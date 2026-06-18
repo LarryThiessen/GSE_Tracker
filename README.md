@@ -1,112 +1,136 @@
 <div align="center">
 
-<img src="media/GSE_Tracker.png" width="100">
+<img src="media/GSE_Tracker.png" width="110">
 
 # GSE: Tracker
 
-**<font color="#4fc3f7">Action Tracker</font> &nbsp;·&nbsp; <font color="#81c784">Player Tracker</font> &nbsp;·&nbsp; <font color="#ffd54f">Assisted Highlight</font>**
+**<font color="#4fc3f7">Action Tracker</font> &nbsp;·&nbsp; <font color="#81c784">Player Tracker</font> &nbsp;·&nbsp; <font color="#ffd54f">Assisted Highlight</font> &nbsp;·&nbsp; <font color="#f06292">Meters</font>**
 
-[![Version](https://img.shields.io/badge/Version-1.1.4-4fc3f7?style=for-the-badge&logoColor=white)](https://github.com/Artseeker-x/GSE_Tracker/releases)
-[![WoW](https://img.shields.io/badge/WoW-Midnight-00b4d8?style=for-the-badge)](https://www.curseforge.com/wow/addons/gse-tracker)
-[![License](https://img.shields.io/badge/License-MIT-ffd54f?style=for-the-badge)](LICENSE)
+[![Version](https://img.shields.io/badge/Version-1.2.0-4fc3f7?style=for-the-badge&logoColor=white)](https://www.curseforge.com/wow/addons/gse-tracker)
+[![WoW](https://img.shields.io/badge/WoW-Retail-00b4d8?style=for-the-badge)](https://www.curseforge.com/wow/addons/gse-tracker)
+[![License](https://img.shields.io/badge/License-MIT-ffd54f?style=for-the-badge)](License)
 [![CurseForge](https://img.shields.io/badge/CurseForge-Download-f16436?style=for-the-badge&logo=curseforge&logoColor=white)](https://www.curseforge.com/wow/addons/gse-tracker)
 
 <br>
 
-Tracks spells triggered by sequences, with native integration for [GSE](https://www.curseforge.com/wow/addons/gse-gnome-sequencer-enhanced-advanced-macros) when available.<br>
-Compatible with **Single-Button Assistant** and **manual keypress** input.
+A clean, highly-customizable combat overlay for sequence &amp; macro users — **sequence tracking**, an **assisted-rotation highlight**, a **player marker**, and a **full built-in meters suite**, all in one addon.
+
+Integrates natively with **[GSE](https://www.curseforge.com/wow/addons/gse-gnome-sequencer-enhanced-advanced-macros)** when available, and also works with **Single-Button Assistant** and plain **manual keypresses**.
 
 </div>
 
 ---
 
 > [!CAUTION]
-> **CLEAN INSTALL REQUIRED**
+> **CLEAN INSTALL RECOMMENDED**
 >
-> Due to major structural and system changes in this version, a **clean reinstall is highly recommended**.
-> Keeping old addon files or saved settings may lead to **broken settings**, **misplaced UI elements**, **outdated data conflicts**, or **unexpected behavior**.
->
-> Remove the previous **GSE: Tracker** folder before installing. Reset saved variables as well for the cleanest possible setup.
+> After a major version update, a clean reinstall avoids broken settings, misplaced UI elements, or stale data.
+> Remove the previous **GSE: Tracker** folder before installing, and reset saved variables for the cleanest setup.
 
 ---
 
 ## <font color="#ffb74d">Overview</font>
 
-**GSE: Tracker** gives you a cleaner and more customizable way to track sequence activity in combat, while also adding extra visual tools to improve awareness, positioning, and usability during gameplay.
+**GSE: Tracker** gives you a cleaner, more customizable way to see what your macros are doing in combat — then adds the awareness tools you'd otherwise need three separate addons for. Everything is configurable from one settings window with **live previews**.
+
+> **Access:** type `/gsetracker` or click the **minimap button**.
 
 ---
 
 ## <font color="#64b5f6">Core Features</font>
 
-### <font color="#ffd54f">Assisted Highlight</font>
+### <font color="#4fc3f7">Action Tracker</font>
 
-![Nameplates](https://img.shields.io/badge/Nameplates-ffd54f?style=flat-square&logoColor=black)
-![Screen Space](https://img.shields.io/badge/Screen%20Space-ffd54f?style=flat-square&logoColor=black)
-![Mouse Cursor](https://img.shields.io/badge/Mouse%20Cursor-ffd54f?style=flat-square&logoColor=black)
-
-A flexible **Assisted Highlight** system helps you keep visual focus where it matters most during combat. Display visual guidance on **Nameplates**, **Screen Space**, or the **Mouse Cursor** depending on how you prefer to play.
-
-### <font color="#81c784">Player Tracker</font>
-
-A dedicated **Player Tracker** feature helps you track your character more easily during combat by showing a clear symbol in the center of the screen — useful during busy encounters, movement-heavy mechanics, and high-visual-combat moments.
-
-### <font color="#4fc3f7">Fully Customizable Action Tracker</font>
-
-The **Action Tracker** gives you independent control over its visual elements so you can tailor the tracker to your own layout and preferences.
+Tracks the spells your sequence/macro fires and shows them as a clean, fully-configurable row of icons.
 
 | Option | Description |
 |--------|-------------|
-| Enable / Disable | Toggle individual elements on or off |
-| Resizing | Adjust the size of each component |
-| Independent Movement | Drag elements to any position freely |
-| X / Y Positioning | Precise numeric position control |
-| Live Preview | See changes instantly while configuring |
+| **Independent elements** | The **Sequence / Macro / Spell** name, **modifier keys**, and **keybind** text can each be toggled, resized, and repositioned on their own |
+| **Free movement** | Drag any element anywhere, or set precise **X / Y** values |
+| **Layouts** | Horizontal or vertical, with adjustable icon count, spacing, and scroll direction |
+| **Live preview** | See every change instantly while you configure |
 
-### <font color="#ba68c8">Settings Window + Live Previews</font>
+### <font color="#9575cd">Input &amp; Sequence Awareness</font>
 
-A dedicated configuration window lets you adjust the addon with **live previews**, making it easier to fine-tune visuals and positioning while you work.
+- **Pressed Indicator** — a customizable shape (crosshairs, dots, faction icons, or your own image) that **pulses in sync with how fast you're pressing**, so your input cadence is visible at a glance. Choose **None** to hide it.
+- **Modifier tracking** — shows which modifier keys (Shift / Ctrl / Alt, side-aware) you're holding.
+- **ModKey burst stack** — abilities fired while holding Ctrl/Alt stack into a centered combo display.
+- **Keybind display** — optionally shows the key bound to the active sequence.
 
-> **Access:** `/gsetracker` or the **minimap button**
+### <font color="#ffd54f">Assisted Highlight</font>
 
-### <font color="#90a4ae">Improved Tracker Positioning</font>
+![Screen Space](https://img.shields.io/badge/Screen%20Space-ffd54f?style=flat-square&logoColor=black)
+![Mouse Cursor](https://img.shields.io/badge/Mouse%20Cursor-ffd54f?style=flat-square&logoColor=black)
+![Target Portrait](https://img.shields.io/badge/Target%20Portrait-ffd54f?style=flat-square&logoColor=black)
 
-The movement and positioning systems have been reworked for more precise placement, cleaner anchoring, and more reliable position persistence.
+A flexible rotation-assist highlight that mirrors your suggested next ability **wherever you want it** — anchored to the **screen**, following the **mouse cursor**, or shown over the **target's portrait** (auto-sized and rounded to match). Optional **keybind + stack/charge count**, **range checking** (red-tints when out of range), and a **GCD swipe**.
 
-### <font color="#ef5350">Performance Mode</font>
+### <font color="#81c784">Player Tracker</font>
 
-Optional performance mode reduces rendering load by disabling certain visual effects and icon animations for players who prefer maximum FPS.
+A clear **combat marker** you can place on screen to instantly find your character during busy, movement-heavy encounters — with selectable symbols, size, color (incl. class color), and show-when rules.
 
-### <font color="#b0bec5">Icon Border Customization</font>
+### <font color="#f06292">Built-in Meters Suite</font>
 
-Icons support customizable borders with adjustable thickness, improving clarity and spell readability during combat for the **Action Tracker**, **Player Tracker**, and **Assisted Highlight**.
+A self-contained damage/utility meter set — no second meters addon required.
 
-### <font color="#9575cd">Sequence Activity Indicator</font>
+| Meter | What it shows |
+|-------|---------------|
+| **Details window** | **Damage / Healing / Dispels / Interrupts** tabs, expandable pet &amp; spell grouping |
+| **Combat-session paging** | Step back through your **last 10 fights** with the title-bar arrows |
+| **Live readouts** | Lightweight **DPS**, **HPS**, **GCD**, and assist-usage values |
+| **Combat timer** | Docked fight timer |
 
-A visual indicator shows when a **GSE sequence is actively running**, with multiple selectable indicator shapes.
+---
 
-### <font color="#4db6ac">Keybind Tracking</font>
+## <font color="#64b5f6">Looks Like *Your* UI</font>
 
-Displays the keybind used to trigger the active sequence so players can easily track inputs during gameplay, with support that also extends into **Assisted Highlight**.
+The tracker **adopts your action-bar skin automatically** — borders, masks, and fonts are pulled **live** from your skinner, so it never looks bolted-on:
+
+![ElvUI](https://img.shields.io/badge/ElvUI-2a2a2a?style=flat-square)
+![Bartender4](https://img.shields.io/badge/Bartender4-2a2a2a?style=flat-square)
+![Dominos](https://img.shields.io/badge/Dominos-2a2a2a?style=flat-square)
+![EllesmereUI](https://img.shields.io/badge/EllesmereUI-2a2a2a?style=flat-square)
+![ActionBarsEnhanced](https://img.shields.io/badge/ActionBarsEnhanced-2a2a2a?style=flat-square)
+![Masque](https://img.shields.io/badge/Masque-2a2a2a?style=flat-square)
+![Blizzard](https://img.shields.io/badge/Blizzard%20Default-2a2a2a?style=flat-square)
+
+---
+
+## <font color="#64b5f6">Customization &amp; Quality of Life</font>
+
+| Feature | Description |
+|---|---|
+| **<font color="#ba68c8">Settings window</font>** | One configuration window with **live previews** |
+| **<font color="#4db6ac">Fonts</font>** | Independent fonts for Sequence, Modifier, and Keybind text — **LibSharedMedia** supported |
+| **<font color="#b0bec5">Icon borders</font>** | Adjustable borders across the Action Tracker, Player Tracker, and Assisted Highlight |
+| **<font color="#ef5350">Performance mode</font>** | Drops visual effects &amp; animations for maximum FPS |
+| **<font color="#90a4ae">QoL extras</font>** | Mute spell-fizzle sounds, hide red error text, account-wide or per-character settings |
 
 ---
 
 ## <font color="#64b5f6">Tracker Options</font>
 
-> **Access:** `/gsetracker` + **minimap button**
+> **Access:** `/gsetracker` &nbsp;·&nbsp; **minimap button**
 
 | Option Group | Description |
 |---|---|
 | **<font color="#4fc3f7">Action Tracker</font>** | Full layout and visual control |
 | **<font color="#81c784">Player Tracker</font>** | Combat marker settings |
 | **<font color="#ffd54f">Assisted Highlight</font>** | Highlight mode and target settings |
+| **<font color="#f06292">Meters</font>** | Details window, DPS/HPS/GCD readouts, combat timer |
 | **<font color="#ba68c8">Fonts</font>** | Sequence, Modifier, and Keybind fonts _(SharedMedia supported)_ |
-| **<font color="#90a4ae">Shortcuts</font>** | Open GSE, Open Sequence Editor, Reload |
 
 ---
 
-## <font color="#ffb74d">Feedback, Suggestions & Bug Reports</font>
+## <font color="#ffb74d">Compatibility</font>
 
-If you have **ideas, feedback, suggestions, or bug reports**, feel free to join the **Discord** linked on my profile — it's the best place for clear communication, tracking issues, and sharing ideas.
+Built for current **Retail** with cross-version-safe APIs. Works **with or without GSE** installed.
+
+---
+
+## <font color="#ffb74d">Feedback, Suggestions &amp; Bug Reports</font>
+
+Have **ideas, feedback, or a bug to report?** Join the **[Discord](https://discord.gg/gseunited)** — it's the best place for clear communication, issue tracking, and sharing ideas.
 
 ---
 
