@@ -79,9 +79,7 @@ A self-contained damage/utility meter set — no second meters addon required.
 
 ### <font color="#ffd54f">Assisted Highlight</font>
 
-![Screen Space](https://img.shields.io/badge/Screen%20Space-ffd54f?style=flat-square&logoColor=black)
-![Mouse Cursor](https://img.shields.io/badge/Mouse%20Cursor-ffd54f?style=flat-square&logoColor=black)
-![Target Portrait](https://img.shields.io/badge/Target%20Portrait-ffd54f?style=flat-square&logoColor=black)
+<font color="#4fc3f7">Anchor Points:</font> Screen | Mouse Cursor | Target Portrait
 
 A flexible rotation-assist highlight that mirrors your suggested next ability **wherever you want it** - anchored to the **screen**, following the **mouse cursor**, or shown over the **target's portrait** (auto-sized and rounded to match). Optional **keybind + stack/charge count**, **range checking** (red-tints when out of range), and a **GCD swipe**.
 
