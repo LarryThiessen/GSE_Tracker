@@ -6,12 +6,14 @@ local Compat = (ns.Utils and ns.Utils.Compat) or nil
 local SV = (ns.Utils and ns.Utils.SV) or nil
 
 local function EnsureDatabase()
+  -- Returns the ACTIVE store (account or per-character). Do NOT reassign the
+  -- GSETrackerDB global -- it's the account SavedVariable; repointing it at the
+  -- per-character table fuses the two stores at logout.
   if SV and SV.EnsureDB then
-    GSETrackerDB = SV:EnsureDB()
-    return GSETrackerDB
+    return SV:EnsureDB()
   end
-  GSETrackerDB = GSETrackerDB or {}
-  return GSETrackerDB
+  if _G.GSETrackerDB == nil then _G.GSETrackerDB = {} end
+  return _G.GSETrackerDB
 end
 
 local function InitializeAddonUI()
@@ -117,7 +119,18 @@ lifecycleEventFrame:SetScript("OnEvent", function(self, event, arg1)
     elseif Core and Core.ApplyDB then
       Core:ApplyDB()
     end
-    if addon.Debug then addon:Debug("Initialized.") end
+    -- Re-read the action-button size shortly after login so a skinner that
+    -- resizes the bars after us (load order) is still picked up as the base.
+    if C_Timer and C_Timer.After then
+      C_Timer.After(2, function()
+        local ui = addon._ui
+        if ui and ui.RefreshIconSize then ui.RefreshIconSize() end
+        if addon.RebuildIcons then addon:RebuildIcons(true) end
+        -- Hook the skinner (ElvUI) AFTER it has initialised so any later media/skin
+        -- change re-skins the tracker live -- "adopt the skinner's settings".
+        if ui and ui.SetupSkinnerHooks then ui.SetupSkinnerHooks(addon) end
+      end)
+    end
     if Compat and Compat.PrintLoadedMessage then
       Compat:PrintLoadedMessage()
     end

@@ -7,44 +7,19 @@ ns.Utils.API = API
 local G = _G
 local noop = function() end
 
-API._debugEnabled = API._debugEnabled or false
-API._debugSink = API._debugSink or nil
-
-local function DebugLog(methodName, ...)
-  if not API._debugEnabled then
-    return
-  end
-
-  local sink = API._debugSink
-  if type(sink) == "function" then
-    pcall(sink, methodName, ...)
-  end
-end
-
-function API.SetDebug(enabled, sink)
-  API._debugEnabled = enabled and true or false
-  if sink ~= nil then
-    API._debugSink = sink
-  end
-end
-
 function API.CreateFrame(...)
-  DebugLog("CreateFrame", ...)
   return G.CreateFrame(...)
 end
 
 function API.GetTime()
-  DebugLog("GetTime")
   return G.GetTime and G.GetTime() or 0
 end
 
 function API.InCombatLockdown()
-  DebugLog("InCombatLockdown")
   return G.InCombatLockdown and G.InCombatLockdown() or false
 end
 
 function API.GetBuildInfo()
-  DebugLog("GetBuildInfo")
   if G.GetBuildInfo then
     local version, build, buildDate, interfaceVersion = G.GetBuildInfo()
     return version, build, buildDate, tonumber(interfaceVersion) or 0
@@ -53,7 +28,6 @@ function API.GetBuildInfo()
 end
 
 function API.GetSpellTexture(spellID)
-  DebugLog("GetSpellTexture", spellID)
 
   if G.C_Spell and G.C_Spell.GetSpellTexture then
     return G.C_Spell.GetSpellTexture(spellID)
@@ -78,28 +52,52 @@ function API.GetSpellTexture(spellID)
   return nil
 end
 
+function API.GetSpellName(spellID)
+  if not spellID then return nil end
+  if G.C_Spell and G.C_Spell.GetSpellName then
+    return G.C_Spell.GetSpellName(spellID)
+  end
+  if G.C_Spell and G.C_Spell.GetSpellInfo then
+    local info = G.C_Spell.GetSpellInfo(spellID)
+    if type(info) == "table" then return info.name end
+  end
+  if G.GetSpellInfo then
+    local name = G.GetSpellInfo(spellID)
+    return name
+  end
+  return nil
+end
+
 function API.UnitExists(unit)
-  DebugLog("UnitExists", unit)
   return G.UnitExists and G.UnitExists(unit) or false
 end
 
+function API.UnitCanAttack(unit, otherUnit)
+  return G.UnitCanAttack and G.UnitCanAttack(unit, otherUnit) or false
+end
+
+-- True when the player has a target that can be attacked (the macro [harm] sense),
+-- as opposed to merely having any target (which would include friendly units).
+function API.HasHarmTarget()
+  if not (G.UnitExists and G.UnitExists("target")) then
+    return false
+  end
+  return G.UnitCanAttack and G.UnitCanAttack("player", "target") and true or false
+end
+
 function API.IsAltKeyDown()
-  DebugLog("IsAltKeyDown")
   return G.IsAltKeyDown and G.IsAltKeyDown() or false
 end
 
 function API.IsShiftKeyDown()
-  DebugLog("IsShiftKeyDown")
   return G.IsShiftKeyDown and G.IsShiftKeyDown() or false
 end
 
 function API.IsControlKeyDown()
-  DebugLog("IsControlKeyDown")
   return G.IsControlKeyDown and G.IsControlKeyDown() or false
 end
 
 function API.UnitClass(unit)
-  DebugLog("UnitClass", unit)
   if G.UnitClass then
     return G.UnitClass(unit)
   end
@@ -107,7 +105,6 @@ function API.UnitClass(unit)
 end
 
 function API.hooksecurefunc(...)
-  DebugLog("hooksecurefunc", ...)
   if G.hooksecurefunc then
     return G.hooksecurefunc(...)
   end
@@ -123,7 +120,6 @@ function API.SafeHooksecurefunc(...)
 end
 
 function API.wipe(t)
-  DebugLog("wipe", t)
   if G.wipe then
     return G.wipe(t)
   end
@@ -136,17 +132,14 @@ function API.wipe(t)
 end
 
 function API.IsAddOnLoaded(name)
-  DebugLog("IsAddOnLoaded", name)
   return G.IsAddOnLoaded and G.IsAddOnLoaded(name) or false
 end
 
 function API.GetBindingText(...)
-  DebugLog("GetBindingText", ...)
   return G.GetBindingText and G.GetBindingText(...) or nil
 end
 
 function API.GetCursorPosition()
-  DebugLog("GetCursorPosition")
   if G.GetCursorPosition then
     return G.GetCursorPosition()
   end
@@ -154,7 +147,6 @@ function API.GetCursorPosition()
 end
 
 function API.GetEffectiveScale(frame)
-  DebugLog("GetEffectiveScale", frame)
   if frame and frame.GetEffectiveScale then
     return frame:GetEffectiveScale()
   end
@@ -166,7 +158,6 @@ function API.UIParent()
 end
 
 function API.GetAddOnMetadata(addonName, field)
-  DebugLog("GetAddOnMetadata", addonName, field)
 
   if G.C_AddOns and G.C_AddOns.GetAddOnMetadata then
     local ok, value = pcall(G.C_AddOns.GetAddOnMetadata, addonName, field)

@@ -116,8 +116,8 @@ If you have **ideas, feedback, suggestions, or bug reports**, feel free to join 
 
 If you enjoy **GSE: Tracker** and want to support ongoing development:
 
-[![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20Artseeker-ff5e5b?style=for-the-badge&logo=kofi&logoColor=white)](https://ko-fi.com/artseeker)
-[![Patreon](https://img.shields.io/badge/Patreon-Support%20Artseeker-f96854?style=for-the-badge&logo=patreon&logoColor=white)](https://www.patreon.com/Artseeker_)
-[![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/vPYXyBgMBW)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20ScaryLarryGames-ff5e5b?style=for-the-badge&logo=kofi&logoColor=white)](https://ko-fi.com/scarylarrygames)
+[![Patreon](https://img.shields.io/badge/Patreon-Support%20ScaryLarryGames-f96854?style=for-the-badge&logo=patreon&logoColor=white)](https://www.patreon.com/c/ScaryLarryGames646)
+[![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/gseunited)
 
 </div>

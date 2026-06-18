@@ -45,7 +45,7 @@ if [ -n "$CF_FILE_ID" ] && [ "$CF_FILE_ID" != "null" ]; then
 else
     CF_URL="https://www.curseforge.com/wow/addons/gse-tracker"
 fi
-GH_URL="https://github.com/Artseeker-x/GSE_Tracker/releases/tag/v${VERSION}"
+GH_URL="https://github.com/${GITHUB_REPOSITORY:-LarryThiessen/GSE_Tracker}/releases/tag/v${VERSION}"
 
 # Format notes: bullets, auto-bold key terms
 NOTES=$(grep "^- " "$NOTES_FILE" \

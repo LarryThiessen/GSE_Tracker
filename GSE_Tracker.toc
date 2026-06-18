@@ -1,10 +1,11 @@
-## Interface: 120001
+## Interface: 120007
 ## Title: |cFFFFFFFFGS|r|cFF00FFFFE:|r|cFFFFFF00 Tracker|r
 ## Notes: Standalone Action Tracker
 ## Author: Artseeker
 ## IconTexture: Interface\AddOns\GSE_Tracker\media\GSE_Tracker.png
-## Version: 1.1.5
+## Version: 1.2.0
 ## SavedVariables: GSETrackerDB
+## SavedVariablesPerCharacter: GSETrackerCharDB
 ## OptionalDeps: LibSharedMedia-3.0
 ## X-Curse-Project-ID: 1445627
 ## X-License: MIT
@@ -29,11 +30,16 @@ core\init.lua
 # Utils: API wrappers, shared helpers, saved variables, debug
 utils\api.lua
 utils\compat.lua
+# Generated list of every image file in media\marker-images\ (WoW can't enumerate a folder
+# at runtime). Loads BEFORE constants.lua, which reads it. Regenerate with
+# tools/gen_marker_manifest.sh after adding/removing marker images.
+utils\marker_manifest.lua
 utils\constants.lua
 utils\savedvars.lua
 utils\debug.lua
 utils\font_changer.lua
 utils\shared.lua
+utils\qol_tweaks.lua
 
 # Core bootstrap after helpers are available
 core\bootstrap.lua
@@ -49,17 +55,37 @@ ui\indicator.lua
 ui\events.lua
 ui\visibility.lua
 ui\icons.lua
+ui\modkey_stack.lua
 ui\assisted_highlight.lua
 ui\player_tracker.lua
 ui\minimap.lua
 
 # Options: configuration only
+options\skins.lua
 options\helpers.lua
 options\sections.lua
 options\tabs.lua
 options\refresh.lua
 options\options.lua
+options\settings_panel.lua
+options\elements.xml
 
 # Tracker: sequence detection only
 tracker\tracker.lua
 tracker\gse_bridge.lua
+
+# Meters (ported from Gnomester -- self-contained meters engine + options panel).
+# Builds the global _G.MetersOptionsPanel which the Meters settings tab embeds.
+# MetersStore loads FIRST: aliases MetersSavedVars into GSE_Tracker's own store so
+# meters settings save in the same file and follow the Account Wide / per-char toggle.
+meters\MetersStore.lua
+meters\Details.lua
+meters\AHLight.lua
+meters\Marker.lua
+meters\GCD.lua
+meters\DPS.lua
+meters\HPS.lua
+meters\AHLightUsage.lua
+meters\Timer.lua
+meters\Meters.lua
+meters\MetersOptions.lua

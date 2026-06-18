@@ -111,6 +111,36 @@ local function PlayFlowFadeIn(icon)
   icon._flowFadeInAG:Play()
 end
 
+-- Layout + scroll direction. The slot model is 1D: slot 1 = newest (entry end),
+-- higher slots = older (toward the exit end). We store a CENTRED axis coordinate
+-- per slot and project it to (x,y) per the layout/direction, so horizontal and
+-- vertical (and all four scroll directions) share one positioning path.
+local function RefreshLayoutCache(ui)
+  ui._layout = (addon.GetActionTrackerLayout and addon:GetActionTrackerLayout()) or "HORIZONTAL"
+  ui._scrollDir = (addon.GetActionTrackerScroll and addon:GetActionTrackerScroll()) or "LEFT"
+end
+
+local function IconAxisToXY(ui, v)
+  if ui._layout == "VERTICAL" then
+    if ui._scrollDir == "UP" then return 0, v end
+    return 0, -v -- DOWN (default for vertical)
+  end
+  if ui._scrollDir == "RIGHT" then return v, 0 end
+  return -v, 0 -- LEFT (default for horizontal)
+end
+
+local function PlaceFrameAtAxis(ui, frame, v)
+  local x, y = IconAxisToXY(ui, v)
+  frame:ClearAllPoints()
+  frame:SetPoint("CENTER", ui.iconHolder, "CENTER", pixelSnap(x, ui), pixelSnap(y, ui))
+end
+local PlaceIcon = PlaceFrameAtAxis
+
+-- Centred axis coordinate for a slot (slot 1 most negative -> entry end).
+local function SlotAxisCoord(slot, count, step)
+  return (slot - (count + 1) / 2) * step
+end
+
 local function EnsureFadeGhost(ui)
   if ui._fadeGhost then return ui._fadeGhost end
   local ghost = API.CreateFrame("Frame", nil, ui.iconHolder, "BackdropTemplate")
@@ -122,7 +152,7 @@ local function EnsureFadeGhost(ui)
   local tex = ghost:CreateTexture(nil, "ARTWORK")
   tex:SetPoint("TOPLEFT", ghost, "TOPLEFT", 0, 0)
   tex:SetPoint("BOTTOMRIGHT", ghost, "BOTTOMRIGHT", 0, 0)
-  tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+  tex:SetTexCoord(0, 1, 0, 1)
   ghost.tex = tex
 
   local ag = ghost:CreateAnimationGroup()
@@ -146,8 +176,7 @@ local function PlayFlowFadeOutGhost(ui, texture, baseX)
   if addon.IsPerformanceModeEnabled and addon:IsPerformanceModeEnabled() then return end
   local ghost = EnsureFadeGhost(ui)
   ghost._fadeOutAG:Stop()
-  ghost:ClearAllPoints()
-  ghost:SetPoint("LEFT", ui.iconHolder, "LEFT", pixelSnap(baseX or 0, ui), 0)
+  PlaceFrameAtAxis(ui, ghost, baseX or 0)
   ghost.tex:SetTexture(texture)
   ghost:Show()
   ghost:SetAlpha(1)
@@ -181,6 +210,243 @@ local function ReleaseIconFrame(icon)
   icon:SetParent(nil)
 end
 
+-- Detect an icon mask the player's UI applies to action buttons (e.g.
+-- ActionBarsEnhanced / other skinners add a MaskTexture named IconMask to each
+-- ActionButton). Returns atlas, fileID/path AND the mask:icon size ratio, or nil
+-- when the icons are plain square. The ratio matters: Blizzard's default mask is
+-- a 64px texture whose opaque rounded square fills only its centre, applied at
+-- 64px over a 45px icon (ratio ~1.42) so the opaque region lands on the icon. If
+-- we instead size the mask to the icon (ratio 1) the opaque centre shrinks and
+-- clips the icon well inside the frame (a dark gap). So we replicate the ratio.
+local function GetActiveActionIconMask()
+  -- Resolved-Native forces the Blizzard default look (ignore any UI skinner);
+  -- MODERN / AUTO-with-skinner adopt whatever the player's bars use. Resolved-Native
+  -- = literal NATIVE, OR AUTO with no skin provider installed -- so "no skinner"
+  -- looks the same whether Native is checked or not (matches GetActionButtonBorder).
+  if uiShared.IsResolvedNativeSkin and uiShared.IsResolvedNativeSkin() then
+    if _G.C_Texture and _G.C_Texture.GetAtlasInfo and _G.C_Texture.GetAtlasInfo("UI-HUD-ActionBar-IconFrame-Mask") then
+      return "UI-HUD-ActionBar-IconFrame-Mask", nil, 64 / 45
+    end
+    return nil, nil, 1 -- atlas absent (e.g. Classic) -> plain square
+  end
+  -- Tie the icon SHAPE to the BORDER kind so the icon matches its frame: thin-border
+  -- skins (ElvUI / EllesmereUI) draw SQUARE icons -> no mask (ignore any vestigial
+  -- IconMask their buttons carry, which reports ~0 width). Frame-art skins (Blizzard
+  -- default, ABE, and Dominos -- which reuses Blizzard buttons) round their icons, so
+  -- adopt the mask below.
+  local sb = uiShared.GetActionButtonBorder and uiShared.GetActionButtonBorder()
+  if sb and sb.thin then return nil, nil, 1 end
+
+  local G = _G
+  local names = { "ActionButton1", "MultiBarBottomLeftButton1", "MultiBarRightButton1" }
+  if uiShared.GetActiveActionButton then
+    local _, an = uiShared.GetActiveActionButton()
+    if an then table.insert(names, 1, an) end
+  end
+  for _, name in ipairs(names) do
+    local btn = G[name]
+    local mask = btn and btn.IconMask
+    if mask then
+      local mw = mask.GetWidth and mask:GetWidth()
+      local icon = btn.icon or (btn.GetName and G[(btn:GetName() or "") .. "Icon"])
+      local iw = icon and icon.GetWidth and icon:GetWidth()
+      local atlas = mask.GetAtlas and mask:GetAtlas()
+      local file = (mask.GetTextureFilePath and mask:GetTextureFilePath())
+        or (mask.GetTexture and mask:GetTexture())
+      if (atlas and atlas ~= "") or (file and file ~= "") then
+        -- Real mask:icon ratio when readable; otherwise the Blizzard mask's intrinsic
+        -- 64:45 (some buttons report a ~0 width even with an active rounding mask) so
+        -- the opaque centre still covers the icon.
+        local ratio = (mw and iw and mw > 1 and iw > 0) and (mw / iw) or (64 / 45)
+        if atlas and atlas ~= "" then return atlas, nil, ratio end
+        return nil, file, ratio
+      end
+    end
+  end
+  return nil, nil, 1
+end
+
+-- Size a tracker icon's mask the way the action buttons do: centred on the icon
+-- texture, scaled by the mask:icon ratio (NOT SetAllPoints) so the mask's opaque
+-- region covers the whole visible icon. Called both on creation and after the
+-- texture is resized in ApplyBorderThickness. Exposed for frame.lua to reuse.
+local function SizeIconMask(b)
+  if not (b and b._iconMask and b.tex) then return end
+  local ratio = b._iconMaskRatio or 1
+  if not ratio or ratio <= 0 then ratio = 1 end
+  local w = (b.tex.GetWidth and b.tex:GetWidth()) or 0
+  local h = (b.tex.GetHeight and b.tex:GetHeight()) or 0
+  if w <= 0 then w = uiShared.ICON_SIZE or 45 end
+  if h <= 0 then h = w end
+  b._iconMask:ClearAllPoints()
+  b._iconMask:SetSize(w * ratio, h * ratio)
+  b._iconMask:SetPoint("CENTER", b.tex, "CENTER", 0, 0)
+end
+uiShared.SizeIconMask = SizeIconMask
+
+-- WoW spell-icon files have a ~7% grey bevel baked into the texture. Action bars
+-- (Blizzard and skinners like ActionBarsEnhanced) crop it off with this standard
+-- zoom so only the art shows. Used as the fallback when we can't read a stronger
+-- crop from the player's bars -- without it the bevel renders as a faint grey
+-- inner border around the tracker icon.
+local ICON_ZOOM_MIN, ICON_ZOOM_MAX = 0.0703125, 0.9296875
+
+-- Read the icon zoom the player's action buttons use (skinners like
+-- ActionBarsEnhanced crop the icon's native edge so the art fills out to the
+-- button frame). Returns left, right, top, bottom or nil when no real crop.
+local function GetActionIconCrop()
+  local G = _G
+  local names = { "ActionButton1", "MultiBarBottomLeftButton1", "MultiBarRightButton1" }
+  if uiShared.GetActiveActionButton then
+    local _, an = uiShared.GetActiveActionButton()
+    if an then table.insert(names, 1, an) end
+  end
+  for _, name in ipairs(names) do
+    local btn = G[name]
+    local icon = btn and (btn.icon or (btn.GetName and G[(btn:GetName() or "") .. "Icon"]))
+    if icon and icon.GetTexCoord then
+      local ulx, uly, _, lly, urx = icon:GetTexCoord()
+      if ulx and urx and uly and lly then
+        local left, right, top, bottom = ulx, urx, uly, lly
+        if (right - left) > 0.5 and (bottom - top) > 0.5 and (right - left) < 0.99 then
+          return left, right, top, bottom
+        end
+      end
+    end
+  end
+  return nil
+end
+
+-- Mirror the player's action-button icon mask onto a tracker icon so the icons
+-- match their UI skin. No-op (plain square) when no mask is in use.
+local function ApplyIconMask(b)
+  if not (b and b.tex) then return end
+  local atlas, file, ratio = GetActiveActionIconMask()
+  -- Flag the mask state and force ApplyBorderThickness to re-apply the correct
+  -- texture insets (masked icons fill the frame so the border hugs them; unmasked
+  -- icons inset by the border thickness).
+  b._isMasked = (atlas or file) and true or false
+  b._iconMaskRatio = ratio or 1
+  b.tex._gsetrackerInset = nil
+  if b._isMasked then
+    -- Match the player's action-bar icon crop. If the bars report a crop use it;
+    -- otherwise fall back to the standard zoom (NOT 0,1) so the icon's baked-in
+    -- grey bevel is cropped off the way the action bars do -- leaving it uncropped
+    -- showed a faint grey inner border inside the adopted skin frame.
+    local l, r, t, btm = GetActionIconCrop()
+    if not l then l, r, t, btm = ICON_ZOOM_MIN, ICON_ZOOM_MAX, ICON_ZOOM_MIN, ICON_ZOOM_MAX end
+    b.tex:SetTexCoord(l, r, t, btm)
+    if not b._iconMask then b._iconMask = b:CreateMaskTexture() end
+    b._iconMask:Show()
+    if atlas then
+      -- false = keep our full-icon size; don't shrink the mask to the atlas size.
+      b._iconMask:SetAtlas(atlas, false)
+    else
+      b._iconMask:SetTexture(file, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+    end
+    SizeIconMask(b)
+    b.tex:AddMaskTexture(b._iconMask)
+  else
+    -- No mask in use. Still adopt the bars' icon CROP if they crop WITHOUT a mask
+    -- (ElvUI crops square at ~0.08 and draws a thin border, no rounded mask) so the
+    -- baked grey bevel is removed; only TRUE native (no crop reported) stays at 0,1.
+    local l, r, t, btm = GetActionIconCrop()
+    if l then
+      b.tex:SetTexCoord(l, r, t, btm)
+    else
+      b.tex:SetTexCoord(0, 1, 0, 1) -- no skinner: exact Blizzard native, no zoom
+    end
+    if b._iconMask then
+      b.tex:RemoveMaskTexture(b._iconMask)
+      b._iconMask:Hide()
+    end
+  end
+end
+
+-- Generic version of the above for any icon (e.g. the Assisted Highlight mirror,
+-- which is a single frame + texture rather than a pooled tracker icon). Applies
+-- the player's action-button icon mask to `iconTex`, owned by `holder`, using the
+-- same crop + mask:icon ratio logic. Returns true when a mask is active. The mask
+-- handle is stored on holder._gsetActionMask so it survives re-application.
+function uiShared.ApplyActionMaskTo(holder, iconTex, explicitW, explicitH)
+  if not (holder and iconTex) then return false end
+  local atlas, file, ratio = GetActiveActionIconMask()
+  local masked = (atlas or file) and true or false
+  if masked then
+    local l, r, t, btm = GetActionIconCrop()
+    if not l then l, r, t, btm = ICON_ZOOM_MIN, ICON_ZOOM_MAX, ICON_ZOOM_MIN, ICON_ZOOM_MAX end
+    iconTex:SetTexCoord(l, r, t, btm)
+    if not holder._gsetActionMask then holder._gsetActionMask = holder:CreateMaskTexture() end
+    local m = holder._gsetActionMask
+    m:Show()
+    -- Set the atlas/texture only when it changes, and AddMaskTexture only once per
+    -- texture (re-running both every frame can leave the mask ineffective). Always
+    -- re-size below.
+    local key = atlas or file
+    if holder._gsetActionMaskKey ~= key then
+      holder._gsetActionMaskKey = key
+      if atlas then
+        m:SetAtlas(atlas, false)
+      else
+        m:SetTexture(file, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+      end
+    end
+    if holder._gsetActionMaskTarget ~= iconTex then
+      holder._gsetActionMaskTarget = iconTex
+      iconTex:AddMaskTexture(m)
+    end
+    ratio = (ratio and ratio > 0) and ratio or 1
+    -- Prefer the explicit size (the caller knows the final icon footprint). Reading
+    -- iconTex:GetWidth() right after re-anchoring can return a stale/0 value, which
+    -- sizes the mask wrong so the icon lands in the mask's flat centre (no rounding).
+    local w = explicitW or (iconTex.GetWidth and iconTex:GetWidth()) or 0
+    local h = explicitH or (iconTex.GetHeight and iconTex:GetHeight()) or 0
+    if not w or w <= 0 then w = uiShared.ICON_SIZE or 45 end
+    if not h or h <= 0 then h = w end
+    m:ClearAllPoints()
+    m:SetSize(w * ratio, h * ratio)
+    m:SetPoint("CENTER", iconTex, "CENTER", 0, 0)
+  else
+    -- No mask: still adopt the bars' icon CROP if they crop without a mask (ElvUI/
+    -- EllesmereUI draw square cropped icons); only TRUE native (no crop) stays at 0,1.
+    local l, r, t, btm = GetActionIconCrop()
+    if l then
+      iconTex:SetTexCoord(l, r, t, btm)
+    else
+      iconTex:SetTexCoord(0, 1, 0, 1)
+    end
+    if holder._gsetActionMask then
+      iconTex:RemoveMaskTexture(holder._gsetActionMask)
+      holder._gsetActionMask:Hide()
+      holder._gsetActionMaskTarget = nil
+      holder._gsetActionMaskKey = nil
+    end
+  end
+  return masked
+end
+
+-- Per-icon keybind placement model (matches the Assisted Highlight keybind anchors):
+-- corner/centre + inset direction + justification.
+local ICON_KB_ANCHORS = {
+  TOPRIGHT    = { point = "TOPRIGHT",    jh = "RIGHT",  jv = "TOP",    sx = -1, sy = -1 },
+  TOPLEFT     = { point = "TOPLEFT",     jh = "LEFT",   jv = "TOP",    sx =  1, sy = -1 },
+  BOTTOMRIGHT = { point = "BOTTOMRIGHT", jh = "RIGHT",  jv = "BOTTOM", sx = -1, sy =  1 },
+  BOTTOMLEFT  = { point = "BOTTOMLEFT",  jh = "LEFT",   jv = "BOTTOM", sx =  1, sy =  1 },
+  CENTER      = { point = "CENTER",      jh = "CENTER", jv = "MIDDLE", sx =  0, sy =  0 },
+}
+
+-- Anchor an icon's keybind label to the user-selected corner/centre of the icon.
+function UI:PositionIconKeybind(b)
+  if not (b and b.keybindText) then return end
+  local key = (addon.GetActionTrackerKeybindAnchor and addon:GetActionTrackerKeybindAnchor()) or "TOPRIGHT"
+  local a = ICON_KB_ANCHORS[key] or ICON_KB_ANCHORS.TOPRIGHT
+  local inset = math.max(2, ICON_SIZE * 0.08)
+  b.keybindText:ClearAllPoints()
+  b.keybindText:SetPoint(a.point, b, a.point, a.sx * inset, a.sy * inset)
+  b.keybindText:SetJustifyH(a.jh)
+  b.keybindText:SetJustifyV(a.jv)
+end
+
 local function AcquireIconFrame(owner, ui, index, showBorder, thickness)
   ui._iconPool = ui._iconPool or {}
   ui._iconBackdropCache = ui._iconBackdropCache or {}
@@ -194,8 +460,14 @@ local function AcquireIconFrame(owner, ui, index, showBorder, thickness)
     b = API.CreateFrame("Frame", nil, ui.iconHolder, "BackdropTemplate")
     local tex = b:CreateTexture(nil, "ARTWORK")
     tex:ClearAllPoints()
-    tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    tex:SetTexCoord(0, 1, 0, 1)
     b.tex = tex
+    -- Per-icon keybind label (top-right, Blizzard HotKey style): shows the key the
+    -- spell on this icon is bound to. Filled by UpdateIconKeybind.
+    b.keybindText = b:CreateFontString(nil, "OVERLAY")
+    b.keybindText:SetDrawLayer("OVERLAY", 7)
+    b.keybindText:SetJustifyH("RIGHT")
+    b.keybindText:Hide()
     ui._iconPool[index] = b
   else
     b:SetParent(ui.iconHolder)
@@ -206,7 +478,14 @@ local function AcquireIconFrame(owner, ui, index, showBorder, thickness)
   b:SetBackdropColor(0, 0, 0, 0)
 
   local borderR, borderG, borderB = 0, 0, 0
-  if owner and owner.GetActionTrackerUseClassColor and owner:GetActionTrackerUseClassColor() then
+  -- When a thin-border skinner is active (ElvUI/EllesmereUI), freshly-acquired icons
+  -- adopt the SKIN's accent colour so they match the rest -- otherwise (depending on
+  -- render order) they'd show the user's own border-colour setting instead of the
+  -- adopted colour. Falls back to the class/border-colour pickers.
+  local skin = uiShared.GetActionButtonBorder and uiShared.GetActionButtonBorder()
+  if skin and skin.thin and skin.r then
+    borderR, borderG, borderB = skin.r, skin.g, skin.b
+  elseif owner and owner.GetActionTrackerUseClassColor and owner:GetActionTrackerUseClassColor() then
     borderR, borderG, borderB = owner:GetClassColorRGB()
   elseif owner and owner.GetActionTrackerBorderColor then
     borderR, borderG, borderB = owner:GetActionTrackerBorderColor()
@@ -220,6 +499,10 @@ local function AcquireIconFrame(owner, ui, index, showBorder, thickness)
   b.tex:ClearAllPoints()
   b.tex:SetPoint("TOPLEFT", b, "TOPLEFT", thickness, -thickness)
   b.tex:SetPoint("BOTTOMRIGHT", b, "BOTTOMRIGHT", -thickness, thickness)
+  if b.keybindText and UI.PositionIconKeybind then
+    UI:PositionIconKeybind(b)
+  end
+  ApplyIconMask(b)
   b:SetAlpha(0)
   b:Hide()
   b.tex:SetTexture(nil)
@@ -270,11 +553,12 @@ end
 
 local function RebuildBaseSlots(ui)
   local count = (ui.icons and #ui.icons) or 0
-  local gap = addon:GetIconGap()
+  local gap = addon:GetIconGap() -- slider 0 = icons touching (flush, no overlap)
   local step = (ICON_SIZE + gap)
+  RefreshLayoutCache(ui)
   ui._iconBaseX = ui._iconBaseX or {}
   for slot = 1, count do
-    ui._iconBaseX[slot] = (slot - 1) * step
+    ui._iconBaseX[slot] = SlotAxisCoord(slot, count, step)
   end
 end
 
@@ -289,8 +573,7 @@ local function SyncIconLayout(ui)
       icon._animTargetX = nil
       icon._animElapsed = nil
       icon._animating = nil
-      icon:ClearAllPoints()
-      icon:SetPoint("LEFT", ui.iconHolder, "LEFT", pixelSnap(baseX, ui), 0)
+      PlaceIcon(ui, icon, baseX)
     end
   end
 end
@@ -345,14 +628,12 @@ local function ManualSlideOnUpdate(holder, elapsed)
       local p = dur > 0 and math.min(t / dur, 1) or 1
       local eased = 1 - ((1 - p) * (1 - p))
       local x = (icon._animStartX or 0) + (((icon._animTargetX or 0) - (icon._animStartX or 0)) * eased)
-      icon:ClearAllPoints()
-      icon:SetPoint("LEFT", ui.iconHolder, "LEFT", pixelSnap(x, ui), 0)
+      PlaceIcon(ui, icon, x)
       if p >= 1 then
         icon._animating = nil
         icon._animElapsed = nil
         icon._baseX = icon._animTargetX or icon._baseX or 0
-        icon:ClearAllPoints()
-        icon:SetPoint("LEFT", ui.iconHolder, "LEFT", pixelSnap(icon._baseX, ui), 0)
+        PlaceIcon(ui, icon, icon._baseX)
         if ui._slidePending and ui._slidePending > 0 then
           ui._slidePending = ui._slidePending - 1
         end
@@ -378,16 +659,14 @@ local function SetIconBaseX(ui, icon, newBaseX, animate)
   local oldBaseX = icon._baseX
   if oldBaseX == nil then
     icon._baseX = newBaseX
-    icon:ClearAllPoints()
-    icon:SetPoint("LEFT", ui.iconHolder, "LEFT", pixelSnap(newBaseX, ui), 0)
+    PlaceIcon(ui, icon, newBaseX)
     return false
   end
   if not animate or newBaseX == oldBaseX then
     icon._animating = nil
     icon._animElapsed = nil
     icon._baseX = newBaseX
-    icon:ClearAllPoints()
-    icon:SetPoint("LEFT", ui.iconHolder, "LEFT", pixelSnap(newBaseX, ui), 0)
+    PlaceIcon(ui, icon, newBaseX)
     return false
   end
 
@@ -395,8 +674,7 @@ local function SetIconBaseX(ui, icon, newBaseX, animate)
   icon._animTargetX = newBaseX
   icon._animElapsed = 0
   icon._animating = true
-  icon:ClearAllPoints()
-  icon:SetPoint("LEFT", ui.iconHolder, "LEFT", pixelSnap(oldBaseX, ui), 0)
+  PlaceIcon(ui, icon, oldBaseX)
   return true
 end
 
@@ -437,7 +715,7 @@ function UI:SetKeybindText(text)
   local rendered = (ui.keybindText.GetText and ui.keybindText:GetText()) or ""
   if ui._lastKeybindText == txt and rendered == txt then return end
   ui._lastKeybindText = txt
-  ui.keybindText:SetText(txt)
+  ui.keybindText:SetText((uiShared.FormatLabelForLayout and uiShared.FormatLabelForLayout(txt)) or txt)
 
   if ui.keybindFrame then
     local cfg = (self.GetElementLayout and self:GetElementLayout("keybindText")) or nil
@@ -478,6 +756,7 @@ function UI:SetSequenceText(displayName, _, _, seqKey)
     ui.nameText:SetText("")
     ui.nameText:SetTextColor(1, 1, 1, 0)
     if ui.sequenceTextFrame then ui.sequenceTextFrame:Hide() end
+    ui._seqWasVisible = false
     self:SetKeybindText("")
     self:_ResizeToContent()
     return
@@ -491,6 +770,7 @@ function UI:SetSequenceText(displayName, _, _, seqKey)
 
   local renderedName = (ui.nameText and ui.nameText.GetText and ui.nameText:GetText()) or ""
   local renderedNameAlpha = (ui.nameText and ui.nameText.GetAlpha and ui.nameText:GetAlpha()) or 1
+  local nameWasVisible = (renderedName ~= "" and (renderedNameAlpha or 0) > 0)
   local renderedKeybind = (ui.keybindText and ui.keybindText.GetText and ui.keybindText:GetText()) or ""
   local keybindInSync = (liveKeybindText == nil) or (renderedKeybind == liveKeybindText)
 
@@ -509,7 +789,7 @@ function UI:SetSequenceText(displayName, _, _, seqKey)
   ui._lastSeqText = txt
   ui._lastSeqKey = seqKey
   ui._accentR, ui._accentG, ui._accentB, ui._accentA = r, g, b, 1
-  ui.nameText:SetText(txt)
+  ui.nameText:SetText((uiShared.FormatLabelForLayout and uiShared.FormatLabelForLayout(txt)) or txt)
   if liveKeybindText ~= nil then
     self:SetKeybindText(liveKeybindText)
   end
@@ -520,6 +800,10 @@ function UI:SetSequenceText(displayName, _, _, seqKey)
     local seqEnabled = seqCfg and seqCfg.enabled ~= false
     if seqEnabled then
       ui.sequenceTextFrame:Show()
+      -- Slide the name UP whenever it appears or changes (reaching here means the
+      -- text genuinely changed -- SetSequenceText early-returns when unchanged).
+      if self.SlideSequenceNameIn then self:SlideSequenceNameIn() end
+      ui._seqWasVisible = true
     end
   end
 
@@ -537,12 +821,29 @@ function UI:_GetIconLayoutSignature()
     tostring(self:GetBorderThickness()),
     tostring(self:IsBorderEnabled() and 1 or 0),
     tostring(string.format("%.2f", self:GetDesiredScale() or 1)),
+    tostring(uiShared.ICON_SIZE or ICON_SIZE),
+    tostring((addon.GetActionTrackerLayout and addon:GetActionTrackerLayout()) or "HORIZONTAL"),
+    tostring((addon.GetActionTrackerScroll and addon:GetActionTrackerScroll()) or "LEFT"),
+    tostring((addon.GetSkin and addon:GetSkin()) or "AUTO"),
     tostring(ui._lastVisible == true),
   }, "|")
 end
 
+-- Placement preview: while the Action Tracker is unlocked and the player is out
+-- of combat, show the chosen number of icons (sample textures) so the row can be
+-- positioned. Requires the tracker to be enabled.
 function UI:IsEditModePreviewActive()
-  return not not (addon._editingOptions and self.IsLocked and not self:IsLocked())
+  if self.IsLocked and self:IsLocked() then return false end
+  if self.IsEnabled and not self:IsEnabled() then return false end
+
+  local ui = self.ui
+  local inCombat
+  if ui and ui._combatState ~= nil then
+    inCombat = ui._combatState == true
+  else
+    inCombat = (API.InCombatLockdown and API.InCombatLockdown()) or false
+  end
+  return not inCombat
 end
 
 function UI:GetEditModePreviewIconCount()
@@ -636,6 +937,11 @@ function UI:RebuildIcons(force)
   local ui = self.ui
   if not ui then return false end
 
+  -- Track the live action-button size as the base (updates the shared upvalue
+  -- used by all the icon layout functions in this file).
+  if uiShared.RefreshIconSize then uiShared.RefreshIconSize(ui.iconHolder or ui) end
+  ICON_SIZE = uiShared.ICON_SIZE or ICON_SIZE
+
   local layoutSig = self._GetIconLayoutSignature and self:_GetIconLayoutSignature() or nil
   if not force and ui._lastIconRebuildSig and layoutSig == ui._lastIconRebuildSig then
     return false
@@ -655,10 +961,17 @@ function UI:RebuildIcons(force)
   clearArray(ui._iconBaseX, 1)
 
   local count = (self.GetEditModePreviewIconCount and self:GetEditModePreviewIconCount()) or self:GetIconCount()
-  local gap = self:GetIconGap()
+  local gap = self:GetIconGap() -- slider 0 = icons touching (flush, no overlap)
   local step = (ICON_SIZE + gap)
 
-  ui.iconHolder:SetSize(PS(iconRowWidth(count)), PS(ICON_SIZE))
+  RefreshLayoutCache(ui)
+  -- Size the holder to the row's long axis (wide for horizontal, tall for vertical).
+  local rowLen = iconRowWidth(count)
+  if ui._layout == "VERTICAL" then
+    ui.iconHolder:SetSize(PS(ICON_SIZE), PS(rowLen))
+  else
+    ui.iconHolder:SetSize(PS(rowLen), PS(ICON_SIZE))
+  end
   if self.UpdateActionTrackerIconRowAnchor then
     self:UpdateActionTrackerIconRowAnchor()
   end
@@ -668,10 +981,9 @@ function UI:RebuildIcons(force)
 
   for i = 1, count do
     local b = AcquireIconFrame(self, ui, i, showBorder, thickness)
-    ui._iconBaseX[i] = (i - 1) * step
+    ui._iconBaseX[i] = SlotAxisCoord(i, count, step)
     b._baseX = ui._iconBaseX[i]
-    b:ClearAllPoints()
-    b:SetPoint("LEFT", ui.iconHolder, "LEFT", PS(b._baseX), 0)
+    PlaceIcon(ui, b, b._baseX)
     ui.icons[i] = b
   end
   HideUnusedIconPool(ui, count)
@@ -706,6 +1018,38 @@ function UI:RebuildIcons(force)
   end
 
   return true
+end
+
+-- NOTE: the AH-suggestion proc effect was moved OFF the main row to a dedicated
+-- centered "proc" icon (ui/modkey_stack.lua: ShowProcCenterIcon) so the row stays
+-- undisturbed. The tracker calls addon:ShowProcCenterIcon(texture) on a match.
+
+-- Set an icon's keybind label from its texture (the key the spell is bound to, GSE or
+-- Blizzard). Uses the Keybind Font so that setting finally has a visible target.
+local function UpdateIconKeybind(b, texture)
+  if not (b and b.keybindText) then return end
+  local key = (texture and texture ~= "" and addon.GetTextureKeybindText and addon:GetTextureKeybindText(texture)) or nil
+  if key and key ~= "" then
+    local name = addon.GetKeybindFontName and addon:GetKeybindFontName()
+    local path = (addon.GetFontPathByName and addon:GetFontPathByName(name)) or STANDARD_TEXT_FONT
+    local size = (addon.GetKeybindFontSize and addon:GetKeybindFontSize()) or 10
+    local flags = "OUTLINE"
+    -- Adopt the action-bar keybind (HotKey) font face/outline when a UI skin is in
+    -- use, mirroring ApplyFontFaces; size stays user-controlled. Forced-native or no
+    -- readable region -> keep the configured keybind font.
+    if uiShared.GetActionButtonFont then
+      local hp, _, hf = uiShared.GetActionButtonFont("hotkey")
+      if hp then path, flags = hp, hf or "" end
+    end
+    if not b.keybindText:SetFont(path, size, flags) then
+      b.keybindText:SetFont(STANDARD_TEXT_FONT, size, flags)
+    end
+    b.keybindText:SetText(key)
+    b.keybindText:Show()
+  else
+    b.keybindText:SetText("")
+    b.keybindText:Hide()
+  end
 end
 
 function UI:SetIconRow(textures)
@@ -810,11 +1154,13 @@ function UI:SetIconRow(textures)
       btn.tex:Show()
       btn:SetAlpha(1)
       btn:Show()
+      UpdateIconKeybind(btn, tex)
     else
       btn.tex:SetTexture(nil)
       btn.tex:Hide()
       btn:SetAlpha(0)
       btn:Hide()
+      UpdateIconKeybind(btn, nil)
     end
     ui._lastTextures[i] = tex
   end
@@ -839,7 +1185,8 @@ function UI:SetIconRow(textures)
         pending = pending + 1
       end
     elseif tex and tex ~= "" and shouldAnimate and isFrontQueueShift and i == 1 and hadVisibleBefore then
-      btn._baseX = -(ICON_SIZE + self:GetIconGap())
+      -- Enter from one step beyond slot 1 (the entry end), in the scroll direction.
+      btn._baseX = (0 - (count + 1) / 2) * (ICON_SIZE + self:GetIconGap())
       if SetIconBaseX(ui, btn, targetBaseX, true) then
         pending = pending + 1
       end
@@ -891,6 +1238,8 @@ function UI:ClearSpellHistory()
   local ui = self.ui
   if not (ui and ui.icons) then return end
   ResetRuntimeSpellHistoryState(ui)
+  if self.ClearModkeyStacks then self:ClearModkeyStacks() end
+  if self.StopProcCenterIcon then self:StopProcCenterIcon() end
   if self.ApplyEditModeIconPreview and self:IsEditModePreviewActive() then
     StopManualSlideDriver(ui)
     ui._postSlideResyncFrames = nil

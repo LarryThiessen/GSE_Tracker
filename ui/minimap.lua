@@ -4,12 +4,20 @@ local UI = ns.UI
 local API = (ns.Utils and ns.Utils.API) or {}
 local C = (ns.Utils and ns.Utils.Constants) or addon.Constants or {}
 local GameTooltip = _G.GameTooltip
-local ICON_TEXTURE = "Interface\\AddOns\\GSE_Tracker\\media\\GSE_Tracker.png"
+-- Masked texture (circle mask below) -- must be power-of-2 (this file is 256x256)
+-- or it renders as the green missing-texture block. Uses the PNG (256x256 RGBA): the
+-- .blp conversion rendered WHITE (colour data blanked, only the alpha/circle survived);
+-- the .png is the correct source and the same format the Details/marker textures use,
+-- so it loads fine.
+local ICON_TEXTURE = "Interface\\AddOns\\GSE_Tracker\\media\\GSE_Tracker_Round.png"
 local BUTTON_NAME = "GSE_TrackerMinimapButton"
-local BUTTON_SIZE = 32
-local ICON_SIZE = 20
-local BACKGROUND_SIZE = 20
-local BORDER_SIZE = 53
+-- Match LibDBIcon's RETAIL (Mainline) layout exactly = identical to GSE's button:
+-- button 31, border 50 TOPLEFT(0,0), background 24 CENTER, icon 18 CENTER.
+-- (The TOPLEFT-offset 17/20/53 layout is LibDBIcon's NON-retail/classic branch.)
+local BUTTON_SIZE = 31
+local ICON_SIZE = 18
+local BACKGROUND_SIZE = 24
+local BORDER_SIZE = 50
 local DEFAULT_ANGLE = 225
 local DRAG_BUTTON = "LeftButton"
 local TOOLTIP_TITLE_FALLBACK = (C.ADDON_DISPLAY_NAME or "|cFFFFFFFFGS|r|cFF00FFFFE:|r|cFFFFFF00 Tracker|r")
@@ -76,9 +84,11 @@ local function SaveAngle(value)
 end
 
 local function GetRadius(minimap)
+  -- Match LibDBIcon: (minimap width / 2) + 5 so the button sits ON the ring edge.
+  -- The old (width/2 - 10) pulled it 15px too far inward.
   local width = minimap and minimap.GetWidth and minimap:GetWidth() or 140
   local size = tonumber(width) or 140
-  return math.max(45, math.floor((size * 0.5) - 10))
+  return (size * 0.5) + 5
 end
 
 local function ApplyPosition(button, angle)
@@ -217,23 +227,21 @@ function UI:EnsureMinimapButton()
 
     local icon = button:CreateTexture(nil, "ARTWORK")
     icon:SetSize(ICON_SIZE, ICON_SIZE)
-    icon:SetPoint("CENTER", button, "CENTER", 0, 0)
+    -- Eye art isn't perfectly centred in its canvas; nudge right 1 / up 1.
+    icon:SetPoint("CENTER", button, "CENTER", 1, 1)
     icon:SetTexture(ICON_TEXTURE)
-    icon:SetTexCoord(0.10, 0.90, 0.10, 0.90)
-    if button.CreateMaskTexture then
-      local mask = button:CreateMaskTexture(nil, "ARTWORK")
-      mask:SetTexture(ICON_MASK, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
-      mask:SetPoint("CENTER", icon, "CENTER", 0, 0)
-      mask:SetSize(ICON_SIZE, ICON_SIZE)
-      if icon.AddMaskTexture then
-        icon:AddMaskTexture(mask)
-      end
-      button.iconMask = mask
-    end
+    -- The PNG is already a circular logo (transparent corners, opaque out to the
+    -- edge), so it carries its OWN round shape -- no extra circle mask. The previous
+    -- TempPortraitAlphaMask (a circle inset within its texture) clipped the logo's
+    -- outer ring, which read as the "messed up" minimap icon.
+    icon:SetTexCoord(0, 1, 0, 1)
     button.icon = icon
 
     local border = button:CreateTexture(nil, "OVERLAY")
     border:SetSize(BORDER_SIZE, BORDER_SIZE)
+    -- Retail LibDBIcon anchors the 50px tracking border TOPLEFT(0,0) while the
+    -- icon/background are CENTERED -- the ring art is positioned within the texture
+    -- to frame the centered icon. Exact GSE/LibDBIcon retail layout.
     border:SetPoint("TOPLEFT", button, "TOPLEFT", 0, 0)
     border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
     button.border = border

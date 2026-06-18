@@ -5,6 +5,7 @@ local UIParent = (API.UIParent and API.UIParent()) or UIParent
 local Options = ns.Options
 local uiShared = addon._ui or {}
 local optionsModule = Options
+local WHITE8X8 = (ns.Utils and ns.Utils.Constants and ns.Utils.Constants.TEXTURE_WHITE8X8) or "Interface/Buttons/WHITE8x8"
 
 optionsModule.SafeAPI = optionsModule.SafeAPI or {}
 
@@ -52,7 +53,43 @@ local CONTROL_TRACK = { 0.15, 0.15, 0.15 }
 local CONTROL_TRACK_OFF = { 0.2, 0.2, 0.2 }
 local SCROLL_THUMB = { 0.45, 0.45, 0.45 }
 local SCROLL_THUMB_HOVER = { 0.55, 0.55, 0.55 }
-local FALLBACK_ACCENT = { 0.45, 0.85, 0.65 }
+-- Modern accent fallback = GSE's MODERN_CUSTOM_COLOR_DEFAULT {0, 0.44, 0.87},
+-- copied from GSE_Utils/Appearance.lua (used when the player's class colour is
+-- unavailable). Self-contained -- no runtime GSE reference.
+local FALLBACK_ACCENT = { 0.00, 0.44, 0.87 }
+
+-- Live palette tables. ApplyActiveSkinPalette() copies the selected skin's
+-- colours into these IN PLACE, so every widget that already references them by
+-- index (BG_DARK[1] etc.) picks up the active skin with no call-site changes.
+-- The same table objects are exposed on optionsModule.Palette so tabs.lua and
+-- options.lua can paint matching surfaces from a single source of truth.
+local LIVE_PALETTE = {
+  BG_DARK = BG_DARK, BG_MEDIUM = BG_MEDIUM, BG_LIGHT = BG_LIGHT,
+  BG_INPUT = BG_INPUT, BG_HOVER = BG_HOVER,
+  BORDER_DARK = BORDER_DARK, BORDER_DEFAULT = BORDER_DEFAULT,
+  BORDER_LIGHT = BORDER_LIGHT, BORDER_HOVER = BORDER_HOVER, BORDER_INPUT = BORDER_INPUT,
+  TEXT_PRIMARY = TEXT_PRIMARY, TEXT_SECONDARY = TEXT_SECONDARY,
+  TEXT_MUTED = TEXT_MUTED, TEXT_DISABLED = TEXT_DISABLED,
+  CONTROL_TRACK = CONTROL_TRACK, CONTROL_TRACK_OFF = CONTROL_TRACK_OFF,
+  SCROLL_THUMB = SCROLL_THUMB, SCROLL_THUMB_HOVER = SCROLL_THUMB_HOVER,
+  FALLBACK_ACCENT = FALLBACK_ACCENT,
+}
+optionsModule.Palette = LIVE_PALETTE
+
+-- Copy the active skin's colours into the live palette. Safe to call before
+-- the settings window is built; widget hover/state handlers that read the
+-- palette tables at event time also pick up the latest values.
+function optionsModule.ApplyActiveSkinPalette()
+  local skin = optionsModule.GetActiveSkin and optionsModule.GetActiveSkin()
+  if type(skin) ~= "table" then return end
+  for key, live in pairs(LIVE_PALETTE) do
+    local c = skin[key]
+    if type(c) == "table" then
+      live[1], live[2], live[3] = c[1], c[2], c[3]
+    end
+  end
+  optionsModule._activeSkin = skin
+end
 
 function optionsModule.EnsureDB()
   if uiShared and uiShared.EnsureDB then
@@ -70,6 +107,15 @@ function optionsModule.Clamp(v, lo, hi)
 end
 
 function optionsModule.GetClassColor()
+  -- Native skin uses a fixed (gold) accent instead of class colour.
+  local skin = optionsModule._activeSkin or (optionsModule.GetActiveSkin and optionsModule.GetActiveSkin())
+  if type(skin) == "table" and skin.useClassAccent == false then
+    local a = skin.accent or FALLBACK_ACCENT
+    return a[1], a[2], a[3]
+  end
+
+  -- Modern skin: class colour. (Standalone -- must NOT read the GSE addon; the
+  -- only permitted GSE link is gse_bridge.lua.)
   local classTag
   if UnitClass then
     _, classTag = UnitClass("player")
@@ -118,11 +164,16 @@ function optionsModule.StyleWindowBorder(frame)
   frame:SetBackdropBorderColor(BORDER_LIGHT[1], BORDER_LIGHT[2], BORDER_LIGHT[3], 1)
 end
 
+function optionsModule.StyleWindowBackground(frame, bgAlpha)
+  if not (frame and frame.SetBackdropColor) then return end
+  frame:SetBackdropColor(BG_DARK[1], BG_DARK[2], BG_DARK[3], bgAlpha or 0.98)
+end
+
 function optionsModule.CreateBackdrop(parent, bgAlpha, borderAlpha)
   local f = API.CreateFrame("Frame", nil, parent, "BackdropTemplate")
   f:SetBackdrop({
-    bgFile = "Interface\\Buttons\\WHITE8x8",
-    edgeFile = "Interface\\Buttons\\WHITE8x8",
+    bgFile = WHITE8X8,
+    edgeFile = WHITE8X8,
     edgeSize = 1,
     insets = { left = 0, right = 0, top = 0, bottom = 0 },
   })
@@ -133,7 +184,13 @@ end
 
 function optionsModule.CreateCheck(parent, label)
   local cb = API.CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
-  cb:SetSize(optionsModule.TOGGLE_W or 46, 20)
+  -- Native skin keeps Blizzard's square check (StyleCheckbox bails); the Modern
+  -- skin paints a wider slide-toggle, so size accordingly.
+  if optionsModule.IsNativeSkin and optionsModule.IsNativeSkin() then
+    cb:SetSize(26, 26)
+  else
+    cb:SetSize(optionsModule.TOGGLE_W or 46, 20)
+  end
   cb.rowHeight = optionsModule.ROW_H
   cb.alignLabelOffsetY = 0
   cb:SetHitRectInsets(-4, -4, -4, -4)
@@ -157,8 +214,8 @@ end
 function optionsModule.ApplyMidnightBackdrop(frame, edgeSize, bgAlpha)
   if not frame then return end
   frame:SetBackdrop({
-    bgFile = "Interface\\Buttons\\WHITE8x8",
-    edgeFile = "Interface\\Buttons\\WHITE8x8",
+    bgFile = WHITE8X8,
+    edgeFile = WHITE8X8,
     edgeSize = edgeSize or 1,
     insets = { left = 0, right = 0, top = 0, bottom = 0 },
   })
@@ -233,7 +290,7 @@ end
 
 local function CreateEdgeTexture(parent, layer)
   local tex = parent:CreateTexture(nil, layer or "ARTWORK")
-  tex:SetTexture("Interface\\Buttons\\WHITE8x8")
+  tex:SetTexture(WHITE8X8)
   return tex
 end
 
@@ -439,6 +496,8 @@ end
 
 function optionsModule.StyleCheckbox(button)
   if not button then return end
+  -- Native skin: leave Blizzard's default checkbox textures intact.
+  if optionsModule.IsNativeSkin and optionsModule.IsNativeSkin() then return end
 
   local normal = button.GetNormalTexture and button:GetNormalTexture()
   local pushed = button.GetPushedTexture and button:GetPushedTexture()
@@ -456,22 +515,22 @@ function optionsModule.StyleCheckbox(button)
     button:SetSize(optionsModule.TOGGLE_W or 46, 20)
 
     local bg = button:CreateTexture(nil, "BACKGROUND")
-    bg:SetTexture("Interface\\Buttons\\WHITE8x8")
+    bg:SetTexture(WHITE8X8)
     bg:SetPoint("TOPLEFT", button, "TOPLEFT", 0, 0)
     bg:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", 0, 0)
 
     local inner = button:CreateTexture(nil, "BORDER")
-    inner:SetTexture("Interface\\Buttons\\WHITE8x8")
+    inner:SetTexture(WHITE8X8)
     inner:SetPoint("TOPLEFT", button, "TOPLEFT", 1, -1)
     inner:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -1, 1)
 
     local fill = button:CreateTexture(nil, "BORDER")
-    fill:SetTexture("Interface\\Buttons\\WHITE8x8")
+    fill:SetTexture(WHITE8X8)
     fill:SetPoint("TOPLEFT", button, "TOPLEFT", 2, -2)
     fill:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -2, 2)
 
     local knob = button:CreateTexture(nil, "ARTWORK")
-    knob:SetTexture("Interface\\Buttons\\WHITE8x8")
+    knob:SetTexture(WHITE8X8)
     knob:SetSize(16, 16)
 
     local borderTop = CreateEdgeTexture(button, "ARTWORK")
@@ -495,11 +554,11 @@ function optionsModule.StyleCheckbox(button)
     borderRight:SetWidth(1)
 
     local glow = button:CreateTexture(nil, "OVERLAY")
-    glow:SetTexture("Interface\\Buttons\\WHITE8x8")
+    glow:SetTexture(WHITE8X8)
     glow:SetSize(16, 16)
 
     local slash = button:CreateTexture(nil, "OVERLAY")
-    slash:SetTexture("Interface\\Buttons\\WHITE8x8")
+    slash:SetTexture(WHITE8X8)
     slash:SetPoint("CENTER", button, "CENTER", 0, 0)
     slash:SetSize(math.min((optionsModule.TOGGLE_W or 46) - 12, 32), 1)
     slash:SetRotation(math.rad(-45))
@@ -572,6 +631,8 @@ end
 
 function optionsModule.StyleActionButton(button)
   if not button then return end
+  -- Native skin: leave Blizzard's default UIPanelButton look (text already set).
+  if optionsModule.IsNativeSkin and optionsModule.IsNativeSkin() then return end
 
   local normal = button.GetNormalTexture and button:GetNormalTexture()
   local pushed = button.GetPushedTexture and button:GetPushedTexture()
@@ -585,12 +646,12 @@ function optionsModule.StyleActionButton(button)
 
   if not button._gseActionStyle then
     local bg = button:CreateTexture(nil, "BACKGROUND")
-    bg:SetTexture("Interface\\Buttons\\WHITE8x8")
+    bg:SetTexture(WHITE8X8)
     bg:SetPoint("TOPLEFT", button, "TOPLEFT", 0, 0)
     bg:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", 0, 0)
 
     local inner = button:CreateTexture(nil, "BORDER")
-    inner:SetTexture("Interface\\Buttons\\WHITE8x8")
+    inner:SetTexture(WHITE8X8)
     inner:SetPoint("TOPLEFT", button, "TOPLEFT", 1, -1)
     inner:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -1, 1)
 
@@ -615,12 +676,12 @@ function optionsModule.StyleActionButton(button)
     borderRight:SetWidth(1)
 
     local accent = button:CreateTexture(nil, "OVERLAY")
-    accent:SetTexture("Interface\\Buttons\\WHITE8x8")
+    accent:SetTexture(WHITE8X8)
     accent:SetPoint("TOPLEFT", button, "TOPLEFT", 1, -1)
     accent:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -1, 1)
 
     local glow = button:CreateTexture(nil, "OVERLAY")
-    glow:SetTexture("Interface\\Buttons\\WHITE8x8")
+    glow:SetTexture(WHITE8X8)
     glow:SetPoint("TOPLEFT", button, "TOPLEFT", 1, -1)
     glow:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -1, 1)
 
@@ -701,12 +762,12 @@ function optionsModule.StyleCloseButton(button)
 
   if not button._gseCloseStyle then
     local bg = button:CreateTexture(nil, "BACKGROUND")
-    bg:SetTexture("Interface\\Buttons\\WHITE8x8")
+    bg:SetTexture(WHITE8X8)
     bg:SetPoint("TOPLEFT", button, "TOPLEFT", 0, 0)
     bg:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", 0, 0)
 
     local inner = button:CreateTexture(nil, "BORDER")
-    inner:SetTexture("Interface\\Buttons\\WHITE8x8")
+    inner:SetTexture(WHITE8X8)
     inner:SetPoint("TOPLEFT", button, "TOPLEFT", 1, -1)
     inner:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -1, 1)
 
@@ -731,7 +792,7 @@ function optionsModule.StyleCloseButton(button)
     borderRight:SetWidth(1)
 
     local glow = button:CreateTexture(nil, "OVERLAY")
-    glow:SetTexture("Interface\\Buttons\\WHITE8x8")
+    glow:SetTexture(WHITE8X8)
     glow:SetPoint("TOPLEFT", button, "TOPLEFT", 1, -1)
     glow:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -1, 1)
 
@@ -804,8 +865,8 @@ function optionsModule.SkinDropdownListFrame(listFrame)
   if backdrop then
     backdrop:SetFrameLevel(math.max(listFrame:GetFrameLevel() - 1, 0))
     backdrop:SetBackdrop({
-      bgFile = "Interface\\Buttons\\WHITE8x8",
-      edgeFile = "Interface\\Buttons\\WHITE8x8",
+      bgFile = WHITE8X8,
+      edgeFile = WHITE8X8,
       edgeSize = 1,
       insets = { left = 0, right = 0, top = 0, bottom = 0 },
     })
@@ -915,11 +976,11 @@ function optionsModule.StyleColorPickerFrame(frame)
     backdrop:SetFrameLevel(math.max(backdropParent:GetFrameLevel() - 1, 0))
 
     local bg = backdrop:CreateTexture(nil, "BACKGROUND")
-    bg:SetTexture("Interface\\Buttons\\WHITE8x8")
+    bg:SetTexture(WHITE8X8)
     bg:SetAllPoints(backdrop)
 
     local inner = backdrop:CreateTexture(nil, "BORDER")
-    inner:SetTexture("Interface\\Buttons\\WHITE8x8")
+    inner:SetTexture(WHITE8X8)
     inner:SetPoint("TOPLEFT", backdrop, "TOPLEFT", 1, -1)
     inner:SetPoint("BOTTOMRIGHT", backdrop, "BOTTOMRIGHT", -1, 1)
 
@@ -1104,27 +1165,27 @@ SkinDropdownListButton = function(button)
 
   if not button._gseMenuItemStyle then
     local bg = button:CreateTexture(nil, "BACKGROUND")
-    bg:SetTexture("Interface\\Buttons\\WHITE8x8")
+    bg:SetTexture(WHITE8X8)
     bg:SetPoint("TOPLEFT", button, "TOPLEFT", 2, -1)
     bg:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -2, 1)
 
     local inner = button:CreateTexture(nil, "BORDER")
-    inner:SetTexture("Interface\\Buttons\\WHITE8x8")
+    inner:SetTexture(WHITE8X8)
     inner:SetPoint("TOPLEFT", bg, "TOPLEFT", 1, -1)
     inner:SetPoint("BOTTOMRIGHT", bg, "BOTTOMRIGHT", -1, 1)
 
     local selection = button:CreateTexture(nil, "ARTWORK")
-    selection:SetTexture("Interface\\Buttons\\WHITE8x8")
+    selection:SetTexture(WHITE8X8)
     selection:SetPoint("TOPLEFT", bg, "TOPLEFT", 0, 0)
     selection:SetPoint("BOTTOMRIGHT", bg, "BOTTOMRIGHT", 0, 0)
 
     local hover = button:CreateTexture(nil, "ARTWORK")
-    hover:SetTexture("Interface\\Buttons\\WHITE8x8")
+    hover:SetTexture(WHITE8X8)
     hover:SetPoint("TOPLEFT", bg, "TOPLEFT", 0, 0)
     hover:SetPoint("BOTTOMRIGHT", bg, "BOTTOMRIGHT", 0, 0)
 
     local accent = button:CreateTexture(nil, "ARTWORK")
-    accent:SetTexture("Interface\\Buttons\\WHITE8x8")
+    accent:SetTexture(WHITE8X8)
     accent:SetPoint("TOPLEFT", bg, "TOPLEFT", 0, 0)
     accent:SetPoint("BOTTOMLEFT", bg, "BOTTOMLEFT", 0, 0)
     accent:SetWidth(0)
@@ -1165,15 +1226,17 @@ end
 function optionsModule.StyleDropdown(dropdown, holder)
   if not dropdown or dropdown._gseDropdownStyled then return end
   dropdown._gseDropdownStyled = true
+  -- Native skin: leave Blizzard's default UIDropDownMenu look.
+  if optionsModule.IsNativeSkin and optionsModule.IsNativeSkin() then return end
 
   local parent = holder or dropdown
   local bg = parent:CreateTexture(nil, "BACKGROUND")
-  bg:SetTexture("Interface\\Buttons\\WHITE8x8")
+  bg:SetTexture(WHITE8X8)
   bg:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, 0)
   bg:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", 0, 0)
 
   local inner = parent:CreateTexture(nil, "BORDER")
-  inner:SetTexture("Interface\\Buttons\\WHITE8x8")
+  inner:SetTexture(WHITE8X8)
   inner:SetPoint("TOPLEFT", parent, "TOPLEFT", 1, -1)
   inner:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -1, 1)
 
@@ -1200,13 +1263,13 @@ function optionsModule.StyleDropdown(dropdown, holder)
   if arrowFrame.EnableMouse then arrowFrame:EnableMouse(false) end
 
   local arrowLeft = arrowFrame:CreateTexture(nil, "OVERLAY")
-  arrowLeft:SetTexture("Interface\\Buttons\\WHITE8x8")
+  arrowLeft:SetTexture(WHITE8X8)
   arrowLeft:SetSize(7, 1.5)
   arrowLeft:SetPoint("CENTER", arrowFrame, "CENTER", -2, 0)
   arrowLeft:SetRotation(math.rad(-45))
 
   local arrowRight = arrowFrame:CreateTexture(nil, "OVERLAY")
-  arrowRight:SetTexture("Interface\\Buttons\\WHITE8x8")
+  arrowRight:SetTexture(WHITE8X8)
   arrowRight:SetSize(7, 1.5)
   arrowRight:SetPoint("CENTER", arrowFrame, "CENTER", 2, 0)
   arrowRight:SetRotation(math.rad(45))
@@ -1297,15 +1360,17 @@ end
 function optionsModule.StyleEditBox(box)
   if not box or box._gseEditStyled then return end
   box._gseEditStyled = true
+  -- Native skin: leave Blizzard's default InputBoxTemplate look.
+  if optionsModule.IsNativeSkin and optionsModule.IsNativeSkin() then return end
   for _, region in ipairs({ box:GetRegions() }) do
     if region and region.GetObjectType and region:GetObjectType() == "Texture" then HideTexture(region) end
   end
   local bg = box:CreateTexture(nil, "BACKGROUND")
-  bg:SetTexture("Interface\\Buttons\\WHITE8x8")
+  bg:SetTexture(WHITE8X8)
   bg:SetPoint("TOPLEFT", box, "TOPLEFT", 0, 0)
   bg:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", 0, 0)
   local inner = box:CreateTexture(nil, "BORDER")
-  inner:SetTexture("Interface\\Buttons\\WHITE8x8")
+  inner:SetTexture(WHITE8X8)
   inner:SetPoint("TOPLEFT", bg, "TOPLEFT", 1, -1)
   inner:SetPoint("BOTTOMRIGHT", bg, "BOTTOMRIGHT", -1, 1)
   local borderTop = CreateEdgeTexture(box, "ARTWORK")
@@ -1347,6 +1412,12 @@ end
 function optionsModule.StyleSlider(slider)
   if not slider or slider._gseSliderStyled then return end
   slider._gseSliderStyled = true
+  -- Native skin: keep Blizzard's default slider thumb/track; provide a no-op
+  -- visual updater so callers (SetSliderBoxValue path) stay safe.
+  if optionsModule.IsNativeSkin and optionsModule.IsNativeSkin() then
+    slider._gseSliderVisualUpdate = function() end
+    return
+  end
 
   HideTextureRegionsRecursive(slider)
   local low = _G[slider:GetName() .. "Low"]
@@ -1355,24 +1426,24 @@ function optionsModule.StyleSlider(slider)
   if text then text:Hide() end
 
   local trackOuter = slider:CreateTexture(nil, "BACKGROUND")
-  trackOuter:SetTexture("Interface\\Buttons\\WHITE8x8")
+  trackOuter:SetTexture(WHITE8X8)
   trackOuter:SetPoint("LEFT", slider, "LEFT", 0, 0)
   trackOuter:SetPoint("RIGHT", slider, "RIGHT", 0, 0)
   trackOuter:SetHeight(4)
 
   local trackInner = slider:CreateTexture(nil, "BORDER")
-  trackInner:SetTexture("Interface\\Buttons\\WHITE8x8")
+  trackInner:SetTexture(WHITE8X8)
   trackInner:SetPoint("TOPLEFT", trackOuter, "TOPLEFT", 1, -1)
   trackInner:SetPoint("BOTTOMRIGHT", trackOuter, "BOTTOMRIGHT", -1, 1)
 
   local fill = slider:CreateTexture(nil, "ARTWORK")
-  fill:SetTexture("Interface\\Buttons\\WHITE8x8")
+  fill:SetTexture(WHITE8X8)
   fill:SetPoint("LEFT", trackInner, "LEFT", 0, 0)
   fill:SetWidth(0)
   fill:SetPoint("TOP", trackInner, "TOP", 0, 0)
   fill:SetPoint("BOTTOM", trackInner, "BOTTOM", 0, 0)
 
-  slider:SetThumbTexture("Interface\\Buttons\\WHITE8x8")
+  slider:SetThumbTexture(WHITE8X8)
   local nativeThumb = slider:GetThumbTexture()
   if nativeThumb then
     nativeThumb:SetSize(12, 18)
@@ -1380,11 +1451,11 @@ function optionsModule.StyleSlider(slider)
   end
 
   local thumb = slider:CreateTexture(nil, "OVERLAY")
-  thumb:SetTexture("Interface\\Buttons\\WHITE8x8")
+  thumb:SetTexture(WHITE8X8)
   thumb:SetSize(10, 14)
 
   local thumbGlow = slider:CreateTexture(nil, "OVERLAY")
-  thumbGlow:SetTexture("Interface\\Buttons\\WHITE8x8")
+  thumbGlow:SetTexture(WHITE8X8)
   thumbGlow:SetSize(12, 18)
 
   slider._gseSliderStyle = {
@@ -1481,6 +1552,8 @@ end
 function optionsModule.StyleScrollBar(scrollBar)
   if not scrollBar or scrollBar._gseScrollBarStyled then return end
   scrollBar._gseScrollBarStyled = true
+  -- Native skin: leave Blizzard's default scrollbar.
+  if optionsModule.IsNativeSkin and optionsModule.IsNativeSkin() then return end
 
   HideTextureRegionsRecursive(scrollBar)
 
@@ -1495,18 +1568,18 @@ function optionsModule.StyleScrollBar(scrollBar)
   end
 
   local track = scrollBar:CreateTexture(nil, "BACKGROUND")
-  track:SetTexture("Interface\\Buttons\\WHITE8x8")
+  track:SetTexture(WHITE8X8)
   track:SetPoint("TOPLEFT", scrollBar, "TOPLEFT", 4, -10)
   track:SetPoint("BOTTOMRIGHT", scrollBar, "BOTTOMRIGHT", -4, 10)
   track:SetVertexColor(BG_INPUT[1], BG_INPUT[2], BG_INPUT[3], 0)
 
   local inner = scrollBar:CreateTexture(nil, "BORDER")
-  inner:SetTexture("Interface\\Buttons\\WHITE8x8")
+  inner:SetTexture(WHITE8X8)
   inner:SetPoint("TOPLEFT", track, "TOPLEFT", 1, -1)
   inner:SetPoint("BOTTOMRIGHT", track, "BOTTOMRIGHT", -1, 1)
   inner:SetVertexColor(BG_DARK[1], BG_DARK[2], BG_DARK[3], 0)
 
-  scrollBar:SetThumbTexture("Interface\\Buttons\\WHITE8x8")
+  scrollBar:SetThumbTexture(WHITE8X8)
   local thumb = scrollBar.GetThumbTexture and scrollBar:GetThumbTexture() or nil
   if thumb then
     thumb:SetSize(6, 28)
@@ -1953,13 +2026,13 @@ function optionsModule.CreateColorSwatch(parent, width, height)
   button.rowHeight = optionsModule.ROW_H
 
   local bg = button:CreateTexture(nil, "BACKGROUND")
-  bg:SetTexture("Interface\\Buttons\\WHITE8x8")
+  bg:SetTexture(WHITE8X8)
   bg:SetPoint("TOPLEFT", button, "TOPLEFT", 0, 0)
   bg:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", 0, 0)
   bg:SetVertexColor(BG_INPUT[1], BG_INPUT[2], BG_INPUT[3], 1)
 
   local inner = button:CreateTexture(nil, "BORDER")
-  inner:SetTexture("Interface\\Buttons\\WHITE8x8")
+  inner:SetTexture(WHITE8X8)
   inner:SetPoint("TOPLEFT", button, "TOPLEFT", 1, -1)
   inner:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -1, 1)
   inner:SetVertexColor(BG_DARK[1], BG_DARK[2], BG_DARK[3], 1)
@@ -1982,7 +2055,7 @@ function optionsModule.CreateColorSwatch(parent, width, height)
   borderRight:SetWidth(1)
 
   local chip = button:CreateTexture(nil, "OVERLAY")
-  chip:SetTexture("Interface\\Buttons\\WHITE8x8")
+  chip:SetTexture(WHITE8X8)
   chip:SetPoint("TOPLEFT", button, "TOPLEFT", 3, -3)
   chip:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -3, 3)
   chip:SetVertexColor(1, 1, 1, 1)
@@ -2024,7 +2097,35 @@ function optionsModule.CreateColorSwatch(parent, width, height)
   return button
 end
 
+-- Native section: a stock Blizzard inset panel with a plain header label.
+function optionsModule.CreateNativeSection(parent, title)
+  local box = API.CreateFrame("Frame", nil, parent, "BackdropTemplate")
+  box:SetBackdrop({
+    bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+    tile = true,
+    tileSize = 16,
+    edgeSize = 14,
+    insets = { left = 4, right = 4, top = 4, bottom = 4 },
+  })
+  box:SetBackdropColor(0.08, 0.08, 0.09, 0.92)
+  box:SetBackdropBorderColor(0.50, 0.45, 0.35, 1)
+
+  local header = box:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+  header:SetPoint("TOPLEFT", box, "TOPLEFT", 12, -8)
+  header:SetJustifyH("LEFT")
+  header:SetText(title)
+  box.header = header
+
+  box.rows = {}
+  return box
+end
+
 function optionsModule.CreateSection(parent, title)
+  if optionsModule.IsNativeSkin and optionsModule.IsNativeSkin() then
+    return optionsModule.CreateNativeSection(parent, title)
+  end
+
   local box = optionsModule.CreateBackdrop(parent, 0.92, 1)
   local classR, classG, classB = optionsModule.GetClassColor()
 
@@ -2032,7 +2133,7 @@ function optionsModule.CreateSection(parent, title)
   box:SetBackdropBorderColor(BORDER_DEFAULT[1], BORDER_DEFAULT[2], BORDER_DEFAULT[3], 1)
 
   local headerBar = box:CreateTexture(nil, "BORDER")
-  headerBar:SetTexture("Interface\\Buttons\\WHITE8x8")
+  headerBar:SetTexture(WHITE8X8)
   headerBar:SetPoint("TOPLEFT", box, "TOPLEFT", 1, -1)
   headerBar:SetPoint("TOPRIGHT", box, "TOPRIGHT", -1, -1)
   headerBar:SetHeight(32)
@@ -2040,7 +2141,7 @@ function optionsModule.CreateSection(parent, title)
   box.headerBar = headerBar
 
   local headerTint = box:CreateTexture(nil, "ARTWORK")
-  headerTint:SetTexture("Interface\\Buttons\\WHITE8x8")
+  headerTint:SetTexture(WHITE8X8)
   headerTint:SetPoint("TOPLEFT", headerBar, "TOPLEFT", 0, 0)
   headerTint:SetPoint("BOTTOMRIGHT", headerBar, "BOTTOMRIGHT", 0, 0)
   headerTint:SetVertexColor(classR, classG, classB, 0.12)

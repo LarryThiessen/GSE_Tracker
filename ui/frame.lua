@@ -5,6 +5,7 @@ local API = (ns.Utils and ns.Utils.API) or {}
 addon._ui = addon._ui or {}
 local uiShared = addon._ui
 local C = (ns.Utils and ns.Utils.Constants) or addon.Constants or {}
+local WHITE8X8 = C.TEXTURE_WHITE8X8 or "Interface/Buttons/WHITE8x8"
 local SV = (ns.Utils and ns.Utils.SV) or nil
 
 local function Clamp(v, lo, hi)
@@ -89,11 +90,45 @@ end
 
 local function GetActionTrackerRowRelativeBaselineOffsets(ui)
   local pressedSize = tonumber(ui and ui.pressedIndicator and ui.pressedIndicator.GetWidth and ui.pressedIndicator:GetWidth()) or 0
+  -- Offsets are measured from the icon-holder CENTRE. The text (name above, mods
+  -- below) must clear the holder's vertical extent -- ICON_SIZE/2 for a horizontal
+  -- row, but the whole column half-height when vertical -- or it sits on the icons.
+  local rowHalfY = ((ui and ui.iconHolder and ui.iconHolder.GetHeight and ui.iconHolder:GetHeight()) or (tonumber(uiShared.ICON_SIZE) or 45)) * 0.5
+  if not rowHalfY or rowHalfY <= 0 then rowHalfY = (tonumber(uiShared.ICON_SIZE) or 45) * 0.5 end
+  local layout = (addon.GetActionTrackerLayout and addon:GetActionTrackerLayout()) or "HORIZONTAL"
+
+  if layout == "VERTICAL" then
+    -- Vertical icon column: the labels render as stacked (top-to-bottom) glyph columns
+    -- beside the icons (see FormatLabelForLayout) -- so each is only ~1 glyph wide and
+    -- sits close to the column, centred on its vertical centre. Modifiers go to the
+    -- LEFT; the sequence/spell name (inner) and keybind (outer) go to the RIGHT as two
+    -- narrow columns. _ResizeToContent narrows the frame to match.
+    local rowHalfX = ((ui and ui.iconHolder and ui.iconHolder.GetWidth and ui.iconHolder:GetWidth()) or (tonumber(uiShared.ICON_SIZE) or 45)) * 0.5
+    if not rowHalfX or rowHalfX <= 0 then rowHalfX = (tonumber(uiShared.ICON_SIZE) or 45) * 0.5 end
+    local gap = (uiShared.GAP_ICONS_MODS or 6)
+    local colW = uiShared.VERTICAL_LABEL_W or 24
+    local innerX = rowHalfX + gap + (colW * 0.5)
+    return {
+      sequenceText  = { x = innerX,            y = 0 },
+      keybindText   = { x = innerX + colW + 2, y = 0 },
+      modifiersText = { x = -innerX,           y = 0 },
+      pressedIndicator = { x = 0, y = 0, point = "CENTER", relativePoint = "CENTER" },
+    }
+  end
+
+  -- Sit just below the icon row, nudged up 2px to tuck the labels closer.
+  local modsY = -(rowHalfY + (uiShared.GAP_ICONS_MODS or 6) + ((uiShared.MODS_H or 14) * 0.5)) + 2
+  -- Sequence name sits above the icon with the SAME gap the mods use below it
+  -- (mirror of modsY); keybind stacks 10px above the name (the original spacing).
+  -- Was hardcoded 17/27, which overlapped the icon's top.
+  local nameY = (rowHalfY + (uiShared.GAP_ICONS_MODS or 6) + ((uiShared.NAME_H or 24) * 0.5)) - 5
+  local keybindY = nameY + 10
   return {
-    sequenceText = { x = 0, y = 17 },
-    modifiersText = { x = 0, y = -15 },
-    keybindText = { x = 0, y = 27 },
-    pressedIndicator = { x = (pressedSize * 0.5) + 8, y = 0, point = "CENTER", relativePoint = "RIGHT" },
+    sequenceText = { x = 0, y = nameY },
+    modifiersText = { x = 0, y = modsY },
+    keybindText = { x = 0, y = keybindY },
+    -- Centred on the icon row (was offset to the right of it).
+    pressedIndicator = { x = 0, y = 0, point = "CENTER", relativePoint = "CENTER" },
   }
 end
 
@@ -145,24 +180,24 @@ function UI:EnsureActionTrackerMoveMarker()
   marker:SetFrameStrata(C.STRATA_TOOLTIP or "TOOLTIP")
   marker:SetFrameLevel(C.ACTION_TRACKER_MARKER_FRAME_LEVEL or 50)
   marker:SetBackdrop({
-    bgFile = "Interface\\Buttons\\WHITE8x8",
-    edgeFile = "Interface\\Buttons\\WHITE8x8",
+    bgFile = WHITE8X8,
+    edgeFile = WHITE8X8,
     edgeSize = 2,
     insets = { left = 0, right = 0, top = 0, bottom = 0 },
   })
   local glow = marker:CreateTexture(nil, "BACKGROUND")
   glow:SetPoint("TOPLEFT", marker, "TOPLEFT", -6, 6)
   glow:SetPoint("BOTTOMRIGHT", marker, "BOTTOMRIGHT", 6, -6)
-  glow:SetTexture("Interface\\Buttons\\WHITE8x8")
+  glow:SetTexture(WHITE8X8)
   marker.glow = glow
   local crossH = marker:CreateTexture(nil, "ARTWORK")
-  crossH:SetTexture("Interface\\Buttons\\WHITE8x8")
+  crossH:SetTexture(WHITE8X8)
   crossH:SetHeight(2)
   crossH:SetPoint("LEFT", marker, "LEFT", 6, 0)
   crossH:SetPoint("RIGHT", marker, "RIGHT", -6, 0)
   marker.crossH = crossH
   local crossV = marker:CreateTexture(nil, "ARTWORK")
-  crossV:SetTexture("Interface\\Buttons\\WHITE8x8")
+  crossV:SetTexture(WHITE8X8)
   crossV:SetWidth(2)
   crossV:SetPoint("TOP", marker, "TOP", 0, -6)
   crossV:SetPoint("BOTTOM", marker, "BOTTOM", 0, 6)
@@ -317,18 +352,53 @@ function UI:ApplyFontFaces()
   local modSize = self:GetModFontSize()
   local keybindSize = self:GetKeybindFontSize()
 
-  local function SafeSet(fs, path, size, flags)
-    if not (fs and fs.SetFont) then return end
-    if not fs:SetFont(path, size, flags) then
-      fs:SetFont(STANDARD_TEXT_FONT, size, flags)
+  -- Shared outline flag from the Fonts "Outline" selector ("NONE" -> no flag).
+  local outline = (ns.Utils and ns.Utils.GetActionTrackerFontOutline and ns.Utils:GetActionTrackerFontOutline()) or "OUTLINE"
+  local flags = (outline == "NONE") and "" or outline
+
+  -- Adopt the player's action-bar font STYLE (face + outline) for ALL tracker text
+  -- when a UI skin is in use -- mirrors the border/mask/crop adoption. We use the
+  -- HotKey font for everything (sequence/macro/spell name, keybind AND modifier
+  -- letters): skinners like ActionBarsEnhanced restyle the HotKey/Count fonts but
+  -- typically leave the macro Name font at the Blizzard default, so HotKey is the
+  -- font that actually reflects the skin. Forced-native keeps the user's configured
+  -- fonts. Sizes stay user-controlled (tracker text differs in size from the bars).
+  local seqFlags, modFlags, keybindFlags = flags, flags, flags
+  if uiShared.GetActionButtonFont then
+    local hp, _, hf = uiShared.GetActionButtonFont("hotkey")
+    if hp then
+      seqPath, seqFlags = hp, hf or ""
+      keybindPath, keybindFlags = hp, hf or ""
+      modPath, modFlags = hp, hf or ""
     end
   end
 
-  SafeSet(self.ui.nameText, seqPath, seqSize, "OUTLINE")
-  SafeSet(self.ui.keybindText, keybindPath, keybindSize, "OUTLINE")
-  SafeSet(self.ui.modShift, modPath, modSize, "OUTLINE")
-  SafeSet(self.ui.modAlt,   modPath, modSize, "OUTLINE")
-  SafeSet(self.ui.modCtrl,  modPath, modSize, "OUTLINE")
+  local function SafeSet(fs, path, size, fl)
+    if not (fs and fs.SetFont) then return end
+    fl = fl or flags
+    if not fs:SetFont(path, size, fl) then
+      fs:SetFont(STANDARD_TEXT_FONT, size, fl)
+    end
+  end
+
+  SafeSet(self.ui.nameText, seqPath, seqSize, seqFlags)
+  SafeSet(self.ui.keybindText, keybindPath, keybindSize, keybindFlags)
+  SafeSet(self.ui.modShift, modPath, modSize, modFlags)
+  -- Per-icon keybind labels (the key shown on each recent-spell icon) also use the
+  -- Keybind Font, so a font change restyles them immediately.
+  if self.ui.icons then
+    for i = 1, #self.ui.icons do
+      local b = self.ui.icons[i]
+      if b and b.keybindText then
+        SafeSet(b.keybindText, keybindPath, keybindSize, keybindFlags)
+        if self.PositionIconKeybind then self:PositionIconKeybind(b) end
+      end
+    end
+  end
+  SafeSet(self.ui.modAlt,   modPath, modSize, modFlags)
+  SafeSet(self.ui.modCtrl,  modPath, modSize, modFlags)
+  -- Re-space the labels for the new font size so they don't touch at large sizes.
+  if self._AlignModsToIcons then self:_AlignModsToIcons() end
   if self._ResizeToContent then self:_ResizeToContent() end
 end
 
@@ -343,7 +413,10 @@ end
 function UI:ApplyBorderThickness()
   if not self.ui then return end
   local thickness = self:GetBorderThickness()
-  local showBorder = self:IsBorderEnabled()
+  -- Border now always ADOPTS the player's action-bar frame art (no toggle). It is
+  -- shown only when the bars have frame art (set from useSkinBorder below); when
+  -- there's none (e.g. Classic) there's simply no border -- no coloured fallback.
+  local showBorder
   local edgeSize = math.max(1, thickness > 0 and thickness or 1)
   local borderR, borderG, borderB
   if self.GetActionTrackerUseClassColor and self:GetActionTrackerUseClassColor() then
@@ -355,33 +428,141 @@ function UI:ApplyBorderThickness()
   end
 
   if self.ui.SetBackdrop then
-    self.ui:SetBackdrop({
-      bgFile   = "Interface\\Buttons\\WHITE8x8",
-      edgeFile = "Interface\\Buttons\\WHITE8x8",
-      edgeSize = 1,
-      insets   = { left = 0, right = 0, top = 0, bottom = 0 }
-    })
-    self.ui:SetBackdropColor(0, 0, 0, 0)
-    self.ui:SetBackdropBorderColor(0, 0, 0, 0)
+    -- Panel border: wrap the whole tracker in the skin's themed panel border when one
+    -- applies (EllesmereUI's class-coloured glow-border) so the tracker reads as part
+    -- of the skin. Otherwise a transparent 1px edge (no panel border).
+    local pe, ps, pr, pg, pb
+    if uiShared.GetSkinnerPanelBorder then pe, ps, pr, pg, pb = uiShared.GetSkinnerPanelBorder() end
+    if pe then
+      self.ui:SetBackdrop({
+        edgeFile = pe,
+        edgeSize = ps or 12,
+        insets   = { left = 0, right = 0, top = 0, bottom = 0 }
+      })
+      self.ui:SetBackdropColor(0, 0, 0, 0)
+      self.ui:SetBackdropBorderColor(pr or 0, pg or 0, pb or 0, 1)
+    else
+      self.ui:SetBackdrop({
+        bgFile   = WHITE8X8,
+        edgeFile = WHITE8X8,
+        edgeSize = 1,
+        insets   = { left = 0, right = 0, top = 0, bottom = 0 }
+      })
+      self.ui:SetBackdropColor(0, 0, 0, 0)
+      self.ui:SetBackdropBorderColor(0, 0, 0, 0)
+    end
+  end
+
+  -- Prefer the player's action-button border art (Blizzard default or skinner)
+  -- so the tracker matches the bars; fall back to our coloured square border.
+  local skinBorder
+  if uiShared.GetActionButtonBorder then skinBorder = uiShared.GetActionButtonBorder() end
+  -- Frame-art skin (Blizzard/ABE) -> draw the adopted frame texture. Thin-border
+  -- skin (ElvUI: no frame art, just a ~1px backdrop) -> draw our thin coloured
+  -- border instead. No skin info at all (Classic) -> no border.
+  local useSkinBorder = (skinBorder and (skinBorder.atlas or skinBorder.file)) and true or false
+  local thinBorder = (skinBorder and skinBorder.thin) and true or false
+  showBorder = useSkinBorder or thinBorder
+
+  -- A thin-border skin (ElvUI) drives the tracker border's COLOUR + THICKNESS from
+  -- the skin's own live settings, so it tracks the skin exactly (e.g. ElvUI's black
+  -- 1px border) instead of the tracker's own colour pickers. Only applies when the
+  -- skinner reported a style; otherwise the tracker's colour settings above stand.
+  if thinBorder and skinBorder and skinBorder.r then
+    borderR, borderG, borderB = skinBorder.r, skinBorder.g, skinBorder.b
+    if skinBorder.thickness and skinBorder.thickness > 0 then
+      edgeSize = math.max(1, skinBorder.thickness)
+    end
   end
 
   local icons = self.ui.icons or {}
   for _, icon in ipairs(icons) do
     if icon and icon.SetBackdrop then
+      -- When masked, using frame art, OR a thin-border skin, the icon fills the whole
+      -- frame so the thin border hugs the icon edge (insetting leaves a 1px gap that
+      -- reads as "the border is larger than the icon").
+      local fillFrame = icon._isMasked or useSkinBorder or thinBorder
+      local bdInset = fillFrame and 0 or edgeSize
       icon:SetBackdrop({
-        bgFile   = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        bgFile   = WHITE8X8,
+        edgeFile = WHITE8X8,
         edgeSize = edgeSize,
-        insets   = { left = edgeSize, right = edgeSize, top = edgeSize, bottom = edgeSize }
+        insets   = { left = bdInset, right = bdInset, top = bdInset, bottom = bdInset }
       })
       icon:SetBackdropColor(0, 0, 0, 0)
-      if icon.tex then
-        SetTextureInsetsIfChanged(icon.tex, icon, thickness)
-      end
-      if showBorder then
-        icon:SetBackdropBorderColor(borderR or 0, borderG or 0, borderB or 0, 1)
-      else
+
+      local sw = (icon.GetWidth and icon:GetWidth()) or uiShared.ICON_SIZE or 45
+      local sh = (icon.GetHeight and icon:GetHeight()) or sw
+      if not sw or sw <= 0 then sw = uiShared.ICON_SIZE or 45 end
+      if not sh or sh <= 0 then sh = sw end
+
+      if showBorder and useSkinBorder then
+        -- Use the action button's border/frame art (matches the UI skin). The
+        -- frame art is sized by the bars' border:button ratio and centred on our
+        -- icon (mirroring how skinners like ActionBarsEnhanced anchor the
+        -- NormalTexture, which can sit outside the base icon).
+        local bw = sw * (skinBorder.wRatio or 1)
+        local bh = sh * (skinBorder.hRatio or 1)
+        if not icon._skinBorder then
+          icon._skinBorder = icon:CreateTexture(nil, "OVERLAY")
+        end
+        local sb = icon._skinBorder
+        if skinBorder.atlas then
+          sb:SetAtlas(skinBorder.atlas, false)
+        else
+          sb:SetTexture(skinBorder.file)
+          if skinBorder.coords then
+            sb:SetTexCoord(unpack(skinBorder.coords))
+          end
+        end
+        sb:ClearAllPoints()
+        sb:SetSize(bw, bh)
+        sb:SetPoint("CENTER", icon, "CENTER", 0, 0)
+        -- Frame art keeps its natural colour (tinting multiplies a dark texture =
+        -- washed/black). Colour is applied via the coloured square border instead.
+        sb:SetVertexColor(1, 1, 1)
+        sb:Show()
         icon:SetBackdropBorderColor(0, 0, 0, 0)
+
+        -- Keep the icon at its OWN size and let the frame art (drawn larger at the
+        -- skin's real ratio) frame it -- the border's transparent inner window is
+        -- sized to the icon, so its inner edge lands on the icon edge like the bars.
+        -- Scaling the icon up to the frame footprint (as before) balloons the icon
+        -- for ornate frames like ActionBarsEnhanced. Shave 0.5px per side so the art
+        -- tucks just INSIDE the frame's inner edge instead of poking past it.
+        if icon.tex then
+          local ox = -0.5
+          local oy = -0.5
+          icon.tex:ClearAllPoints()
+          icon.tex:SetPoint("TOPLEFT", icon, "TOPLEFT", -ox, oy)
+          icon.tex:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", ox, -oy)
+          icon.tex._gsetrackerInset = nil
+        end
+      else
+        if icon._skinBorder then icon._skinBorder:Hide() end
+        local texInset = fillFrame and 0 or thickness
+        if icon.tex then
+          SetTextureInsetsIfChanged(icon.tex, icon, texInset)
+        end
+        if showBorder then
+          icon:SetBackdropBorderColor(borderR or 0, borderG or 0, borderB or 0, 1)
+        else
+          icon:SetBackdropBorderColor(0, 0, 0, 0)
+        end
+      end
+
+      -- Re-size the icon mask to the texture's FINAL geometry. The mask must be
+      -- scaled by the bars' mask:icon ratio and centred (NOT SetAllPoints) so its
+      -- opaque region covers the whole visible icon -- otherwise it clips the icon
+      -- well inside the frame, leaving a dark gap. Established at creation while
+      -- the texture was smaller, so re-assert after the resize above.
+      if icon._isMasked and icon._iconMask and icon.tex then
+        if uiShared.SizeIconMask then
+          uiShared.SizeIconMask(icon)
+        else
+          icon._iconMask:ClearAllPoints()
+          icon._iconMask:SetAllPoints(icon.tex)
+        end
       end
     end
   end
@@ -650,10 +831,10 @@ function UI:ApplyDeterministicRenderPipeline(reason)
 end
 
 function UI:ResetToDefaults()
+  -- SV:ResetToDefaults resets the ACTIVE store (account or per-character) and sets
+  -- the right global internally -- don't reassign GSETrackerDB here.
   if SV and SV.ResetToDefaults then
-    GSETrackerDB = SV:ResetToDefaults({ colors = true })
-  else
-    GSETrackerDB = EnsureDB()
+    SV:ResetToDefaults({ colors = true })
   end
 
   EnsureDB()
@@ -695,13 +876,32 @@ function UI:_AlignModsToIcons()
   local ui = self.ui
   if not (ui and ui.modifiersFrame) then return end
   local function PS(v) return PixelSnap(v, ui) end
-  local xAlt   = PS(-(uiShared.MOD_FIXED_X_SPACING) + (uiShared.MOD_ALT_X_NUDGE or 0))
+
+  -- Keep the labels spread at the fixed spacing, but expand it when needed so they
+  -- never touch -- always leave at least a one-space gap between adjacent labels,
+  -- scaled to the modifier font (the labels grow with the Modifiers Font size).
+  local altW   = (ui.modAlt and ui.modAlt.GetStringWidth and ui.modAlt:GetStringWidth()) or 0
+  local shiftW = (ui.modShift and ui.modShift.GetStringWidth and ui.modShift:GetStringWidth()) or 0
+  local ctrlW  = (ui.modCtrl and ui.modCtrl.GetStringWidth and ui.modCtrl:GetStringWidth()) or 0
+  local modSize = (self.GetModFontSize and self:GetModFontSize()) or uiShared.MOD_FONT_SIZE or 8
+  local spaceGap = math.max(3, modSize * 0.35) -- ~one space at the current font size
+  local base = uiShared.MOD_FIXED_X_SPACING or 48
+  -- Symmetric spacing: ALT and CTRL sit EQUIDISTANT from the centred SHIFT.
+  -- Using per-side widths (CTRL is wider than ALT) pushed the group visibly right
+  -- of the icon centre. Take the larger of the two so neither label can touch.
+  local spacing = math.max(base, (shiftW + altW) * 0.5 + spaceGap, (shiftW + ctrlW) * 0.5 + spaceGap)
+  local leftSpacing, rightSpacing = spacing, spacing
+
+  local xAlt   = PS(-leftSpacing + (uiShared.MOD_ALT_X_NUDGE or 0))
   local xShift = PS(0 + (uiShared.MOD_SHIFT_X_NUDGE or 0))
-  local xCtrl  = PS((uiShared.MOD_FIXED_X_SPACING) + (uiShared.MOD_CTRL_X_NUDGE or 0))
+  local xCtrl  = PS(rightSpacing + (uiShared.MOD_CTRL_X_NUDGE or 0))
   ui.modifiersFrame:SetSize(PS(uiShared.TEXT_W), PS(uiShared.MODS_H))
   ui.modAlt:ClearAllPoints(); ui.modAlt:SetPoint("CENTER", ui.modifiersFrame, "CENTER", xAlt, 0)
   ui.modShift:ClearAllPoints(); ui.modShift:SetPoint("CENTER", ui.modifiersFrame, "CENTER", xShift, 0)
   ui.modCtrl:ClearAllPoints(); ui.modCtrl:SetPoint("CENTER", ui.modifiersFrame, "CENTER", xCtrl, 0)
+  -- Remember each label's resting x so the press slide-in animation can re-anchor
+  -- it (x stays, only y is animated).
+  ui.modAlt._modBaseX, ui.modShift._modBaseX, ui.modCtrl._modBaseX = xAlt, xShift, xCtrl
 end
 
 function UI:_ResizeToContent()
@@ -709,15 +909,49 @@ function UI:_ResizeToContent()
   if not ui then return end
   local function PS(v) return PixelSnap(v, ui) end
   local count = (self.GetEditModePreviewIconCount and self:GetEditModePreviewIconCount()) or self:GetIconCount()
+  local layout = (addon.GetActionTrackerLayout and addon:GetActionTrackerLayout()) or "HORIZONTAL"
+  local rowLen = IconRowWidth(count) -- icon row long-axis length
+
+  if layout == "VERTICAL" then
+    -- Labels are narrow stacked glyph columns (mods left; name inner + keybind outer on
+    -- the right), so the frame stays narrow. Text is centred within its (invisible)
+    -- label frame, so only the tracker frame size matters here. Height is the icon
+    -- column plus padding.
+    local colW = uiShared.VERTICAL_LABEL_W or 24
+    local gap = uiShared.GAP_ICONS_MODS
+    local rowHalfX = uiShared.ICON_SIZE * 0.5
+    local innerX = rowHalfX + gap + (colW * 0.5)
+    local halfW = (innerX + colW + 2) + (colW * 0.5) -- out to the keybind (outer) column edge
+    local w = Clamp(2 * halfW + uiShared.PAD_X * 2, uiShared.MIN_W, uiShared.MAX_W)
+    local frameW = PS(w)
+    local colH = math.max(rowLen, (uiShared.NAME_H * 2) + 4)
+    local frameH = PS(uiShared.PAD_TOP + colH + uiShared.PAD_BOTTOM)
+
+    local sizeSig = table.concat({ "V", tostring(frameW), tostring(frameH), tostring(count) }, "|")
+    if ui._lastResizeSig ~= sizeSig then
+      ui._lastResizeSig = sizeSig
+      ui:SetSize(frameW, frameH)
+      UpdateActionTrackerContentFrame(ui)
+      self:ApplyAllElementPositions()
+      self:UpdateActionTrackerMoveMarker()
+    else
+      UpdateActionTrackerIconRowAnchor(ui)
+    end
+    return
+  end
+
   local nameW = (ui.nameText:GetStringWidth() or 0) + uiShared.PAD_X * 2
   local keybindW = (ui.keybindText and ui.keybindText:GetStringWidth() or 0) + uiShared.PAD_X * 2
-  local iconW = IconRowWidth(count) + uiShared.PAD_X * 2
+  -- Icon block extent: horizontal row is wide x ICON_SIZE; vertical column is
+  -- ICON_SIZE wide x rowLen tall.
+  local iconBlockW = ((layout == "VERTICAL") and uiShared.ICON_SIZE or rowLen) + uiShared.PAD_X * 2
+  local iconBlockH = (layout == "VERTICAL") and rowLen or uiShared.ICON_SIZE
   local stableTextW = math.max(nameW, keybindW, uiShared.TEXT_W + uiShared.PAD_X * 2)
   ui._stableTextWidth = math.max(ui._stableTextWidth or 0, stableTextW)
-  local w = Clamp(math.max(ui._stableTextWidth or stableTextW, iconW, uiShared.MIN_W), uiShared.MIN_W, uiShared.MAX_W)
+  local w = Clamp(math.max(ui._stableTextWidth or stableTextW, iconBlockW, uiShared.MIN_W), uiShared.MIN_W, uiShared.MAX_W)
   local innerW = PS(w - (uiShared.PAD_X * 2))
   local frameW = PS(w)
-  local h = uiShared.PAD_TOP + uiShared.NAME_H + uiShared.GAP_NAME_ICONS + uiShared.ICON_SIZE + uiShared.GAP_ICONS_MODS + uiShared.MODS_H + uiShared.PAD_BOTTOM
+  local h = uiShared.PAD_TOP + uiShared.NAME_H + uiShared.GAP_NAME_ICONS + iconBlockH + uiShared.GAP_ICONS_MODS + uiShared.MODS_H + uiShared.PAD_BOTTOM
   local frameH = PS(h)
 
   local sizeSig = table.concat({ tostring(innerW), tostring(frameW), tostring(frameH), tostring(count), tostring(ui._stableTextWidth or stableTextW) }, "|")
@@ -762,8 +996,8 @@ function UI:BuildMainFrame()
   ui._combatState = false
 
   ui:SetBackdrop({
-    bgFile   = "Interface\\Buttons\\WHITE8x8",
-    edgeFile = "Interface\\Buttons\\WHITE8x8",
+    bgFile   = WHITE8X8,
+    edgeFile = WHITE8X8,
     edgeSize = math.max(1, (addon:GetBorderThickness() or 0) > 0 and addon:GetBorderThickness() or 1),
     insets   = { left = 0, right = 0, top = 0, bottom = 0 }
   })
@@ -809,7 +1043,9 @@ function UI:BuildMainFrame()
   ui.modCtrl:SetJustifyH("CENTER")
   ui.modCtrl:SetText("CTRL")
 
-  ui.modShift:SetWidth(PS(uiShared.ICON_SIZE + 18))
+  -- modShift is the single combined modifier readout (e.g. "RShift+LCtrl"); make it
+  -- wide enough to hold the full string and centre it. modAlt/modCtrl are unused.
+  ui.modShift:SetWidth(PS(uiShared.TEXT_W))
   ui.modAlt:SetWidth(PS(uiShared.ICON_SIZE + 10))
   ui.modCtrl:SetWidth(PS(uiShared.ICON_SIZE + 10))
 

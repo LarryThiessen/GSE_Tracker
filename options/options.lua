@@ -12,6 +12,7 @@ local Options = ns.Options
 local uiShared = addon._ui or {}
 local Constants = (ns.Utils and ns.Utils.Constants) or addon.Constants or {}
 local optionsModule = Options
+local WHITE8X8 = (Constants and Constants.TEXTURE_WHITE8X8) or "Interface/Buttons/WHITE8x8"
 
 local MIN_W = optionsModule.MIN_W
 local MIN_H = optionsModule.MIN_H
@@ -24,9 +25,9 @@ local FOOTER_H = optionsModule.FOOTER_H
 local CONTROL_TRACK_W = optionsModule.CONTROL_TRACK_W
 local CONTROL_TOTAL_W = optionsModule.CONTROL_TOTAL_W
 local ADDON_ICON = "Interface\\AddOns\\GSE_Tracker\\media\\GSE_Tracker.png"
-local DISCORD_ICON = "Interface\\AddOns\\GSE_Tracker\\media\\discord_white.tga"
-local PATREON_ICON = "Interface\\AddOns\\GSE_Tracker\\media\\patreon_white.tga"
-local KOFI_ICON = "Interface\\AddOns\\GSE_Tracker\\media\\kofi_symbol.png"
+local DISCORD_ICON = "Interface\\AddOns\\GSE_Tracker\\media\\Discord-Logo.png"
+local PATREON_ICON = "Interface\\AddOns\\GSE_Tracker\\media\\patreon.png"
+local KOFI_ICON = "Interface\\AddOns\\GSE_Tracker\\media\\kofi_s_logo_nolabel.png"
 
 local ensureDatabase = optionsModule.EnsureDB
 local clampValue = optionsModule.Clamp
@@ -461,6 +462,8 @@ end
 function Options:InitOptions()
   if self.settingsWindow then return end
   ensureDatabase()
+  if optionsModule.ApplyActiveSkinPalette then optionsModule.ApplyActiveSkinPalette() end
+  local nativeSkin = (optionsModule.IsNativeSkin and optionsModule.IsNativeSkin()) or false
 
   local frame = _G.GSE_TrackerSettingsWindow
   if frame then
@@ -468,7 +471,7 @@ function Options:InitOptions()
     return
   end
 
-  frame = API.CreateFrame("Frame", "GSE_TrackerSettingsWindow", UIParent, "BackdropTemplate")
+  frame = API.CreateFrame("Frame", "GSE_TrackerSettingsWindow", UIParent, nativeSkin and "ButtonFrameTemplate" or "BackdropTemplate")
   self.settingsWindow = frame
   frame:SetSize(DEFAULT_W, DEFAULT_H)
   frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
@@ -479,14 +482,33 @@ function Options:InitOptions()
   frame:RegisterForDrag("LeftButton")
   frame:SetFrameStrata("DIALOG")
   frame:SetFrameLevel(40)
-  frame:SetBackdrop({
-    bgFile = "Interface\\Buttons\\WHITE8x8",
-    edgeFile = "Interface\\Buttons\\WHITE8x8",
-    edgeSize = 2,
-    insets = { left = 0, right = 0, top = 0, bottom = 0 },
-  })
-  frame:SetBackdropColor(0.025, 0.03, 0.035, 0.98)
-  styleWindowBorder(frame)
+  if nativeSkin then
+    -- Genuine Blizzard window chrome: gold portrait border, title bar, native close.
+    local nativeTitle = (API.GetAddOnMetadata and API.GetAddOnMetadata(addon.name, "Title")) or uiShared.ADDON_DISPLAY_NAME or "GSE Tracker"
+    if frame.SetTitle then frame:SetTitle(nativeTitle) end
+    if frame.SetPortraitToAsset then
+      frame:SetPortraitToAsset(ADDON_ICON)
+    elseif frame.portrait and frame.portrait.SetTexture then
+      frame.portrait:SetTexture(ADDON_ICON)
+    end
+    if frame.CloseButton then frame.closeButton = frame.CloseButton end
+  else
+    frame:SetBackdrop({
+      bgFile = WHITE8X8,
+      edgeFile = WHITE8X8,
+      edgeSize = 2,
+      insets = { left = 0, right = 0, top = 0, bottom = 0 },
+    })
+    if optionsModule.StyleWindowBackground then
+      optionsModule.StyleWindowBackground(frame, 0.98)
+    else
+      frame:SetBackdropColor(0.025, 0.03, 0.035, 0.98)
+    end
+    styleWindowBorder(frame)
+  end
+  -- Children anchor to the inset area in Native (clears the gold border + title
+  -- bar); to the full frame in Modern.
+  local contentRoot = (nativeSkin and frame.Inset) or frame
   frame:Hide()
   table.insert(UISpecialFrames, "GSE_TrackerSettingsWindow")
 
@@ -543,23 +565,25 @@ function Options:InitOptions()
     )
   end
 
-  local frameGlow = frame:CreateTexture(nil, "BACKGROUND")
-  frameGlow:SetTexture("Interface\\Buttons\\WHITE8x8")
-  frameGlow:SetPoint("TOPLEFT", frame, "TOPLEFT", 1, -1)
-  frameGlow:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -1, 1)
-  frameGlow:SetVertexColor(classR, classG, classB, 0.012)
-  frame.frameGlow = frameGlow
+  if not nativeSkin then
+    local frameGlow = frame:CreateTexture(nil, "BACKGROUND")
+    frameGlow:SetTexture(WHITE8X8)
+    frameGlow:SetPoint("TOPLEFT", frame, "TOPLEFT", 1, -1)
+    frameGlow:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -1, 1)
+    frameGlow:SetVertexColor(classR, classG, classB, 0.012)
+    frame.frameGlow = frameGlow
+  end
 
   local sidebar = createBackdrop(frame, 0.98, 1)
   frame.sidebar = sidebar
-  sidebar:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
-  sidebar:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, 0)
+  sidebar:SetPoint("TOPLEFT", contentRoot, "TOPLEFT", 0, 0)
+  sidebar:SetPoint("BOTTOMLEFT", contentRoot, "BOTTOMLEFT", 0, 0)
   sidebar:SetWidth(SIDEBAR_W)
   sidebar:SetBackdropColor(0.025, 0.03, 0.035, 0.98)
   sidebar:SetBackdropBorderColor(0.06, 0.06, 0.06, 1)
 
   local sidebarGlow = sidebar:CreateTexture(nil, "BORDER")
-  sidebarGlow:SetTexture("Interface\\Buttons\\WHITE8x8")
+  sidebarGlow:SetTexture(WHITE8X8)
   sidebarGlow:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 1, -1)
   sidebarGlow:SetPoint("TOPRIGHT", sidebar, "TOPRIGHT", -1, -1)
   sidebarGlow:SetHeight(40)
@@ -568,7 +592,7 @@ function Options:InitOptions()
 
   local sidebarDivider = frame:CreateTexture(nil, "ARTWORK")
   frame.sidebarDivider = sidebarDivider
-  sidebarDivider:SetTexture("Interface\\Buttons\\WHITE8x8")
+  sidebarDivider:SetTexture(WHITE8X8)
   sidebarDivider:SetPoint("TOPLEFT", sidebar, "TOPRIGHT", 0, -1)
   sidebarDivider:SetPoint("BOTTOMLEFT", sidebar, "BOTTOMRIGHT", 0, 1)
   sidebarDivider:SetWidth(1)
@@ -620,7 +644,7 @@ function Options:InitOptions()
 
   local brandDivider = frame:CreateTexture(nil, "BORDER")
   frame.brandDivider = brandDivider
-  brandDivider:SetTexture("Interface\\Buttons\\WHITE8x8")
+  brandDivider:SetTexture(WHITE8X8)
   brandDivider:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 10, -44)
   brandDivider:SetPoint("TOPRIGHT", sidebar, "TOPRIGHT", -10, -44)
   brandDivider:SetHeight(1)
@@ -644,7 +668,7 @@ function Options:InitOptions()
 
   local navFooter = sidebar:CreateTexture(nil, "BORDER")
   frame.navFooter = navFooter
-  navFooter:SetTexture("Interface\\Buttons\\WHITE8x8")
+  navFooter:SetTexture(WHITE8X8)
   navFooter:SetPoint("TOPLEFT", navPanel, "BOTTOMLEFT", 0, -16)
   navFooter:SetPoint("TOPRIGHT", navPanel, "BOTTOMRIGHT", 0, -16)
   navFooter:SetHeight(1)
@@ -677,7 +701,7 @@ function Options:InitOptions()
     overlay:Hide()
 
     local shade = overlay:CreateTexture(nil, "BACKGROUND")
-    shade:SetTexture("Interface\\Buttons\\WHITE8x8")
+    shade:SetTexture(WHITE8X8)
     shade:SetAllPoints(overlay)
     shade:SetVertexColor(0, 0, 0, 0.68)
     overlay.shade = shade
@@ -691,7 +715,7 @@ function Options:InitOptions()
     panel:SetBackdropBorderColor(0.12, 0.12, 0.12, 1)
 
     local header = panel:CreateTexture(nil, "BORDER")
-    header:SetTexture("Interface\\Buttons\\WHITE8x8")
+    header:SetTexture(WHITE8X8)
     header:SetPoint("TOPLEFT", panel, "TOPLEFT", 1, -1)
     header:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -1, -1)
     header:SetHeight(30)
@@ -781,7 +805,7 @@ function Options:InitOptions()
     overlay.hint = hint
 
     local footerLine = panel:CreateTexture(nil, "BORDER")
-    footerLine:SetTexture("Interface\\Buttons\\WHITE8x8")
+    footerLine:SetTexture(WHITE8X8)
     footerLine:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 16, 44)
     footerLine:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -16, 44)
     footerLine:SetHeight(1)
@@ -889,6 +913,14 @@ function Options:InitOptions()
       if btn._gseText and btn._gseText.IsShown and btn._gseText:IsShown() then
         btn._gseText:SetTextColor(1, 1, 1, 1)
       end
+      -- Tooltip: name the link and show where it goes.
+      if (label and label ~= "") or (url and url ~= "") then
+        GameTooltip:SetOwner(btn, "ANCHOR_RIGHT")
+        if label and label ~= "" then GameTooltip:SetText(label, 1, 0.82, 0) end
+        if url and url ~= "" then GameTooltip:AddLine(url, 0.8, 0.8, 0.8, true) end
+        GameTooltip:AddLine("Click to open in your browser", 0.6, 0.8, 1, true)
+        GameTooltip:Show()
+      end
     end)
 
     button:SetScript("OnLeave", function(btn)
@@ -901,6 +933,7 @@ function Options:InitOptions()
       if btn._gseText and btn._gseText.IsShown and btn._gseText:IsShown() then
         btn._gseText:SetTextColor(0.92, 0.93, 0.96, 0.82)
       end
+      GameTooltip:Hide()
     end)
 
     button:SetScript("OnClick", function()
@@ -910,9 +943,9 @@ function Options:InitOptions()
     return button
   end
 
-  local discordButton = CreateSocialLinkButton(socialLinksRow, DISCORD_ICON, nil, "Discord", "https://discord.gg/vPYXyBgMBW")
-  local patreonButton = CreateSocialLinkButton(socialLinksRow, PATREON_ICON, nil, "Patreon", "https://www.patreon.com/cw/Artseeker_")
-  local kofiButton = CreateSocialLinkButton(socialLinksRow, KOFI_ICON, nil, "Ko-Fi", "https://ko-fi.com/artseeker")
+  local discordButton = CreateSocialLinkButton(socialLinksRow, DISCORD_ICON, nil, "Discord", "https://discord.gg/gseunited")
+  local patreonButton = CreateSocialLinkButton(socialLinksRow, PATREON_ICON, nil, "Patreon", "https://www.patreon.com/c/ScaryLarryGames646")
+  local kofiButton = CreateSocialLinkButton(socialLinksRow, KOFI_ICON, nil, "Ko-Fi", "https://ko-fi.com/scarylarrygames")
   frame.discordButton = discordButton
   frame.patreonButton = patreonButton
   frame.kofiButton = kofiButton
@@ -924,12 +957,12 @@ function Options:InitOptions()
   local mainPanel = createBackdrop(frame, 0.95, 1)
   frame.mainPanel = mainPanel
   mainPanel:SetPoint("TOPLEFT", sidebar, "TOPRIGHT", 0, 0)
-  mainPanel:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
+  mainPanel:SetPoint("BOTTOMRIGHT", contentRoot, "BOTTOMRIGHT", 0, 0)
   mainPanel:SetBackdropColor(0.025, 0.03, 0.035, 0.98)
   mainPanel:SetBackdropBorderColor(0.18, 0.18, 0.18, 1)
 
   local mainInner = mainPanel:CreateTexture(nil, "BORDER")
-  mainInner:SetTexture("Interface\\Buttons\\WHITE8x8")
+  mainInner:SetTexture(WHITE8X8)
   mainInner:SetPoint("TOPLEFT", mainPanel, "TOPLEFT", 1, -1)
   mainInner:SetPoint("BOTTOMRIGHT", mainPanel, "BOTTOMRIGHT", -1, 1)
   mainInner:SetVertexColor(0.025, 0.03, 0.035, 0.98)
@@ -978,29 +1011,31 @@ function Options:InitOptions()
     if addon.RefreshAssistedHighlight then addon:RefreshAssistedHighlight(true) end
   end)
 
-  local close = API.CreateFrame("Button", nil, frame, "UIPanelCloseButton")
-  frame.closeButton = close
-  close:SetPoint("TOPRIGHT", mainPanel, "TOPRIGHT", -10, -8)
-  close:SetFrameLevel(frame:GetFrameLevel() + 8)
-  optionsModule.StyleCloseButton(close)
+  if not nativeSkin then
+    local close = API.CreateFrame("Button", nil, frame, "UIPanelCloseButton")
+    frame.closeButton = close
+    close:SetPoint("TOPRIGHT", mainPanel, "TOPRIGHT", -10, -8)
+    close:SetFrameLevel(frame:GetFrameLevel() + 8)
+    optionsModule.StyleCloseButton(close)
 
-  local title = frame:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-  frame.titleText = title
-  title:SetPoint("TOPLEFT", mainPanel, "TOPLEFT", MAIN_PAD, -12)
-  title:SetText((API.GetAddOnMetadata and API.GetAddOnMetadata(addon.name, "Title")) or uiShared.ADDON_DISPLAY_NAME or "GSE Tracker")
+    local title = frame:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    frame.titleText = title
+    title:SetPoint("TOPLEFT", mainPanel, "TOPLEFT", MAIN_PAD, -12)
+    title:SetText((API.GetAddOnMetadata and API.GetAddOnMetadata(addon.name, "Title")) or uiShared.ADDON_DISPLAY_NAME or "GSE Tracker")
 
-  local titleSubtitle = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-  frame.titleSubtitle = titleSubtitle
-  titleSubtitle:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -4)
-  titleSubtitle:SetTextColor(0.48, 0.50, 0.56)
-  titleSubtitle:SetText("Tracker control surface")
+    local titleSubtitle = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    frame.titleSubtitle = titleSubtitle
+    titleSubtitle:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -4)
+    titleSubtitle:SetTextColor(0.48, 0.50, 0.56)
+    titleSubtitle:SetText("Tracker control surface")
 
-  local headerLine = frame:CreateTexture(nil, "BORDER")
-  frame.headerLine = headerLine
-  headerLine:SetColorTexture(1, 1, 1, 0.05)
-  headerLine:SetPoint("TOPLEFT", mainPanel, "TOPLEFT", MAIN_PAD, -(HEADER_H - 2))
-  headerLine:SetPoint("TOPRIGHT", mainPanel, "TOPRIGHT", -MAIN_PAD, -(HEADER_H - 2))
-  headerLine:SetHeight(1)
+    local headerLine = frame:CreateTexture(nil, "BORDER")
+    frame.headerLine = headerLine
+    headerLine:SetColorTexture(1, 1, 1, 0.05)
+    headerLine:SetPoint("TOPLEFT", mainPanel, "TOPLEFT", MAIN_PAD, -(HEADER_H - 2))
+    headerLine:SetPoint("TOPRIGHT", mainPanel, "TOPRIGHT", -MAIN_PAD, -(HEADER_H - 2))
+    headerLine:SetHeight(1)
+  end
 
   local contentPanel = createBackdrop(mainPanel, 0.96, 1)
   frame.contentPanel = contentPanel
@@ -1090,9 +1125,15 @@ function Options:InitOptions()
 
   local showOptions = {
     { text = Constants.MODE_ALWAYS or "Always", value = Constants.MODE_ALWAYS or "Always" },
-    { text = "Has Target", value = "HasTarget" },
+    { text = "Has Harm Target", value = "HasTarget" },
     { text = "In Combat", value = "InCombat" },
     { text = "Never", value = "Never" },
+  }
+
+  local skinOptions = {
+    { text = "Auto", value = "AUTO" },
+    { text = "Modern", value = "MODERN" },
+    { text = "Native", value = "NATIVE" },
   }
 
   local shapeOptions = {
@@ -1128,13 +1169,15 @@ function Options:InitOptions()
   local scaleHolder, sScale = createSlider(generalSection, "GSE_TrackerCustomScaleSlider", 0.70, 1.80, 0.01, CONTROL_TRACK_W)
   if sScale.inputBox then sScale.inputBox:Show() end
   local showHolder, ddShowWhen = createDropdown(generalSection, "GSE_TrackerCustomShowWhenDropDown", CONTROL_TOTAL_W)
+  local skinHolder, ddSkin = createDropdown(generalSection, "GSE_TrackerSkinDropDown", CONTROL_TOTAL_W)
   local borderThickHolder, sBorderThickness = createSlider(displaySection, "GSE_TrackerCustomBorderThicknessSlider", 0, 5, 1, CONTROL_TRACK_W)
   local countHolder, sIconCount = createSlider(displaySection, "GSE_TrackerCustomIconCountSlider", 4, 8, 1, CONTROL_TRACK_W)
-  local gapHolder, sIconGap = createSlider(displaySection, "GSE_TrackerCustomIconGapSlider", 1, 5, 1, CONTROL_TRACK_W)
+  local gapHolder, sIconGap = createSlider(displaySection, "GSE_TrackerCustomIconGapSlider", 0, 5, 1, CONTROL_TRACK_W)
 
   addInlineCheckRow(generalSection, "Enable", cbEnable)
   addInlineCheckRow(generalSection, "Lock", cbLock)
   addRow(generalSection, "Show", showHolder)
+  addRow(generalSection, "Skin", skinHolder)
   addRow(generalSection, "Scale", scaleHolder)
   addInlineCheckRow(generalSection, "Performance Mode", cbPerformance)
   addRow(generalSection, "X Offset", actionTrackerXHolder)
@@ -1200,13 +1243,13 @@ function Options:InitOptions()
   }
   local assistedHighlightShowOptions = {
     { text = Constants.MODE_ALWAYS or "Always", value = Constants.MODE_ALWAYS or "Always" },
-    { text = "Has Target", value = Constants.MODE_HAS_TARGET or "HasTarget" },
+    { text = "Has Harm Target", value = Constants.MODE_HAS_TARGET or "HasTarget" },
     { text = "In Combat", value = Constants.MODE_IN_COMBAT or "InCombat" },
     { text = "Never", value = Constants.MODE_NEVER or "Never" },
   }
   local combatMarkerShowOptions = {
     { text = Constants.MODE_ALWAYS or "Always", value = Constants.MODE_ALWAYS or "Always" },
-    { text = "Has Target", value = Constants.MODE_HAS_TARGET or "HasTarget" },
+    { text = "Has Harm Target", value = Constants.MODE_HAS_TARGET or "HasTarget" },
     { text = "In Combat", value = Constants.MODE_IN_COMBAT or "InCombat" },
     { text = "Never", value = Constants.MODE_NEVER or "Never" },
   }
@@ -1379,6 +1422,21 @@ function Options:InitOptions()
       addon:SetShowWhen(value)
       setDropdownValue(ddShowWhen, value, text)
       ApplyOptionEffect("visibility")
+    end)
+
+  initSimpleDropdown(ddSkin, skinOptions,
+    function() return (addon.GetSkin and addon:GetSkin()) or "AUTO" end,
+    function(value, text)
+      ensureDatabase()
+      if addon.SetSkin then addon:SetSkin(value) end
+      setDropdownValue(ddSkin, value, text)
+      -- Update the live palette now (hover states pick it up immediately); a
+      -- /reload re-paints every already-built widget with the new skin.
+      if optionsModule.ApplyActiveSkinPalette then optionsModule.ApplyActiveSkinPalette() end
+      local prefix = (Constants and Constants.ADDON_DISPLAY_NAME) or "GSE: Tracker"
+      if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+        DEFAULT_CHAT_FRAME:AddMessage(prefix .. "|cffffffff Skin set to " .. tostring(text) .. " \226\128\148 type /reload to fully apply.|r")
+      end
     end)
 
   initSimpleDropdown(ddIndicatorShape, shapeOptions,
@@ -1620,7 +1678,7 @@ function Options:InitOptions()
     if sIconGap._gseApplyingFromInput or refreshing then return end
     ensureDatabase()
 
-    local value = clampValue(math.floor(v + 0.5), 1, 5)
+    local value = clampValue(math.floor(v + 0.5), 0, 5)
     setSliderBoxValue(sIconGap, value)
     if addon:GetIconGap() == value then return end
     addon:SetIconGap(value)
@@ -1633,7 +1691,7 @@ function Options:InitOptions()
       addon:SetIconGap(value)
       ApplyOptionEffect("iconLayout")
     end,
-    1, 5)
+    0, 5)
 
   sBorderThickness:SetScript("OnValueChanged", function(_, v)
     if sBorderThickness._gseApplyingFromInput or refreshing then return end
@@ -1912,11 +1970,9 @@ function Options:InitOptions()
     return button
   end
 
-  local gseBtn = CreateFooterButton(118, "Open GSE", "BOTTOMLEFT", mainPanel, "BOTTOMLEFT", MAIN_PAD, 10)
-  local sequenceEditorBtn = CreateFooterButton(144, "Sequence Editor", "LEFT", gseBtn, "RIGHT", 10, 0)
+  -- No GSE launcher buttons: GSE_Tracker is standalone and connects to the GSE
+  -- addon ONLY via gse_bridge.lua.
   local reloadBtn = CreateFooterButton(102, "Reload", "BOTTOMRIGHT", mainPanel, "BOTTOMRIGHT", -MAIN_PAD, 10)
-  frame.gseButton = gseBtn
-  frame.sequenceEditorButton = sequenceEditorBtn
   frame.reloadButton = reloadBtn
 
   local resize = API.CreateFrame("Button", nil, frame)
@@ -1926,7 +1982,7 @@ function Options:InitOptions()
   resize:SetHitRectInsets(-10, 0, 0, -10)
   do
     local triangle = resize:CreateTexture(nil, "OVERLAY")
-    triangle:SetTexture("Interface\\Buttons\\WHITE8x8")
+    triangle:SetTexture(WHITE8X8)
     triangle:SetSize(10, 10)
     triangle:SetPoint("BOTTOMRIGHT", resize, "BOTTOMRIGHT", -2, 2)
     triangle:SetVertexColor(0.4, 0.4, 0.4, 1)
@@ -2308,26 +2364,6 @@ function Options:InitOptions()
       ChatEdit_SendText(editBox, 0)
     end
   end
-
-  gseBtn:SetScript("OnClick", function()
-    SendChatCommand("/gse")
-  end)
-
-  sequenceEditorBtn:SetScript("OnClick", function()
-    local gse = _G.GSE
-    if gse then
-      local guiReady = true
-      if gse.CheckGUI then
-        guiReady = gse.CheckGUI()
-      end
-      if guiReady and gse.ShowSequences then
-        gse.ShowSequences()
-        return
-      end
-    end
-
-    SendChatCommand("/gse")
-  end)
 
   reloadBtn:SetScript("OnClick", function()
     ReloadUI()

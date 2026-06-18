@@ -92,7 +92,10 @@ local function GetCenteredOffsets(frame, parent)
   if frame.GetPoint then
     local point, anchor, relativePoint, x, y = frame:GetPoint(1)
     if point == "CENTER" and relativePoint == "CENTER" and anchor == parent then
-      return ClampCenteredOffsetsToScreen(frame, parent, ParentUnitsToCanonicalPixels(x, parent), ParentUnitsToCanonicalPixels(y, parent))
+      -- Inverse of the frame-scale compensation in ApplyCenteredOffsets.
+      local fs = (frame.GetScale and frame:GetScale()) or 1
+      if not fs or fs == 0 then fs = 1 end
+      return ClampCenteredOffsetsToScreen(frame, parent, ParentUnitsToCanonicalPixels(x, parent) * fs, ParentUnitsToCanonicalPixels(y, parent) * fs)
     end
   end
 
@@ -117,6 +120,13 @@ local function ApplyCenteredOffsets(frame, parent, x, y)
   local nx, ny = ClampCenteredOffsetsToScreen(frame, parent, x, y)
   local px = CanonicalPixelsToParentUnits(nx, parent)
   local py = CanonicalPixelsToParentUnits(ny, parent)
+  -- SetPoint offsets are measured in the frame's OWN scale, so divide by it to
+  -- keep the on-screen position independent of the addon Scale -- the tracker
+  -- then scales from its centre instead of drifting up/down.
+  local fs = (frame.GetScale and frame:GetScale()) or 1
+  if not fs or fs == 0 then fs = 1 end
+  px = px / fs
+  py = py / fs
   if uiShared.SetPointIfChanged then
     uiShared.SetPointIfChanged(frame, "CENTER", parent, "CENTER", px, py)
   else

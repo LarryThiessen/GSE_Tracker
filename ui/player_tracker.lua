@@ -35,13 +35,18 @@ local function GetClassColorRGB()
 end
 
 local function GetResolvedMarkerColor()
-  if addon.GetCombatMarkerUseClassColor and addon:GetCombatMarkerUseClassColor() then
+  -- Tri-state colour mode (mirrors the Pressed Indicator): "class" / "custom" / "none".
+  -- "none" = no tint (1,1,1) so image markers show their own colours.
+  local mode = (addon.GetCombatMarkerColorMode and addon:GetCombatMarkerColorMode()) or "none"
+  if mode == "class" then
     return GetClassColorRGB()
+  elseif mode == "custom" then
+    if addon.GetCombatMarkerColor then
+      return addon:GetCombatMarkerColor()
+    end
+    return 1.00, 0.82, 0.20
   end
-  if addon.GetCombatMarkerColor then
-    return addon:GetCombatMarkerColor()
-  end
-  return 1.00, 0.82, 0.20
+  return 1, 1, 1
 end
 
 local function ParentUnitsFromCanonical(value, parent)
@@ -95,17 +100,17 @@ local function SetTextureBar(tex, parent, width, height, rotation, x, y, r, g, b
 end
 
 local function GetCenteredAnchorConfig()
-  local defaultPoint = C.COMBAT_MARKER_DEFAULT_POINT or { "CENTER", "UIParent", "CENTER", 0, 120 }
-  local point = addon.GetCombatMarkerAnchorPoint and addon:GetCombatMarkerAnchorPoint() or defaultPoint[1] or "CENTER"
-  local x = tonumber(defaultPoint[4]) or 0
-  local y = tonumber(defaultPoint[5]) or 120
-  if addon.GetCombatMarkerOffset then
-    x, y = addon:GetCombatMarkerOffset()
-  elseif addon.GetCombatMarkerPoint then
-    local _, _, _, px, py = addon:GetCombatMarkerPoint()
-    x, y = px, py
-  end
-  return point, tonumber(x) or 0, tonumber(y) or 120
+  -- The Center Marker is locked to the Meters readout's centre: it is NOT independently
+  -- positionable -- it rides the Meters anchor and moves only when the Meters text moves.
+  -- So always centre it (0,0) on its parent; the stored drag offset is intentionally ignored.
+  return "CENTER", 0, 0
+end
+
+-- The Center Marker is locked to the Meters readout: anchor it to MetersAnchor's centre
+-- (not UIParent) so it stays dead-centre on the meters area and follows it when the user
+-- moves the Meters Position X/Y. Falls back to UIParent before the meters engine exists.
+local function GetMarkerParent()
+  return _G.MetersAnchor or UIParent
 end
 
 local function BuildCircleBars(size, thickness)
@@ -162,6 +167,17 @@ local function GetLayoutBars(symbol, size, thickness)
   }
 end
 
+-- Lazily create the single texture used for image (media) symbols. Centred on the
+-- marker frame; sized/shown by ApplyMarkerStyleToFrame when an image symbol is active.
+local function EnsureMarkerImage(frame)
+  if not frame.imageSymbol then
+    frame.imageSymbol = frame:CreateTexture(nil, "ARTWORK")
+    frame.imageSymbol:SetPoint("CENTER", frame, "CENTER", 0, 0)
+    frame.imageSymbol:Hide()
+  end
+  return frame.imageSymbol
+end
+
 local function EnsureMarkerBars(frame)
   frame.borderBars = frame.borderBars or {}
   frame.fillBars = frame.fillBars or {}
@@ -201,6 +217,106 @@ local function CombatMarkerDragOnUpdate(selfFrame)
   end
 end
 
+-- Shared symbol renderer used by BOTH the combat marker and the pressed indicator so
+-- they offer the same symbol/shape set. Draws either a media image symbol (full colour,
+-- no tint) or a procedural shape (coloured bars tinted r,g,b,a) onto `frame`, sized to
+-- `size`. The caller owns frame:SetSize and positioning.
+-- Resolve the texture (+ texcoords) for a ported Meters "dynamic" marker symbol.
+-- Bullseye is a fixed image; Class/Specialization resolve per-player at draw time.
+-- Returns texture, left, right, top, bottom (or nil for an unknown symbol).
+local function ResolveDynamicMarkerTexture(symbol)
+  if symbol == "Class" then
+    local _, classFile = UnitClass("player")
+    local coords = classFile and CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[classFile]
+    if coords then
+      return C.MARKER_CLASS_TEXTURE, coords[1], coords[2], coords[3], coords[4]
+    end
+    return "Interface\\Icons\\INV_Misc_QuestionMark", 0, 1, 0, 1
+  elseif symbol == "Specialization" then
+    local icon
+    if GetSpecialization and GetSpecializationInfo then
+      local idx = GetSpecialization()
+      if idx then local _, _, _, i = GetSpecializationInfo(idx); icon = i end
+    end
+    if icon then return icon, 0.07, 0.93, 0.07, 0.93 end
+    return "Interface\\Icons\\INV_Misc_QuestionMark", 0, 1, 0, 1
+  end
+  return nil
+end
+
+function UI:DrawSymbolOnFrame(frame, symbol, size, thickness, borderSize, r, g, b, a)
+  if not frame then return end
+  EnsureMarkerBars(frame)
+
+  -- "None" (off) or "AHLight" (the AH engine mirrors its own icon here -- the combat
+  -- marker frame is just a positioned anchor): draw nothing.
+  if symbol == nil or symbol == "None" or symbol == "none" or symbol == "AHLight" then
+    for i = 1, MAX_BARS do
+      HideTexture(frame.fillBars[i])
+      HideTexture(frame.borderBars[i])
+    end
+    if frame.imageSymbol then frame.imageSymbol:Hide() end
+    return
+  end
+
+  size = math.max(2, tonumber(size) or 2)
+  thickness = math.max(1, tonumber(thickness) or 2)
+  borderSize = math.max(0, tonumber(borderSize) or 0)
+  a = tonumber(a) or 1
+  r, g, b = r or 1, g or 1, b or 1
+
+  -- Media image symbols (manifest) OR the ported Meters "dynamic" symbols
+  -- (Bullseye / Class / Specialization) render as a single texture in this frame --
+  -- so they follow the same centre/scale/show-when rule as every other marker.
+  local imagePath = C.COMBAT_MARKER_IMAGE_PATHS and C.COMBAT_MARKER_IMAGE_PATHS[symbol]
+  local tex, cl, cr, ct, cb
+  if imagePath then
+    tex, cl, cr, ct, cb = imagePath, 0, 1, 0, 1
+  elseif C.COMBAT_MARKER_DYNAMIC_VALID and C.COMBAT_MARKER_DYNAMIC_VALID[symbol] then
+    tex, cl, cr, ct, cb = ResolveDynamicMarkerTexture(symbol)
+  end
+  if tex then
+    for i = 1, MAX_BARS do
+      HideTexture(frame.fillBars[i])
+      HideTexture(frame.borderBars[i])
+    end
+    local img = EnsureMarkerImage(frame)
+    img:SetTexture(tex)
+    img:SetTexCoord(cl or 0, cr or 1, ct or 0, cb or 1)
+    -- Tintable images (white/greyscale, e.g. the crosshairs) follow the marker color;
+    -- full-colour art and dynamic Class/Spec icons render as-is.
+    if imagePath and C.COMBAT_MARKER_IMAGE_TINT and C.COMBAT_MARKER_IMAGE_TINT[symbol] then
+      img:SetVertexColor(r, g, b, a)
+    else
+      img:SetVertexColor(1, 1, 1, a)
+    end
+    img:SetSize(PixelSnap(size, frame), PixelSnap(size, frame))
+    img:Show()
+    return
+  end
+  if frame.imageSymbol then frame.imageSymbol:Hide() end
+
+  local bars = GetLayoutBars(symbol, size, thickness)
+  for i = 1, MAX_BARS do
+    local fill = frame.fillBars[i]
+    local border = frame.borderBars[i]
+    local bar = bars[i]
+    if bar then
+      local borderThick = math.max(bar.thick, bar.thick + (borderSize * 2))
+      local borderLength = bar.length + (borderSize * 2)
+      if borderSize > 0 then
+        SetTextureBar(border, frame, borderLength, borderThick, bar.rotation, bar.x, bar.y, 0, 0, 0, math.min(1, a * 0.95), "BACKGROUND", i)
+      else
+        HideTexture(border)
+      end
+      SetTextureBar(fill, frame, bar.length, bar.thick, bar.rotation, bar.x, bar.y, r, g, b, a, "OVERLAY", i)
+    else
+      HideTexture(fill)
+      HideTexture(border)
+    end
+  end
+end
+
 local function ApplyMarkerStyleToFrame(frame)
   if not frame then return end
 
@@ -216,10 +332,17 @@ local function ApplyMarkerStyleToFrame(frame)
   borderSize = Clamp(tonumber(borderSize) or 2, C.COMBAT_MARKER_MIN_BORDER_SIZE or 0, C.COMBAT_MARKER_MAX_BORDER_SIZE or 8)
   alpha = Clamp(tonumber(alpha) or 0.85, 0.05, 1.00)
 
+  -- Dynamic symbols (Class/Specialization) resolve their texture per-player, so fold
+  -- that into the cache key -- otherwise a spec change wouldn't redraw (same symbol).
+  local dynToken = ""
+  if C.COMBAT_MARKER_DYNAMIC_VALID and C.COMBAT_MARKER_DYNAMIC_VALID[symbol] then
+    dynToken = tostring((ResolveDynamicMarkerTexture(symbol)))
+  end
   local styleSig = table.concat({
     tostring(symbol), tostring(size), tostring(thickness), tostring(borderSize),
     string.format("%.3f", alpha),
     string.format("%.3f", r or 1), string.format("%.3f", g or 1), string.format("%.3f", b or 1),
+    dynToken,
   }, "|")
   if frame._combatMarkerStyleSig == styleSig then
     return
@@ -228,34 +351,24 @@ local function ApplyMarkerStyleToFrame(frame)
 
   frame:SetSize(PixelSnap(size, frame), PixelSnap(size, frame))
   frame:SetAlpha(1)
-
-  local bars = GetLayoutBars(symbol, size, thickness)
-  for i = 1, MAX_BARS do
-    local fill = frame.fillBars[i]
-    local border = frame.borderBars[i]
-    local bar = bars[i]
-    if bar then
-      local borderThick = math.max(bar.thick, bar.thick + (borderSize * 2))
-      local borderLength = bar.length + (borderSize * 2)
-      if borderSize > 0 then
-        SetTextureBar(border, frame, borderLength, borderThick, bar.rotation, bar.x, bar.y, 0, 0, 0, math.min(1, alpha * 0.95), "BACKGROUND", i)
-      else
-        HideTexture(border)
-      end
-      SetTextureBar(fill, frame, bar.length, bar.thick, bar.rotation, bar.x, bar.y, r, g, b, alpha, "OVERLAY", i)
-    else
-      HideTexture(fill)
-      HideTexture(border)
-    end
-  end
+  UI:DrawSymbolOnFrame(frame, symbol, size, thickness, borderSize, r, g, b, alpha)
 end
 
 local function ApplyMarkerPointToFrame(frame, parent, point, x, y)
   if not frame then return end
   parent = parent or UIParent
   x, y = ClampCanonicalOffsets(frame, parent, x, y)
-  local px = ParentUnitsFromCanonical(x, parent)
-  local py = ParentUnitsFromCanonical(y, parent)
+  -- The marker uses SetIgnoreParentScale(true), so its effective scale is 1 and a
+  -- SetPoint offset in parent units lands at the wrong screen distance -- the marker
+  -- then drifts off the cursor as you drag (moves cursorDelta / UIScale instead of
+  -- cursorDelta). Multiply by the parent's effective scale so on-screen movement
+  -- tracks the cursor 1:1 (mirrors the frame-scale compensation the action tracker
+  -- does in ApplyCenteredOffsets; the assisted highlight instead does not ignore
+  -- parent scale).
+  local s = (parent.GetEffectiveScale and parent:GetEffectiveScale()) or 1
+  if not s or s <= 0 then s = 1 end
+  local px = ParentUnitsFromCanonical(x, parent) * s
+  local py = ParentUnitsFromCanonical(y, parent) * s
 
   if uiShared.SetPointIfChanged then
     uiShared.SetPointIfChanged(frame, point, parent, "CENTER", px, py)
@@ -319,6 +432,18 @@ function UI:EnsureCombatMarker()
       end
     end)
   end
+  -- The marker follows the Meters frame's visibility (ShouldShowCombatMarker mirrors
+  -- MetersAnchor:IsShown()). Hook the anchor's show/hide so the marker re-evaluates the
+  -- instant the meters readout appears/disappears, not just on the next combat event.
+  local mAnchor = _G.MetersAnchor
+  if mAnchor and not mAnchor._gseMarkerVisibilityHook then
+    mAnchor._gseMarkerVisibilityHook = true
+    local function syncMarker()
+      if addon.ui and addon.ui.RefreshCombatMarker then addon.ui:RefreshCombatMarker() end
+    end
+    mAnchor:HookScript("OnShow", syncMarker)
+    mAnchor:HookScript("OnHide", syncMarker)
+  end
   self:ApplyCombatMarkerStrata(addon.combatMarkerFrame)
   return addon.combatMarkerFrame
 end
@@ -333,7 +458,7 @@ function UI:ApplyCombatMarkerPosition(frame, parent, point, x, y)
   if point == nil then
     point, x, y = GetCenteredAnchorConfig()
   end
-  ApplyMarkerPointToFrame(frame, parent or UIParent, point, x, y)
+  ApplyMarkerPointToFrame(frame, parent or GetMarkerParent(), point, x, y)
 end
 
 function UI:LayoutCombatMarkerPreview()
@@ -388,13 +513,11 @@ function UI:EndCombatMarkerDrag(commit)
 end
 
 function UI:CanDragCombatMarker()
-  local frame = addon and addon.combatMarkerFrame
-  if not frame then return false end
-  if not (addon.IsCombatMarkerEnabled and addon:IsCombatMarkerEnabled()) then return false end
-  if addon.GetCombatMarkerLocked and addon:GetCombatMarkerLocked() then return false end
-  if not IsEditingPlayerTrackerTab() then return false end
-  if API.InCombatLockdown and API.InCombatLockdown() then return false end
-  return frame:IsShown() and true or false
+  -- The Center Marker is no longer independently draggable: it is pinned to the Meters
+  -- centre and moves only when the Meters text is dragged. Returning false here also keeps
+  -- the marker mouse-disabled (RefreshCombatMarkerDragMouseState) so clicks fall through to
+  -- the Meters anchor underneath -- letting the user grab the Meters text where the marker sits.
+  return false
 end
 
 function UI:RefreshCombatMarkerDragMouseState()
@@ -430,7 +553,7 @@ function UI:SyncActiveCombatMarkerDragPosition()
 
   x, y = ClampCanonicalOffsets(frame, UIParent, x, y)
   addon:SetCombatMarkerPoint(point, C.UI_PARENT_NAME or "UIParent", C.ANCHOR_CENTER or "CENTER", x, y)
-  self:ApplyCombatMarkerPosition(frame, UIParent, point, x, y)
+  self:ApplyCombatMarkerPosition(frame, GetMarkerParent(), point, x, y)
 
   local settingsWindow = addon.settingsWindow
   if settingsWindow and settingsWindow.RefreshCombatMarkerControls then
@@ -440,34 +563,18 @@ function UI:SyncActiveCombatMarkerDragPosition()
 end
 
 function UI:ShouldShowCombatMarker(forceOverride)
-  if not (addon.IsCombatMarkerEnabled and addon:IsCombatMarkerEnabled()) then
-    return false
+  -- The Center Marker is pinned to the Meters readout's centre and has NO independent
+  -- enable/show of its own -- it simply follows the Meters frame's visibility: shown when
+  -- the Meters readout is shown, hidden otherwise. (forceOverride / editing-tab preview
+  -- still forces it visible so it can be seen while the options window is open.)
+  if forceOverride == true or IsEditingPlayerTrackerTab() then
+    return true
   end
-
-  local editingOverride = (forceOverride == true)
-    or IsEditingPlayerTrackerTab()
-
-  local showWhen = (addon.GetCombatMarkerShowWhen and addon:GetCombatMarkerShowWhen())
-    or (C.COMBAT_MARKER_DEFAULT_SHOW_WHEN or (C.MODE_IN_COMBAT or "InCombat"))
-
-  local ui = addon and addon.ui
-  local inCombat
-  if ui and ui._combatState ~= nil then
-    inCombat = (ui._combatState == true)
-  else
-    inCombat = (API.InCombatLockdown and API.InCombatLockdown()) and true or false
+  local anchor = _G.MetersAnchor
+  if anchor and anchor.IsShown then
+    return anchor:IsShown() and true or false
   end
-  local hasTarget = (API.UnitExists and API.UnitExists("target")) and true or false
-
-  if self.EvaluateVisibilityMode then
-    return self:EvaluateVisibilityMode(showWhen, inCombat, hasTarget, editingOverride)
-  end
-
-  if editingOverride then return true end
-  if showWhen == (C.MODE_NEVER or "Never") then return false end
-  if showWhen == (C.MODE_IN_COMBAT or "InCombat") then return inCombat end
-  if showWhen == (C.MODE_HAS_TARGET or "HasTarget") then return hasTarget end
-  return true
+  return false
 end
 
 function UI:RefreshCombatMarker(force)

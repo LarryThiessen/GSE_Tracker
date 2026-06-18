@@ -13,7 +13,7 @@ local styleWindowBorder = optionsModule.StyleWindowBorder
 
 local SHOW_TEXT = {
   Always = "Always",
-  HasTarget = "Has Target",
+  HasTarget = "Has Harm Target",
   InCombat = "In Combat",
   Never = "Never",
 }
@@ -143,6 +143,11 @@ function optionsModule.ApplyTargetedRefresh(effect, elementName, changeKind)
       if addon.ApplyAssistedHighlightBorder then addon:ApplyAssistedHighlightBorder() end
     else
       if addon.ApplyAssistedHighlightSize then addon:ApplyAssistedHighlightSize() end
+      -- The ShowWhen mode may have just changed to/from "Has Harm Target"; re-evaluate
+      -- whether PLAYER_TARGET_CHANGED needs to be (un)registered so the highlight tracks
+      -- target changes live even when no other area uses that mode (mirrors the
+      -- player-tracker effect path above).
+      if addon.UpdateEventSubscriptions then addon:UpdateEventSubscriptions() end
       if addon.RefreshAssistedHighlight then addon:RefreshAssistedHighlight(true) end
     end
   elseif effect == "element" then

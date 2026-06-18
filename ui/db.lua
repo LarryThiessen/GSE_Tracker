@@ -90,7 +90,11 @@ local function GetMinimapDefaults()
 end
 
 GetRuntimeDB = function()
-  local rawRef = _G.GSETrackerDB
+  -- Key the cache on the ACTIVE store via a READ-ONLY lookup. Calling SV:GetDB()
+  -- here (which self-assigns _G globals) on every call re-taints those globals;
+  -- because this runs inside Settings dropdown generators (shared Menu system),
+  -- that taint reaches the GameMenu and blocks Logout/action-bar grid. Read only.
+  local rawRef = (SV and SV.GetActiveDBRaw and SV:GetActiveDBRaw()) or _G.GSETrackerDB
   if rawRef ~= nil and rawRef == _cachedRawRef then
     return _cachedDB, _cachedGeneral, _cachedDisplay, _cachedFonts, _cachedFlags
   end
@@ -100,7 +104,7 @@ GetRuntimeDB = function()
   if SV and SV.EnsureDB then
     db = SV:EnsureDB()
   else
-    _G.GSETrackerDB = _G.GSETrackerDB or {}
+    if _G.GSETrackerDB == nil then _G.GSETrackerDB = {} end
     db = _G.GSETrackerDB
   end
 
@@ -119,7 +123,7 @@ GetRuntimeDB = function()
   EnsureTable(db, "combatMarker")
   EnsureTable(db, "assistedHighlight")
 
-  _cachedRawRef = _G.GSETrackerDB
+  _cachedRawRef = (SV and SV.GetActiveDBRaw and SV:GetActiveDBRaw()) or db
   _cachedDB = db
   _cachedGeneral = general
   _cachedDisplay = display
@@ -230,6 +234,51 @@ function Utils:SetActionTrackerUseClassColor(enabled)
   PersistRuntimeChange(db)
 end
 
+-- Name source for the tracker's title label: false (default) = the GSE sequence name
+-- as before; true = the most recently cast spell's name (shown the same way).
+function Utils:GetActionTrackerUseSpellName()
+  local _, _, display = GetRuntimeDB()
+  return display.useSpellName == true
+end
+
+function Utils:SetActionTrackerUseSpellName(enabled)
+  local db, _, display = GetRuntimeDB()
+  display.useSpellName = not not enabled
+  PersistRuntimeChange(db)
+end
+
+-- Whether the modifier readout shows the side prefix (L/R) before each key. Default
+-- true (e.g. "LShift+RCtrl"); false collapses to "Shift+Ctrl".
+function Utils:GetActionTrackerModkeySide()
+  local _, _, display = GetRuntimeDB()
+  return display.modkeySide ~= false
+end
+
+function Utils:SetActionTrackerModkeySide(enabled)
+  local db, _, display = GetRuntimeDB()
+  display.modkeySide = not not enabled
+  PersistRuntimeChange(db)
+end
+
+-- Corner/centre that the per-recent-icon keybind label anchors to (matches the
+-- Assisted Highlight keybind Location). Default TOPRIGHT (Blizzard HotKey style).
+local VALID_ACTIONBAR_KEYBIND_ANCHORS = { TOPLEFT = true, TOPRIGHT = true, BOTTOMLEFT = true, BOTTOMRIGHT = true, CENTER = true }
+
+function Utils:GetActionTrackerKeybindAnchor()
+  local _, _, display = GetRuntimeDB()
+  local v = tostring(display.keybindAnchor or "TOPRIGHT")
+  if not VALID_ACTIONBAR_KEYBIND_ANCHORS[v] then v = "TOPRIGHT" end
+  return v
+end
+
+function Utils:SetActionTrackerKeybindAnchor(value)
+  local db, _, display = GetRuntimeDB()
+  local v = tostring(value or "TOPRIGHT")
+  if not VALID_ACTIONBAR_KEYBIND_ANCHORS[v] then v = "TOPRIGHT" end
+  display.keybindAnchor = v
+  PersistRuntimeChange(db)
+end
+
 function Utils:GetActionTrackerBorderColor()
   local color = EnsureActionTrackerBorderColorTable()
   return color.r, color.g, color.b
@@ -255,17 +304,6 @@ function Utils:SetBorderThickness(value)
   local thickness = clampValue(tonumber(value) or (tonumber(GetDisplayDefaults().borderThickness) or 0), 0, 5)
   display.borderThickness = thickness
   display.border = thickness > 0
-  PersistRuntimeChange(db)
-end
-
-function Utils:GetPreviewWindowEnabled()
-  local _, _, _, _, flags = GetRuntimeDB()
-  return flags.previewWindowEnabled and true or false
-end
-
-function Utils:SetPreviewWindowEnabled(enabled)
-  local db, _, _, _, flags = GetRuntimeDB()
-  flags.previewWindowEnabled = not not enabled
   PersistRuntimeChange(db)
 end
 
@@ -492,7 +530,13 @@ function Utils:SetCombatMarkerSymbol(value)
   local db = GetRuntimeDB()
   local combatMarker = EnsureTable(db, "combatMarker")
   local symbol = tostring(value or (GetCombatMarkerDefaults().symbol or (C.COMBAT_MARKER_DEFAULT_SYMBOL or "x")))
-  if symbol ~= "plus" and symbol ~= "diamond" and symbol ~= "x" and symbol ~= "square" and symbol ~= "circle" then
+  local isImage = C.COMBAT_MARKER_IMAGE_VALID and C.COMBAT_MARKER_IMAGE_VALID[symbol]
+  -- Dynamic (Bullseye/Class/Specialization), "None" (off) and "AHLight" (AH mirrors its
+  -- icon at centre) are also valid now that ALL Center Marker options route through this
+  -- single combat-marker symbol.
+  local isDynamic = C.COMBAT_MARKER_DYNAMIC_VALID and C.COMBAT_MARKER_DYNAMIC_VALID[symbol]
+  if not isImage and not isDynamic and symbol ~= "None" and symbol ~= "AHLight"
+    and symbol ~= "plus" and symbol ~= "diamond" and symbol ~= "x" and symbol ~= "square" and symbol ~= "circle" then
     if symbol == "cross" then symbol = "plus" else symbol = (C.COMBAT_MARKER_DEFAULT_SYMBOL or "x") end
   end
   combatMarker.symbol = symbol
@@ -554,6 +598,30 @@ function Utils:SetCombatMarkerColor(r, g, b)
   PersistRuntimeChange(db)
 end
 
+-- Combat marker colour mode, mirroring the Pressed Indicator: "none" (no tint -- image
+-- shows its own colours), "class", or "custom". On first read it migrates from the legacy
+-- useClassColor boolean so existing markers keep their look (class unless custom was set).
+function Utils:GetCombatMarkerColorMode()
+  local db = GetRuntimeDB()
+  local combatMarker = EnsureTable(db, "combatMarker")
+  if combatMarker.colorMode == nil then
+    combatMarker.colorMode = (combatMarker.useClassColor == false) and "custom" or "class"
+  end
+  local m = tostring(combatMarker.colorMode)
+  if m ~= "class" and m ~= "custom" then m = "none" end
+  return m
+end
+
+function Utils:SetCombatMarkerColorMode(mode)
+  local db = GetRuntimeDB()
+  local combatMarker = EnsureTable(db, "combatMarker")
+  if mode ~= "class" and mode ~= "custom" then mode = "none" end
+  combatMarker.colorMode = mode
+  -- Keep the legacy boolean roughly in sync for any old code path that still reads it.
+  combatMarker.useClassColor = (mode == "class")
+  PersistRuntimeChange(db)
+end
+
 local VALID_COMBAT_MARKER_ANCHORS = C.COMBAT_MARKER_VALID_ANCHORS or {
   CENTER = true,
   TOP = true,
@@ -601,7 +669,11 @@ local function EnsureCombatMarkerPointTable()
   elseif IsLegacyCombatMarkerDefaultPoint(point) then
     point = { fallback[1], fallback[2], fallback[3], fallback[4], fallback[5] }
   end
-  point[1] = VALID_COMBAT_MARKER_ANCHORS[point[1]] and point[1] or fallback[1]
+  -- Always anchor the marker by its CENTRE so the Size slider scales it symmetrically.
+  -- A legacy "TOP" anchor (the old default) kept the top edge fixed and made the
+  -- marker grow downward only when resized. relativePoint is CENTER, so the stored
+  -- offset now positions the marker's centre.
+  point[1] = C.ANCHOR_CENTER or "CENTER"
   point[2] = C.UI_PARENT_NAME or "UIParent"
   point[3] = C.ANCHOR_CENTER or "CENTER"
   point[4] = ClampActionTrackerOffset(tonumber(point[4]) or fallback[4])
@@ -840,6 +912,25 @@ function Utils:SetShowWhen(value)
   PersistRuntimeChange(db)
 end
 
+local VALID_SKIN = { AUTO = true, MODERN = true, NATIVE = true }
+
+function Utils:GetSkin()
+  local db = GetRuntimeDB()
+  local appearance = EnsureTable(db, "appearance")
+  local value = tostring(appearance.skin or "AUTO")
+  if not VALID_SKIN[value] then value = "AUTO" end
+  return value
+end
+
+function Utils:SetSkin(value)
+  local db = GetRuntimeDB()
+  local appearance = EnsureTable(db, "appearance")
+  local normalized = tostring(value or "AUTO")
+  if not VALID_SKIN[normalized] then normalized = "AUTO" end
+  appearance.skin = normalized
+  PersistRuntimeChange(db)
+end
+
 
 function Utils:GetScale()
   local _, _, display = GetRuntimeDB()
@@ -916,19 +1007,28 @@ end
 
 function Utils:GetIconGap()
   local _, _, display = GetRuntimeDB()
-  return clampValue(tonumber(display.iconGap) or (tonumber(GetDisplayDefaults().iconGap) or 3), 1, 5)
+  return clampValue(tonumber(display.iconGap) or (tonumber(GetDisplayDefaults().iconGap) or 3), 0, 5)
 end
 
 function Utils:SetIconGap(value)
   local db, _, display = GetRuntimeDB()
-  display.iconGap = clampValue(tonumber(value) or (tonumber(GetDisplayDefaults().iconGap) or 3), 1, 5)
+  display.iconGap = clampValue(tonumber(value) or (tonumber(GetDisplayDefaults().iconGap) or 3), 0, 5)
   PersistRuntimeChange(db)
 end
+
+-- Legacy pressed-indicator shapes mapped onto the shared marker symbol set so old
+-- saved values keep working after the indicator adopted the marker symbols.
+local PRESSED_SHAPE_LEGACY = {
+  dot = "circle",
+  cross = "plus",
+  eye = "GSE_Tracker_Round.png",
+}
 
 function Utils:GetPressedIndicatorShape()
   local _, _, display = GetRuntimeDB()
   local pressed = EnsureTable(display, "pressedIndicator")
-  return tostring(pressed.shape or (tostring(GetPressedIndicatorDefaults().shape or "dot")))
+  local shape = tostring(pressed.shape or (tostring(GetPressedIndicatorDefaults().shape or "circle")))
+  return PRESSED_SHAPE_LEGACY[shape] or shape
 end
 
 function Utils:SetPressedIndicatorShape(value)
@@ -948,6 +1048,56 @@ function Utils:SetPressedIndicatorSize(value)
   local db, _, display = GetRuntimeDB()
   local pressed = EnsureTable(display, "pressedIndicator")
   pressed.size = clampValue(tonumber(value) or (tonumber(GetPressedIndicatorDefaults().size) or 10), C.PRESSED_INDICATOR_MIN_SIZE or 4, C.PRESSED_INDICATOR_MAX_SIZE or 24)
+  PersistRuntimeChange(db)
+end
+
+-- Pressed Indicator colour mode: "none" (DEFAULT -- the image shows in its own colours,
+-- no tint), "class" (tinted with the player's class colour), or "custom" (tinted with the
+-- stored RGB). "none" is what shows when neither Class nor Custom is selected.
+function Utils:GetPressedIndicatorColorMode()
+  local _, _, display = GetRuntimeDB()
+  local pressed = EnsureTable(display, "pressedIndicator")
+  local m = tostring(pressed.colorMode or "none")
+  if m ~= "class" and m ~= "custom" then m = "none" end
+  return m
+end
+
+function Utils:SetPressedIndicatorColorMode(mode)
+  local db, _, display = GetRuntimeDB()
+  local pressed = EnsureTable(display, "pressedIndicator")
+  if mode ~= "class" and mode ~= "custom" then mode = "none" end
+  pressed.colorMode = mode
+  PersistRuntimeChange(db)
+end
+
+function Utils:GetPressedIndicatorCustomColor()
+  local _, _, display = GetRuntimeDB()
+  local pressed = EnsureTable(display, "pressedIndicator")
+  local c = EnsureTable(pressed, "color")
+  return tonumber(c.r) or 1, tonumber(c.g) or 0.82, tonumber(c.b) or 0
+end
+
+function Utils:SetPressedIndicatorCustomColor(r, g, b)
+  local db, _, display = GetRuntimeDB()
+  local pressed = EnsureTable(display, "pressedIndicator")
+  local c = EnsureTable(pressed, "color")
+  c.r, c.g, c.b = tonumber(r) or 1, tonumber(g) or 0.82, tonumber(b) or 0
+  PersistRuntimeChange(db)
+end
+
+-- Pressed Indicator lock: locked (default) shows only on key press at its saved spot;
+-- unlocked makes it draggable + always visible so it can be repositioned. The saved
+-- position (element offset) is untouched, so unlocking keeps it at its current location.
+function Utils:GetPressedIndicatorUnlocked()
+  local _, _, display = GetRuntimeDB()
+  local pressed = EnsureTable(display, "pressedIndicator")
+  return pressed.unlocked and true or false
+end
+
+function Utils:SetPressedIndicatorUnlocked(enabled)
+  local db, _, display = GetRuntimeDB()
+  local pressed = EnsureTable(display, "pressedIndicator")
+  pressed.unlocked = not not enabled
   PersistRuntimeChange(db)
 end
 
@@ -999,26 +1149,44 @@ end
 function Utils:GetSeqFontSize()
   local _, _, _, fonts = GetRuntimeDB()
   local seq = EnsureTable(fonts, "sequence")
-  return clampValue(tonumber(seq.size) or (tonumber(GetFontDefaults("sequence").size) or 12), 8, 24)
+  return clampValue(tonumber(seq.size) or (tonumber(GetFontDefaults("sequence").size) or 12), 6, 24)
 end
 
 function Utils:SetSeqFontSize(value)
   local db, _, _, fonts = GetRuntimeDB()
   local seq = EnsureTable(fonts, "sequence")
-  seq.size = clampValue(tonumber(value) or (tonumber(GetFontDefaults("sequence").size) or 12), 8, 24)
+  seq.size = clampValue(tonumber(value) or (tonumber(GetFontDefaults("sequence").size) or 12), 6, 24)
   PersistRuntimeChange(db)
 end
 
 function Utils:GetModFontSize()
   local _, _, _, fonts = GetRuntimeDB()
   local mods = EnsureTable(fonts, "modifiers")
-  return clampValue(tonumber(mods.size) or (tonumber(GetFontDefaults("modifiers").size) or 8), 6, 20)
+  return clampValue(tonumber(mods.size) or (tonumber(GetFontDefaults("modifiers").size) or 8), 6, 24)
+end
+
+-- Action Tracker font outline, shared by the sequence name / modifiers / keybind labels:
+-- "NONE", "OUTLINE" (default), or "THICKOUTLINE".
+local VALID_FONT_OUTLINES = { NONE = true, OUTLINE = true, THICKOUTLINE = true }
+function Utils:GetActionTrackerFontOutline()
+  local _, _, _, fonts = GetRuntimeDB()
+  local o = tostring((fonts and fonts.outline) or "OUTLINE")
+  if not VALID_FONT_OUTLINES[o] then o = "OUTLINE" end
+  return o
+end
+
+function Utils:SetActionTrackerFontOutline(value)
+  local db, _, _, fonts = GetRuntimeDB()
+  value = tostring(value or "OUTLINE")
+  if not VALID_FONT_OUTLINES[value] then value = "OUTLINE" end
+  fonts.outline = value
+  PersistRuntimeChange(db)
 end
 
 function Utils:SetModFontSize(value)
   local db, _, _, fonts = GetRuntimeDB()
   local mods = EnsureTable(fonts, "modifiers")
-  mods.size = clampValue(tonumber(value) or (tonumber(GetFontDefaults("modifiers").size) or 8), 6, 20)
+  mods.size = clampValue(tonumber(value) or (tonumber(GetFontDefaults("modifiers").size) or 8), 6, 24)
   PersistRuntimeChange(db)
 end
 
@@ -1234,6 +1402,120 @@ function Utils:SetAssistedHighlightShowKeybind(enabled)
   PersistRuntimeChange(db)
 end
 
+-- The AH "Show GCD Swipe" and the Meters "Show GCD" are unified onto a SINGLE flag
+-- (MetersSavedVars.showGCD) so the AH icon -- shown in the AH position AND mirrored at
+-- the centre marker -- follows ONE toggle instead of two conflicting ones. The AH db
+-- copy is kept in sync as a mirror / pre-Meters fallback.
+function Utils:GetAssistedHighlightShowGCD()
+  local sv = _G.MetersSavedVars
+  if type(sv) == "table" then
+    return sv.showGCD ~= false
+  end
+  local db = GetRuntimeDB()
+  local assisted = EnsureTable(db, "assistedHighlight")
+  if assisted.showGCD == nil then
+    return GetAssistedHighlightDefaults().showGCD ~= false
+  end
+  return assisted.showGCD and true or false
+end
+
+function Utils:SetAssistedHighlightShowGCD(enabled)
+  enabled = not not enabled
+  local sv = _G.MetersSavedVars
+  if type(sv) == "table" then sv.showGCD = enabled end
+  local db = GetRuntimeDB()
+  local assisted = EnsureTable(db, "assistedHighlight")
+  assisted.showGCD = enabled
+  PersistRuntimeChange(db)
+end
+
+-- ModKey burst stack (centered z-stack of modifier-fired abilities). Default ON.
+function Utils:GetModkeyStackEnabled()
+  local db = GetRuntimeDB()
+  if db.modkeyStackEnabled == nil then return true end
+  return db.modkeyStackEnabled and true or false
+end
+
+function Utils:SetModkeyStackEnabled(enabled)
+  local db = GetRuntimeDB()
+  db.modkeyStackEnabled = not not enabled
+  PersistRuntimeChange(db)
+end
+
+-- Proc glow: flash the main-row icon when a cast matches the AH suggestion. Default ON.
+function Utils:GetProcGlowEnabled()
+  local db = GetRuntimeDB()
+  if db.procGlowEnabled == nil then return true end
+  return db.procGlowEnabled and true or false
+end
+
+function Utils:SetProcGlowEnabled(enabled)
+  local db = GetRuntimeDB()
+  db.procGlowEnabled = not not enabled
+  PersistRuntimeChange(db)
+end
+
+-- QoL: mute the spell-fizzle (cast-failure) sounds. Default OFF.
+function Utils:GetMuteFizzles()
+  local db = GetRuntimeDB()
+  return db.muteFizzles and true or false
+end
+
+function Utils:SetMuteFizzles(enabled)
+  local db = GetRuntimeDB()
+  db.muteFizzles = not not enabled
+  PersistRuntimeChange(db)
+  if addon.ApplyMuteFizzles then addon:ApplyMuteFizzles(db.muteFizzles) end
+end
+
+-- QoL: hide the red UIErrorsFrame error text. Default OFF.
+function Utils:GetHideErrors()
+  local db = GetRuntimeDB()
+  return db.hideErrors and true or false
+end
+
+function Utils:SetHideErrors(enabled)
+  local db = GetRuntimeDB()
+  db.hideErrors = not not enabled
+  PersistRuntimeChange(db)
+  if addon.ApplyHideErrors then addon:ApplyHideErrors(db.hideErrors) end
+end
+
+-- AH match % readout (matches / casts over the session's combat time). Default OFF.
+function Utils:GetAHMatchPercentEnabled()
+  local db = GetRuntimeDB()
+  return db.ahMatchPercentEnabled and true or false
+end
+
+function Utils:SetAHMatchPercentEnabled(enabled)
+  local db = GetRuntimeDB()
+  db.ahMatchPercentEnabled = not not enabled
+  PersistRuntimeChange(db)
+end
+
+-- AH match audible alert + chosen LibSharedMedia sound name. Default OFF.
+function Utils:GetAHMatchAudibleEnabled()
+  local db = GetRuntimeDB()
+  return db.ahMatchAudibleEnabled and true or false
+end
+
+function Utils:SetAHMatchAudibleEnabled(enabled)
+  local db = GetRuntimeDB()
+  db.ahMatchAudibleEnabled = not not enabled
+  PersistRuntimeChange(db)
+end
+
+function Utils:GetAHMatchSound()
+  local db = GetRuntimeDB()
+  return (type(db.ahMatchSound) == "string" and db.ahMatchSound ~= "") and db.ahMatchSound or nil
+end
+
+function Utils:SetAHMatchSound(name)
+  local db = GetRuntimeDB()
+  db.ahMatchSound = (type(name) == "string" and name ~= "") and name or nil
+  PersistRuntimeChange(db)
+end
+
 
 function Utils:GetAssistedHighlightPreviewEnabled()
   local db = GetRuntimeDB()
@@ -1277,6 +1559,56 @@ function Utils:SetAssistedHighlightBorderSize(value)
   PersistRuntimeChange(db)
 end
 
+function Utils:GetAccountWide()
+  return (SV and SV.GetAccountWide and SV:GetAccountWide()) or false
+end
+
+function Utils:SetAccountWide(enabled)
+  if SV and SV.SetAccountWide then SV:SetAccountWide(enabled) end
+  -- The active store changed: invalidate the runtime cache and persist.
+  _cachedRawRef = nil
+  local db = GetRuntimeDB()
+  PersistRuntimeChange(db)
+end
+
+local VALID_LAYOUT = { HORIZONTAL = true, VERTICAL = true }
+local VALID_SCROLL_DIR = { LEFT = true, RIGHT = true, UP = true, DOWN = true }
+
+function Utils:GetActionTrackerLayout()
+  local _, _, display = GetRuntimeDB()
+  local v = tostring(display.layout or "")
+  if VALID_LAYOUT[v] then return v end
+  return "HORIZONTAL"
+end
+
+function Utils:SetActionTrackerLayout(value)
+  local db, _, display = GetRuntimeDB()
+  value = tostring(value or "")
+  display.layout = VALID_LAYOUT[value] and value or "HORIZONTAL"
+  PersistRuntimeChange(db)
+end
+
+function Utils:GetActionTrackerScroll()
+  local _, _, display = GetRuntimeDB()
+  local v = tostring(display.scrollDirection or "")
+  -- Constrain to the layout's axis: vertical uses UP/DOWN (default DOWN),
+  -- horizontal uses LEFT/RIGHT (default RIGHT). A stored value for the other axis
+  -- (or no selection) falls back to the axis default.
+  if self:GetActionTrackerLayout() == "VERTICAL" then
+    if v == "UP" or v == "DOWN" then return v end
+    return "DOWN"
+  end
+  if v == "LEFT" or v == "RIGHT" then return v end
+  return "RIGHT"
+end
+
+function Utils:SetActionTrackerScroll(value)
+  local db, _, display = GetRuntimeDB()
+  value = tostring(value or "")
+  display.scrollDirection = VALID_SCROLL_DIR[value] and value or "LEFT"
+  PersistRuntimeChange(db)
+end
+
 function Utils:GetAssistedHighlightKeybindOffset()
   local db = GetRuntimeDB()
   local assisted = EnsureTable(db, "assistedHighlight")
@@ -1291,6 +1623,27 @@ function Utils:SetAssistedHighlightKeybindOffset(x, y)
   local assisted = EnsureTable(db, "assistedHighlight")
   assisted.keybindXOffset = clampValue(tonumber(x) or (tonumber(GetAssistedHighlightDefaults().keybindXOffset) or -3), -64, 64)
   assisted.keybindYOffset = clampValue(tonumber(y) or (tonumber(GetAssistedHighlightDefaults().keybindYOffset) or -3), -64, 64)
+  PersistRuntimeChange(db)
+end
+
+local VALID_AH_KEYBIND_ANCHORS = { TOPLEFT = true, TOPRIGHT = true, BOTTOMLEFT = true, BOTTOMRIGHT = true, CENTER = true }
+
+function Utils:GetAssistedHighlightKeybindAnchor()
+  local db = GetRuntimeDB()
+  local assisted = EnsureTable(db, "assistedHighlight")
+  local default = GetAssistedHighlightDefaults().keybindAnchor or "TOPRIGHT"
+  local value = tostring(assisted.keybindAnchor or default)
+  if not VALID_AH_KEYBIND_ANCHORS[value] then value = default end
+  return value
+end
+
+function Utils:SetAssistedHighlightKeybindAnchor(value)
+  local db = GetRuntimeDB()
+  local assisted = EnsureTable(db, "assistedHighlight")
+  local default = GetAssistedHighlightDefaults().keybindAnchor or "TOPRIGHT"
+  local normalized = tostring(value or default)
+  if not VALID_AH_KEYBIND_ANCHORS[normalized] then normalized = default end
+  assisted.keybindAnchor = normalized
   PersistRuntimeChange(db)
 end
 

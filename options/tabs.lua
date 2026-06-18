@@ -2,28 +2,30 @@ local _, ns = ...
 local API = (ns.Utils and ns.Utils.API) or {}
 local Options = ns.Options
 local optionsModule = Options
+local WHITE8X8 = (ns.Utils and ns.Utils.Constants and ns.Utils.Constants.TEXTURE_WHITE8X8) or "Interface/Buttons/WHITE8x8"
 
 local TAB_HEIGHT = optionsModule.TAB_HEIGHT or 34
 local TAB_GAP = optionsModule.TAB_GAP or 2
+
+-- Pull an RGB colour from the active skin palette (falls back to black). Tab
+-- alphas are kept as-is below; only the RGB is skin-driven.
+local function pc(key)
+  local p = optionsModule.Palette
+  return (p and p[key]) or { 0, 0, 0 }
+end
 
 local function SetTabVisual(button, selected)
   if not button then return end
   local r, g, b = optionsModule.GetClassColor()
 
   if button._gseBg then
-    if selected then
-      button._gseBg:SetVertexColor(0.036, 0.040, 0.045, 0.98)
-    else
-      button._gseBg:SetVertexColor(0.020, 0.023, 0.027, 0.94)
-    end
+    local c = selected and pc("BG_MEDIUM") or pc("BG_DARK")
+    button._gseBg:SetVertexColor(c[1], c[2], c[3], selected and 0.98 or 0.94)
   end
 
   if button._gseInner then
-    if selected then
-      button._gseInner:SetVertexColor(0.06, 0.065, 0.070, 0.05)
-    else
-      button._gseInner:SetVertexColor(0.028, 0.032, 0.036, 0.03)
-    end
+    local c = selected and pc("BG_LIGHT") or pc("BG_INPUT")
+    button._gseInner:SetVertexColor(c[1], c[2], c[3], selected and 0.05 or 0.03)
   end
 
   if button._gseGlow then
@@ -35,11 +37,8 @@ local function SetTabVisual(button, selected)
   end
 
   if button._gseLabel then
-    if selected then
-      button._gseLabel:SetTextColor(0.97, 0.97, 0.97)
-    else
-      button._gseLabel:SetTextColor(0.62, 0.62, 0.64)
-    end
+    local c = selected and pc("TEXT_PRIMARY") or pc("TEXT_MUTED")
+    button._gseLabel:SetTextColor(c[1], c[2], c[3])
   end
 
   if button._gseSubtitle then
@@ -55,7 +54,8 @@ local function SetTabVisual(button, selected)
       if selected then
         tex:SetVertexColor(r, g, b, 0.42)
       else
-        tex:SetVertexColor(0.15, 0.15, 0.16, 1)
+        local c = pc("BORDER_DEFAULT")
+        tex:SetVertexColor(c[1], c[2], c[3], 1)
       end
     end
   end
@@ -67,53 +67,53 @@ function optionsModule.CreateTopTab(parent, key, text, subtitle)
   button.tabKey = key
 
   local bg = button:CreateTexture(nil, "BACKGROUND")
-  bg:SetTexture("Interface\\Buttons\\WHITE8x8")
+  bg:SetTexture(WHITE8X8)
   bg:SetPoint("TOPLEFT", button, "TOPLEFT", 0, 0)
   bg:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", 0, 0)
   button._gseBg = bg
 
   local inner = button:CreateTexture(nil, "BORDER")
-  inner:SetTexture("Interface\\Buttons\\WHITE8x8")
+  inner:SetTexture(WHITE8X8)
   inner:SetPoint("TOPLEFT", button, "TOPLEFT", 1, -1)
   inner:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -1, 1)
   button._gseInner = inner
 
   local glow = button:CreateTexture(nil, "BORDER")
-  glow:SetTexture("Interface\\Buttons\\WHITE8x8")
+  glow:SetTexture(WHITE8X8)
   glow:SetPoint("TOPLEFT", button, "TOPLEFT", 1, -1)
   glow:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -1, 1)
   button._gseGlow = glow
 
   local accent = button:CreateTexture(nil, "ARTWORK")
-  accent:SetTexture("Interface\\Buttons\\WHITE8x8")
+  accent:SetTexture(WHITE8X8)
   accent:SetPoint("TOPLEFT", button, "TOPLEFT", 0, 0)
   accent:SetPoint("BOTTOMLEFT", button, "BOTTOMLEFT", 0, 0)
   accent:SetWidth(3)
   button._gseAccent = accent
 
   local pill = button:CreateTexture(nil, "ARTWORK")
-  pill:SetTexture("Interface\\Buttons\\WHITE8x8")
+  pill:SetTexture(WHITE8X8)
   pill:SetPoint("TOPRIGHT", button, "TOPRIGHT", -12, -10)
   pill:SetSize(6, 6)
   button._gsePill = pill
 
   local borderTop = button:CreateTexture(nil, "ARTWORK")
-  borderTop:SetTexture("Interface\\Buttons\\WHITE8x8")
+  borderTop:SetTexture(WHITE8X8)
   borderTop:SetPoint("TOPLEFT", button, "TOPLEFT", 0, 0)
   borderTop:SetPoint("TOPRIGHT", button, "TOPRIGHT", 0, 0)
   borderTop:SetHeight(1)
   local borderBottom = button:CreateTexture(nil, "ARTWORK")
-  borderBottom:SetTexture("Interface\\Buttons\\WHITE8x8")
+  borderBottom:SetTexture(WHITE8X8)
   borderBottom:SetPoint("BOTTOMLEFT", button, "BOTTOMLEFT", 0, 0)
   borderBottom:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", 0, 0)
   borderBottom:SetHeight(1)
   local borderLeft = button:CreateTexture(nil, "ARTWORK")
-  borderLeft:SetTexture("Interface\\Buttons\\WHITE8x8")
+  borderLeft:SetTexture(WHITE8X8)
   borderLeft:SetPoint("TOPLEFT", button, "TOPLEFT", 0, 0)
   borderLeft:SetPoint("BOTTOMLEFT", button, "BOTTOMLEFT", 0, 0)
   borderLeft:SetWidth(1)
   local borderRight = button:CreateTexture(nil, "ARTWORK")
-  borderRight:SetTexture("Interface\\Buttons\\WHITE8x8")
+  borderRight:SetTexture(WHITE8X8)
   borderRight:SetPoint("TOPRIGHT", button, "TOPRIGHT", 0, 0)
   borderRight:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", 0, 0)
   borderRight:SetWidth(1)
@@ -142,10 +142,10 @@ function optionsModule.CreateTopTab(parent, key, text, subtitle)
   button:HookScript("OnEnter", function(self)
     if self._gseSelected then return end
     local r, g, b = optionsModule.GetClassColor()
-    if self._gseBg then self._gseBg:SetVertexColor(0.028, 0.032, 0.036, 0.98) end
-    if self._gseInner then self._gseInner:SetVertexColor(0.05, 0.055, 0.06, 0.05) end
+    if self._gseBg then local c = pc("BG_LIGHT") self._gseBg:SetVertexColor(c[1], c[2], c[3], 0.98) end
+    if self._gseInner then local c = pc("BG_HOVER") self._gseInner:SetVertexColor(c[1], c[2], c[3], 0.05) end
     if self._gseGlow then self._gseGlow:SetVertexColor(r, g, b, 0.02) end
-    if self._gseLabel then self._gseLabel:SetTextColor(0.90, 0.90, 0.92) end
+    if self._gseLabel then local c = pc("TEXT_SECONDARY") self._gseLabel:SetTextColor(c[1], c[2], c[3]) end
     if self._gseAccent then self._gseAccent:SetVertexColor(optionsModule.GetClassColor()) end
     if self._gseAccent then self._gseAccent:SetAlpha(0.42) end
     if self._gseBorder then

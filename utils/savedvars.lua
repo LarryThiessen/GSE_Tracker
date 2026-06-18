@@ -8,7 +8,8 @@ Utils.SV = SV
 local C = Utils.Constants or addon.Constants or {}
 
 SV.SCHEMA_VERSION = C.SCHEMA_VERSION or 3
-SV.DB_NAME = C.DB_NAME or "GSETrackerDB"
+SV.DB_NAME = C.DB_NAME or "GSETrackerDB"            -- account-wide store (holds the accountWide flag)
+SV.CHAR_DB_NAME = C.CHAR_DB_NAME or "GSETrackerCharDB" -- per-character store
 SV.ADDON_VERSION = C.ADDON_VERSION or "1.1.4"
 local ACTION_TRACKER_POSITION_LIMIT = tonumber(C.ACTION_TRACKER_POSITION_LIMIT) or 3000
 
@@ -32,62 +33,63 @@ local ROOT_DEFAULTS = {
   },
   general = {
     enabled = true,
-    locked = false,
+    locked = true,
     showWhen = C.MODE_ALWAYS or "Always",
     strata = C.DEFAULT_COMBAT_TRACKER_STRATA or (C.STRATA_MEDIUM or "MEDIUM"),
   },
   display = {
     scale = C.DEFAULT_SCALE or 1.00,
-    iconCount = C.DEFAULT_ICON_COUNT or 4,
-    iconGap = C.DEFAULT_ICON_GAP or 3,
-    border = false,
-    borderThickness = 0,
-    borderUseClassColor = true,
+    iconCount = 6,
+    iconGap = 0,
+    layout = "HORIZONTAL",       -- HORIZONTAL | VERTICAL
+    scrollDirection = "RIGHT",   -- LEFT | RIGHT (horizontal) | UP | DOWN (vertical); getter normalizes to the layout axis
+    border = true,
+    borderThickness = 1,
+    borderUseClassColor = false,
     borderColor = {
-      r = 0.20,
-      g = 0.60,
-      b = 1.00,
+      r = 0,
+      g = 0,
+      b = 0,
     },
     point = CopyDefaultActionTrackerPoint(),
     pressedIndicator = {
-      shape = C.DEFAULT_PRESSED_INDICATOR_SHAPE or "dot",
-      size = C.DEFAULT_PRESSED_INDICATOR_SIZE or 10,
+      shape = "X.png",
+      size = 24,
     },
   },
   fonts = {
+    outline = "OUTLINE",
     sequence = {
       face = C.FONT_FRIZ or "Friz Quadrata TT",
-      size = 12,
+      size = 18,
     },
     modifiers = {
       face = C.FONT_FRIZ or "Friz Quadrata TT",
-      size = 8,
+      size = 16,
     },
     keybind = {
       face = C.FONT_FRIZ or "Friz Quadrata TT",
-      size = 8,
+      size = 13,
     },
   },
   flags = {
-    previewWindowEnabled = false,
     performanceMode = false,
-    debug = false,
   },
   combatMarker = {
-    enabled = false,
+    enabled = true,
     preview = false,
-    showWhen = C.COMBAT_MARKER_DEFAULT_SHOW_WHEN or (C.MODE_IN_COMBAT or "InCombat"),
-    symbol = C.COMBAT_MARKER_DEFAULT_SYMBOL or "x",
-    size = C.COMBAT_MARKER_DEFAULT_SIZE or 40,
-    thickness = C.COMBAT_MARKER_DEFAULT_THICKNESS or 4,
-    borderSize = C.COMBAT_MARKER_DEFAULT_BORDER_SIZE or 2,
-    alpha = C.COMBAT_MARKER_DEFAULT_ALPHA or 0.85,
-    useClassColor = true,
-    point = C.COMBAT_MARKER_DEFAULT_POINT or { "CENTER", "UIParent", "CENTER", 0, 120 },
+    showWhen = C.MODE_ALWAYS or "Always",
+    symbol = "X.png",
+    size = 18,
+    thickness = 1,
+    borderSize = 0,
+    alpha = 1.00,
+    useClassColor = false,
+    point = C.COMBAT_MARKER_DEFAULT_POINT or { "CENTER", "UIParent", "CENTER", 0, 0 },
     color = {
       r = 1.00,
-      g = 0.82,
-      b = 0.20,
+      g = 0,
+      b = 0.086,
     },
   },
   assistedHighlight = {
@@ -95,26 +97,31 @@ local ROOT_DEFAULTS = {
     preview = false,
     locked = false,
     showWhen = C.MODE_ALWAYS or "Always",
-    size = 52,
-    alpha = C.ASSISTED_HIGHLIGHT_DEFAULT_ALPHA or 0.85,
-    borderSize = 2,
+    size = 60,
+    alpha = 1.00,
+    borderSize = 1,
     point = { "CENTER", "UIParent", "CENTER", 0, -140 },
     anchorTarget = "Screen",
     showKeybind = true,
+    showGCD = true,
     rangeChecker = true,
-    useClassColor = true,
+    useClassColor = false,
     color = {
-      r = 0.20,
-      g = 0.60,
-      b = 1.00,
+      r = 0,
+      g = 0,
+      b = 0,
     },
-    keybindXOffset = -3,
-    keybindYOffset = -3,
-    fontFace = nil,
-    fontSize = 8,
+    keybindXOffset = 16,
+    keybindYOffset = 13,
+    keybindAnchor = "TOPRIGHT",
+    fontFace = "Friz Quadrata TT",
+    fontSize = 15,
   },
   minimap = {
     angle = 225,
+  },
+  appearance = {
+    skin = "AUTO",
   },
   layout = {
     offsetModelVersion = 2,
@@ -125,7 +132,20 @@ local ROOT_DEFAULTS = {
 }
 
 local VALID_SHOW = { [C.MODE_ALWAYS or "Always"] = true, [C.MODE_IN_COMBAT or "InCombat"] = true, [C.MODE_HAS_TARGET or "HasTarget"] = true, [C.MODE_NEVER or "Never"] = true }
-local VALID_SHAPES = { square = true, circle = true, dot = true, cross = true }
+local VALID_SKIN = { AUTO = true, MODERN = true, NATIVE = true }
+local VALID_SHAPES = { square = true, circle = true, dot = true, cross = true, eye = true }
+-- Valid Pressed Indicator shapes: the procedural shapes above, plus "None" (off) and
+-- any media image symbol from the manifest (e.g. "GSE_Tracker_Round"). Without this
+-- the image/None choices would be reset to the default on normalize and never persist.
+local function IsValidPressedShape(shape)
+  shape = tostring(shape or "")
+  return VALID_SHAPES[shape]
+    or shape == "None"
+    or (C.COMBAT_MARKER_IMAGE_VALID and C.COMBAT_MARKER_IMAGE_VALID[shape])
+    or false
+end
+local VALID_LAYOUT = { HORIZONTAL = true, VERTICAL = true }
+local VALID_SCROLL_DIR = { LEFT = true, RIGHT = true, UP = true, DOWN = true }
 local VALID_COMBAT_MARKER_SYMBOLS = { x = true, plus = true, diamond = true, square = true, circle = true }
 local VALID_FRAME_STRATA = C.VALID_FRAME_STRATA or { BACKGROUND = true, LOW = true, MEDIUM = true, HIGH = true, DIALOG = true, FULLSCREEN = true, FULLSCREEN_DIALOG = true, TOOLTIP = true }
 
@@ -147,8 +167,27 @@ local function NormalizeCombatMarkerSymbol(symbol)
   if VALID_COMBAT_MARKER_SYMBOLS[symbol] then
     return symbol
   end
+  -- Media image symbols (e.g. "GSE_Tracker.png") are also valid; see the manifest
+  -- in constants.lua (C.COMBAT_MARKER_IMAGE_VALID).
+  if C.COMBAT_MARKER_IMAGE_VALID and C.COMBAT_MARKER_IMAGE_VALID[symbol] then
+    return symbol
+  end
+  -- Dynamic ported-Meters symbols (Bullseye/Class/Specialization), "None" (off) and
+  -- "AHLight" (the AH engine mirrors its icon at centre) are valid now that every
+  -- Center Marker option routes through this one symbol.
+  if (C.COMBAT_MARKER_DYNAMIC_VALID and C.COMBAT_MARKER_DYNAMIC_VALID[symbol])
+    or symbol == "None" or symbol == "AHLight" then
+    return symbol
+  end
   if symbol == "cross" then return "plus" end
   return ROOT_DEFAULTS.combatMarker.symbol
+end
+
+local VALID_AH_KEYBIND_ANCHORS = { TOPLEFT = true, TOPRIGHT = true, BOTTOMLEFT = true, BOTTOMRIGHT = true, CENTER = true }
+local function NormalizeAHKeybindAnchor(value)
+  value = tostring(value or (ROOT_DEFAULTS.assistedHighlight.keybindAnchor or "TOPRIGHT"))
+  if VALID_AH_KEYBIND_ANCHORS[value] then return value end
+  return ROOT_DEFAULTS.assistedHighlight.keybindAnchor or "TOPRIGHT"
 end
 
 local function IsLegacyCombatMarkerDefaultPoint(point)
@@ -177,10 +216,10 @@ end
 
 local LEGACY_IMPORT_KEYS = {
   "enabled", "locked", "showWhen",
-  "scale", "iconCount", "iconGap", "border", "borderThickness", "point",
+  "scale", "iconCount", "iconGap", "layout", "scrollDirection", "border", "borderThickness", "point",
   "pressedIndicatorShape", "pressedIndicatorSize",
   "seqFont", "seqFontSize", "modFont", "modFontSize", "keybindFont", "keybindFontSize",
-  "previewWindowEnabled", "performanceMode", "debug",
+  "performanceMode",
 }
 
 local function HasLegacyImportData(db)
@@ -303,10 +342,15 @@ local function NormalizeCanonical(db)
   general.showWhen = VALID_SHOW[tostring(general.showWhen)] and tostring(general.showWhen) or ROOT_DEFAULTS.general.showWhen
   general.strata = VALID_FRAME_STRATA[tostring(general.strata)] and tostring(general.strata) or ROOT_DEFAULTS.general.strata
 
+  local appearance = EnsureTable(db, "appearance")
+  appearance.skin = VALID_SKIN[tostring(appearance.skin)] and tostring(appearance.skin) or ROOT_DEFAULTS.appearance.skin
+
   local display = EnsureTable(db, "display")
   display.scale = Clamp(tonumber(display.scale) or ROOT_DEFAULTS.display.scale, 0.70, 1.80)
   display.iconCount = Clamp(tonumber(display.iconCount) or ROOT_DEFAULTS.display.iconCount, C.MIN_ICON_COUNT or 4, C.MAX_ICON_COUNT or 8)
-  display.iconGap = Clamp(tonumber(display.iconGap) or ROOT_DEFAULTS.display.iconGap, 1, 5)
+  display.iconGap = Clamp(tonumber(display.iconGap) or ROOT_DEFAULTS.display.iconGap, 0, 5)
+  display.layout = VALID_LAYOUT[tostring(display.layout)] and tostring(display.layout) or ROOT_DEFAULTS.display.layout
+  display.scrollDirection = VALID_SCROLL_DIR[tostring(display.scrollDirection)] and tostring(display.scrollDirection) or ROOT_DEFAULTS.display.scrollDirection
   display.border = not not display.border
   display.borderThickness = Clamp(tonumber(display.borderThickness) or ROOT_DEFAULTS.display.borderThickness, 0, 5)
   display.borderUseClassColor = display.borderUseClassColor ~= false
@@ -322,7 +366,7 @@ local function NormalizeCanonical(db)
 
   local pressed = EnsureTable(display, "pressedIndicator")
   local shape = tostring(pressed.shape or ROOT_DEFAULTS.display.pressedIndicator.shape)
-  pressed.shape = VALID_SHAPES[shape] and shape or ROOT_DEFAULTS.display.pressedIndicator.shape
+  pressed.shape = IsValidPressedShape(shape) and shape or ROOT_DEFAULTS.display.pressedIndicator.shape
   pressed.size = Clamp(tonumber(pressed.size) or ROOT_DEFAULTS.display.pressedIndicator.size, C.PRESSED_INDICATOR_MIN_SIZE or 4, C.PRESSED_INDICATOR_MAX_SIZE or 24)
 
   local fonts = EnsureTable(db, "fonts")
@@ -339,9 +383,7 @@ local function NormalizeCanonical(db)
   keybind.size = Clamp(tonumber(keybind.size) or mods.size, 6, 20)
 
   local flags = EnsureTable(db, "flags")
-  flags.previewWindowEnabled = not not flags.previewWindowEnabled
   flags.performanceMode = not not flags.performanceMode
-  flags.debug = not not flags.debug
 
   local combatMarker = EnsureTable(db, "combatMarker")
   combatMarker.enabled = not not combatMarker.enabled
@@ -370,6 +412,7 @@ local function NormalizeCanonical(db)
   assistedHighlight.point = SanitizePoint(assistedHighlight.point, ROOT_DEFAULTS.assistedHighlight.point)
   assistedHighlight.anchorTarget = tostring(assistedHighlight.anchorTarget or ROOT_DEFAULTS.assistedHighlight.anchorTarget or "Screen")
   assistedHighlight.showKeybind = assistedHighlight.showKeybind ~= false
+  assistedHighlight.showGCD = assistedHighlight.showGCD ~= false
   assistedHighlight.rangeChecker = assistedHighlight.rangeChecker ~= false
   assistedHighlight.useClassColor = assistedHighlight.useClassColor ~= false
   local ahColor = EnsureTable(assistedHighlight, "color")
@@ -379,6 +422,7 @@ local function NormalizeCanonical(db)
   ahColor.b = Clamp(tonumber(ahColor.b) or ahColorDefaults.b or 1.00, 0, 1)
   assistedHighlight.keybindXOffset = Clamp(RoundNearest(tonumber(assistedHighlight.keybindXOffset) or ROOT_DEFAULTS.assistedHighlight.keybindXOffset or -3), -64, 64)
   assistedHighlight.keybindYOffset = Clamp(RoundNearest(tonumber(assistedHighlight.keybindYOffset) or ROOT_DEFAULTS.assistedHighlight.keybindYOffset or -3), -64, 64)
+  assistedHighlight.keybindAnchor = NormalizeAHKeybindAnchor(assistedHighlight.keybindAnchor)
   assistedHighlight.fontFace = type(assistedHighlight.fontFace) == "string" and assistedHighlight.fontFace or ROOT_DEFAULTS.assistedHighlight.fontFace
   assistedHighlight.fontSize = Clamp(tonumber(assistedHighlight.fontSize) or ROOT_DEFAULTS.assistedHighlight.fontSize or 8, 6, 40)
   assistedHighlight.showStacks = nil
@@ -400,9 +444,83 @@ local function NormalizeCanonical(db)
   end
 end
 
+-- The accountWide flag ALWAYS lives in the account store so it's a single global
+-- preference, readable before we decide which store is active.
+function SV:IsAccountWide()
+  local acc = _G[self.DB_NAME]
+  return (acc and acc.accountWide) and true or false
+end
+
+-- Seed a fresh per-character store from the account store once, so existing
+-- (previously account-wide) setups carry over to the character on first use.
+local function SeedCharFromAccount(self)
+  local char = _G[self.CHAR_DB_NAME]
+  if not char or char._gseSeeded then return end
+  char._gseSeeded = true
+  local account = _G[self.DB_NAME]
+  if type(account) == "table" then
+    for k, v in pairs(account) do
+      if k ~= "accountWide" and char[k] == nil then
+        char[k] = DeepCopy(v)
+      end
+    end
+  end
+end
+
+-- READ-ONLY active store: NEVER writes globals, so it's safe to call on every
+-- GetRuntimeDB (incl. inside dropdown generators that run in the shared Menu
+-- system used by the GameMenu). `_G.X = _G.X or {}` self-assigns the global on
+-- every call, which re-taints it and broke Logout/action-bar grid.
+function SV:GetActiveDBRaw()
+  if self:IsAccountWide() then return _G[self.DB_NAME] end
+  return _G[self.CHAR_DB_NAME]
+end
+
+-- Returns the ACTIVE store, creating the backing globals ONLY when missing (no
+-- per-call self-assign writes).
 function SV:GetDB()
-  _G[self.DB_NAME] = _G[self.DB_NAME] or {}
-  return _G[self.DB_NAME]
+  if _G[self.DB_NAME] == nil then _G[self.DB_NAME] = {} end
+  if _G[self.CHAR_DB_NAME] == nil then _G[self.CHAR_DB_NAME] = {} end
+  if self:IsAccountWide() then
+    return _G[self.DB_NAME]
+  end
+  SeedCharFromAccount(self)
+  return _G[self.CHAR_DB_NAME]
+end
+
+function SV:GetAccountWide()
+  return self:IsAccountWide()
+end
+
+-- Toggle account-wide saving, migrating (copying) the current active store's
+-- settings into the new active store so the tracker looks identical afterwards.
+function SV:SetAccountWide(enabled)
+  enabled = enabled and true or false
+  if _G[self.DB_NAME] == nil then _G[self.DB_NAME] = {} end
+  if _G[self.CHAR_DB_NAME] == nil then _G[self.CHAR_DB_NAME] = {} end
+  local account = _G[self.DB_NAME]
+  local char = _G[self.CHAR_DB_NAME]
+  if (account.accountWide and true or false) == enabled then return end
+
+  if enabled then
+    -- per-character -> account: copy this character's settings up.
+    for k in pairs(account) do
+      if k ~= "accountWide" then account[k] = nil end
+    end
+    for k, v in pairs(char) do
+      if k ~= "accountWide" and k ~= "_gseSeeded" then account[k] = DeepCopy(v) end
+    end
+  else
+    -- account -> per-character: copy account settings down.
+    for k in pairs(char) do
+      if k ~= "_gseSeeded" then char[k] = nil end
+    end
+    for k, v in pairs(account) do
+      if k ~= "accountWide" then char[k] = DeepCopy(v) end
+    end
+    char._gseSeeded = true
+  end
+  account.accountWide = enabled
 end
 
 function SV:SyncLegacyMirrorToCanonical(db)
@@ -419,6 +537,7 @@ function SV:SyncLegacyMirrorToCanonical(db)
   assistedHighlight.point = SanitizePoint(assistedHighlight.point, ROOT_DEFAULTS.assistedHighlight.point)
   assistedHighlight.anchorTarget = tostring(assistedHighlight.anchorTarget or ROOT_DEFAULTS.assistedHighlight.anchorTarget or "Screen")
   assistedHighlight.showKeybind = assistedHighlight.showKeybind ~= false
+  assistedHighlight.showGCD = assistedHighlight.showGCD ~= false
   assistedHighlight.rangeChecker = assistedHighlight.rangeChecker ~= false
   assistedHighlight.useClassColor = assistedHighlight.useClassColor ~= false
   local ahColor = EnsureTable(assistedHighlight, "color")
@@ -428,6 +547,7 @@ function SV:SyncLegacyMirrorToCanonical(db)
   ahColor.b = Clamp(tonumber(ahColor.b) or ahColorDefaults.b or 1.00, 0, 1)
   assistedHighlight.keybindXOffset = Clamp(RoundNearest(tonumber(assistedHighlight.keybindXOffset) or ROOT_DEFAULTS.assistedHighlight.keybindXOffset or -3), -64, 64)
   assistedHighlight.keybindYOffset = Clamp(RoundNearest(tonumber(assistedHighlight.keybindYOffset) or ROOT_DEFAULTS.assistedHighlight.keybindYOffset or -3), -64, 64)
+  assistedHighlight.keybindAnchor = NormalizeAHKeybindAnchor(assistedHighlight.keybindAnchor)
   assistedHighlight.fontFace = assistedHighlight.fontFace or ROOT_DEFAULTS.assistedHighlight.fontFace
   assistedHighlight.fontSize = Clamp(tonumber(assistedHighlight.fontSize) or ROOT_DEFAULTS.assistedHighlight.fontSize or 8, 6, 40)
 
@@ -446,6 +566,8 @@ function SV:SyncLegacyMirrorToCanonical(db)
   if db.scale ~= nil then display.scale = db.scale end
   if db.iconCount ~= nil then display.iconCount = db.iconCount end
   if db.iconGap ~= nil then display.iconGap = db.iconGap end
+  if db.layout ~= nil then display.layout = db.layout end
+  if db.scrollDirection ~= nil then display.scrollDirection = db.scrollDirection end
   if db.border ~= nil then display.border = db.border end
   if db.borderThickness ~= nil then display.borderThickness = db.borderThickness end
   if db.borderUseClassColor ~= nil then display.borderUseClassColor = db.borderUseClassColor end
@@ -462,9 +584,7 @@ function SV:SyncLegacyMirrorToCanonical(db)
   if db.keybindFont ~= nil then keybind.face = db.keybindFont end
   if db.keybindFontSize ~= nil then keybind.size = db.keybindFontSize end
 
-  if db.previewWindowEnabled ~= nil then flags.previewWindowEnabled = db.previewWindowEnabled end
   if db.performanceMode ~= nil then flags.performanceMode = db.performanceMode end
-  if db.debug ~= nil then flags.debug = db.debug end
 
   if type(db.colors) ~= "table" then
     db.colors = {}
@@ -489,7 +609,9 @@ function SV:MigrateToVersion2(db)
 
   db.iconCount = Clamp(tonumber(db.iconCount) or ROOT_DEFAULTS.display.iconCount, C.MIN_ICON_COUNT or 4, C.MAX_ICON_COUNT or 8)
   db.scale = Clamp(tonumber(db.scale) or ROOT_DEFAULTS.display.scale, 0.70, 1.80)
-  db.iconGap = Clamp(tonumber(db.iconGap) or ROOT_DEFAULTS.display.iconGap, 1, 5)
+  db.iconGap = Clamp(tonumber(db.iconGap) or ROOT_DEFAULTS.display.iconGap, 0, 5)
+  db.layout = VALID_LAYOUT[tostring(db.layout)] and tostring(db.layout) or ROOT_DEFAULTS.display.layout
+  db.scrollDirection = VALID_SCROLL_DIR[tostring(db.scrollDirection)] and tostring(db.scrollDirection) or ROOT_DEFAULTS.display.scrollDirection
   db.border = not not db.border
   db.borderThickness = Clamp(tonumber(db.borderThickness) or ROOT_DEFAULTS.display.borderThickness, 0, 5)
   if db.border == false then
@@ -506,11 +628,9 @@ function SV:MigrateToVersion2(db)
   db.keybindFontSize = Clamp(tonumber(db.keybindFontSize) or db.modFontSize, 6, 20)
 
   local shape = tostring(db.pressedIndicatorShape or ROOT_DEFAULTS.display.pressedIndicator.shape)
-  db.pressedIndicatorShape = VALID_SHAPES[shape] and shape or ROOT_DEFAULTS.display.pressedIndicator.shape
+  db.pressedIndicatorShape = IsValidPressedShape(shape) and shape or ROOT_DEFAULTS.display.pressedIndicator.shape
   db.pressedIndicatorSize = Clamp(tonumber(db.pressedIndicatorSize) or ROOT_DEFAULTS.display.pressedIndicator.size, 4, 24)
-  db.previewWindowEnabled = db.previewWindowEnabled == true
   db.performanceMode = not not db.performanceMode
-  db.debug = not not db.debug
   EnsureAncillaryTables(db)
 
   if addon and addon.MaybeMigrateLegacyFontsInDB then
@@ -574,11 +694,31 @@ local function FinalizeDatabase(self, db, mergeDefaults, importLegacy)
   end
   if importLegacy then
     self:SyncLegacyMirrorToCanonical(db)
-    CleanupLegacyFlatKeys(db)
   end
+  -- Prune the legacy flat keys for EVERYONE (not only on import). Once the canonical
+  -- sections exist these are dead mirrors; leaving them is a landmine -- a future
+  -- SCHEMA_VERSION bump would flip ShouldImportLegacyFlat true again and re-apply the
+  -- STALE flat values OVER the user's current settings (data loss). Runs AFTER the sync
+  -- above so an old-schema import still captures them first. Safe on fresh/reset DBs
+  -- (they carry no legacy flat keys, so this removes nothing).
+  CleanupLegacyFlatKeys(db)
   NormalizeCanonical(db)
   db._meta.schemaVersion = self.SCHEMA_VERSION
   db._meta.lastAddonVersion = self.ADDON_VERSION
+
+  -- One-time: the keybindText element ("F1" keybind readout) shipped enabled-by-default
+  -- in older versions. It is now OFF by default, so flip any existing DB that still
+  -- carries the old default to OFF. Sentinel-guarded: runs exactly once, so a user who
+  -- later re-enables the keybind in settings keeps it. Fresh installs have no keybindText
+  -- element table yet, so this is a no-op for them (they get the new false default).
+  if not db._meta.keybindDefaultOffApplied then
+    db._meta.keybindDefaultOffApplied = true
+    local elements = db.layout and db.layout.elements
+    if elements and type(elements.keybindText) == "table" then
+      elements.keybindText.enabled = false
+    end
+  end
+
   return db
 end
 
@@ -594,15 +734,23 @@ function SV:FlushRuntimeToCanonical()
 end
 
 function SV:ResetToDefaults(preserve)
-  local old = self:GetDB()
+  -- Reset the ACTIVE store only (account or per-character), and keep the
+  -- account-wide flag (it lives in the account store) so the mode is preserved.
+  local activeName = self:IsAccountWide() and self.DB_NAME or self.CHAR_DB_NAME
+  local old = _G[activeName] or {}
   local newDB = self:CopyDefaults()
 
   if preserve and preserve.colors and type(old.colors) == "table" then
     newDB.colors = DeepCopy(old.colors)
   end
+  if activeName == self.DB_NAME then
+    newDB.accountWide = old.accountWide
+  else
+    newDB._gseSeeded = true
+  end
 
-  _G[self.DB_NAME] = FinalizeDatabase(self, newDB, false, false)
-  return _G[self.DB_NAME]
+  _G[activeName] = FinalizeDatabase(self, newDB, false, false)
+  return _G[activeName]
 end
 
 function SV:GetSchemaVersion()

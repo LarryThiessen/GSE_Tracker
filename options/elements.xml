@@ -1,0 +1,92 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+  <!--
+    Custom Settings-list elements for the GSE: Tracker General panel.
+    Used via Settings.CreateElementInitializer("GSETracker...Template", ...).
+    Mixins (GSETrackerBrandMixin / GSETrackerSocialMixin) and the link handler
+    GSETracker_OpenLink are defined in options/settings_panel.lua, loaded first.
+  -->
+  <Frame name="GSETrackerBrandTemplate" virtual="true" mixin="GSETrackerBrandMixin">
+    <Size x="100" y="36"/>
+    <Layers>
+      <Layer level="ARTWORK">
+        <Texture parentKey="Logo" file="Interface\AddOns\GSE_Tracker\media\GSE_Tracker.png">
+          <Size x="28" y="28"/>
+          <Anchors>
+            <Anchor point="LEFT" x="12" y="0"/>
+          </Anchors>
+          <TexCoords left="0.06" right="0.94" top="0.06" bottom="0.94"/>
+        </Texture>
+        <FontString parentKey="Title" inherits="GameFontNormalLarge" text="|cFFFFFFFFGS|r|cFF00FFFFE|r|cFFFFFF00: Tracker|r">
+          <Anchors>
+            <Anchor point="LEFT" relativeKey="$parent.Logo" relativePoint="RIGHT" x="8" y="0"/>
+          </Anchors>
+        </FontString>
+      </Layer>
+    </Layers>
+  </Frame>
+
+  <Frame name="GSETrackerSocialTemplate" virtual="true" mixin="GSETrackerSocialMixin">
+    <Size x="150" y="52"/>
+    <Frames>
+      <!-- Button widths match each logo's aspect ratio (height 26) so the icons
+           render at their natural proportions instead of being squished square. -->
+      <Button parentKey="Discord">
+        <Size x="31" y="26"/>
+        <Anchors>
+          <Anchor point="CENTER" x="-46" y="0"/>
+        </Anchors>
+        <NormalTexture file="Interface\AddOns\GSE_Tracker\media\Discord-Logo.png"/>
+        <HighlightTexture file="Interface\AddOns\GSE_Tracker\media\Discord-Logo.png" alphaMode="ADD"/>
+        <Scripts>
+          <OnEnter>
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:SetText("Discord", 1, 0.82, 0)
+            GameTooltip:AddLine("Join the GSE United Discord", 0.8, 0.8, 0.8, true)
+            GameTooltip:AddLine("Click to open in your browser", 0.6, 0.8, 1, true)
+            GameTooltip:Show()
+          </OnEnter>
+          <OnLeave>GameTooltip:Hide()</OnLeave>
+          <OnClick>GSETracker_OpenLink("https://discord.gg/gseunited", "Discord")</OnClick>
+        </Scripts>
+      </Button>
+      <Button parentKey="Patreon">
+        <Size x="26" y="26"/>
+        <Anchors>
+          <Anchor point="CENTER" x="0" y="0"/>
+        </Anchors>
+        <NormalTexture file="Interface\AddOns\GSE_Tracker\media\patreon.png"/>
+        <HighlightTexture file="Interface\AddOns\GSE_Tracker\media\patreon.png" alphaMode="ADD"/>
+        <Scripts>
+          <OnEnter>
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:SetText("Patreon", 1, 0.82, 0)
+            GameTooltip:AddLine("Support development on Patreon", 0.8, 0.8, 0.8, true)
+            GameTooltip:AddLine("Click to open in your browser", 0.6, 0.8, 1, true)
+            GameTooltip:Show()
+          </OnEnter>
+          <OnLeave>GameTooltip:Hide()</OnLeave>
+          <OnClick>GSETracker_OpenLink("https://www.patreon.com/c/ScaryLarryGames646", "Patreon")</OnClick>
+        </Scripts>
+      </Button>
+      <Button parentKey="Kofi">
+        <Size x="40" y="26"/>
+        <Anchors>
+          <Anchor point="CENTER" x="48" y="0"/>
+        </Anchors>
+        <NormalTexture file="Interface\AddOns\GSE_Tracker\media\kofi_s_logo_nolabel.png"/>
+        <HighlightTexture file="Interface\AddOns\GSE_Tracker\media\kofi_s_logo_nolabel.png" alphaMode="ADD"/>
+        <Scripts>
+          <OnEnter>
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:SetText("Ko-fi", 1, 0.82, 0)
+            GameTooltip:AddLine("Buy me a coffee on Ko-fi", 0.8, 0.8, 0.8, true)
+            GameTooltip:AddLine("Click to open in your browser", 0.6, 0.8, 1, true)
+            GameTooltip:Show()
+          </OnEnter>
+          <OnLeave>GameTooltip:Hide()</OnLeave>
+          <OnClick>GSETracker_OpenLink("https://ko-fi.com/scarylarrygames", "Ko-Fi")</OnClick>
+        </Scripts>
+      </Button>
+    </Frames>
+  </Frame>
+</Ui>

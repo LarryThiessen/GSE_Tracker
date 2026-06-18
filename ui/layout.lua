@@ -6,6 +6,19 @@ local pixelSnap = uiShared.PixelSnap
 local ELEMENT_DEFAULTS = uiShared.ELEMENT_DEFAULTS or {}
 local SV = (ns.Utils and ns.Utils.SV) or nil
 
+-- The ACTIVE saved store (account or per-character). Element layout lives here, so
+-- it must follow the same store as every other setting.
+local function ActiveDB()
+  -- Read-only active store (no global self-assign writes); falls back to GetDB
+  -- (which creates the store once) only if the read-only ref isn't ready yet.
+  if SV and SV.GetActiveDBRaw then
+    local db = SV:GetActiveDBRaw()
+    if db then return db end
+  end
+  if SV and SV.GetDB then return SV:GetDB() end
+  return _G.GSETrackerDB or {}
+end
+
 local CENTERED_OFFSET_MODEL_VERSION = 2
 local ROW_RELATIVE_ANCHOR_MODEL_VERSION = 2
 local _layoutMigrationsApplied = false
@@ -113,7 +126,7 @@ end
 
 function UI:EnsureCenteredElementOffsetModel()
   local ui = self.ui
-  local db = GSETrackerDB
+  local db = ActiveDB()
   if type(db) ~= "table" then return false end
   if not NeedsBrokenCenteredOffsetRepair(db) then return false end
   if not (ui and ui.content and ui.elements) then return false end
@@ -174,7 +187,7 @@ end
 
 function UI:EnsureRowRelativeAnchorOffsetModel()
   local ui = self.ui
-  local db = GSETrackerDB
+  local db = ActiveDB()
   if type(db) ~= "table" then return false end
   if not NeedsRowRelativeAnchorMigration(db) then return false end
   if not (ui and ui.content and ui.iconHolder and ui.elements) then return false end
@@ -249,7 +262,7 @@ function UI:EnsureRowRelativeAnchorOffsetModel()
 end
 
 function UI:EnsureLayoutDB(db)
-  db = db or GSETrackerDB
+  db = db or ActiveDB()
   if type(db) ~= "table" then return end
   db.layout = db.layout or {}
   db.layout.elements = db.layout.elements or {}
@@ -280,8 +293,8 @@ function UI:GetElementLayout(elementName)
     end
   end
 
-  self:EnsureLayoutDB(GSETrackerDB)
-  local db = GSETrackerDB and GSETrackerDB.layout and GSETrackerDB.layout.elements
+  self:EnsureLayoutDB(ActiveDB())
+  local db = ActiveDB() and ActiveDB().layout and ActiveDB().layout.elements
   local cfg = db and db[elementName]
   if type(cfg) ~= "table" then return defaults end
   return cfg, defaults
@@ -322,8 +335,20 @@ function UI:ApplyElementPosition(elementName)
   local visible = (cfg and cfg.enabled)
   if visible == nil then visible = defaults.enabled and true or false end
 
+  -- While the pressed indicator is being dragged (unlocked), don't re-anchor it -- that
+  -- would yank it out from under the cursor. The drag's OnDragStop stores the new offset.
+  if elementName == "pressedIndicator" and element._gsetPiMoving then
+    return
+  end
   local function PS(v) return pixelSnap(v, ui) end
   SetElementPointIfNeeded(element, point, anchor, relativePoint, PS(x), PS(y))
+  -- The pressed indicator lives on UIParent (independent of the tracker frame) and
+  -- its show/hide is owned entirely by RefreshPressedIndicator (input-gated). Don't
+  -- let the layout pass force it visible just because the element is "enabled".
+  if elementName == "pressedIndicator" then
+    if self.RefreshPressedIndicator then self:RefreshPressedIndicator(true) end
+    return
+  end
   if element._gsetrackerVisible ~= visible then
     element._gsetrackerVisible = visible
     if visible then element:Show() else element:Hide() end
@@ -344,8 +369,8 @@ function UI:ResetElementPosition(elementName)
   if addon.ResetElementLayout then
     addon:ResetElementLayout(elementName)
   else
-    self:EnsureLayoutDB(GSETrackerDB)
-    local cfg = GSETrackerDB.layout.elements[elementName]
+    self:EnsureLayoutDB(ActiveDB())
+    local cfg = ActiveDB().layout.elements[elementName]
     cfg.x = defaults.x or 0
     cfg.y = defaults.y or 0
     cfg.enabled = defaults.enabled and true or false
@@ -355,7 +380,7 @@ function UI:ResetElementPosition(elementName)
 end
 
 function UI:ResetAllElementPositions()
-  self:EnsureLayoutDB(GSETrackerDB)
+  self:EnsureLayoutDB(ActiveDB())
   for name in pairs(ELEMENT_DEFAULTS) do
     self:ResetElementPosition(name)
   end
@@ -365,8 +390,8 @@ function UI:SetElementEnabled(elementName, enabled)
   if addon.SetElementLayoutEnabled then
     if not addon:SetElementLayoutEnabled(elementName, enabled) then return end
   else
-    self:EnsureLayoutDB(GSETrackerDB)
-    local cfg = GSETrackerDB.layout.elements[elementName]
+    self:EnsureLayoutDB(ActiveDB())
+    local cfg = ActiveDB().layout.elements[elementName]
     if not cfg then return end
     cfg.enabled = not not enabled
   end
@@ -377,8 +402,8 @@ function UI:SetElementOffset(elementName, x, y)
   if addon.SetElementLayoutOffset then
     if not addon:SetElementLayoutOffset(elementName, x, y) then return end
   else
-    self:EnsureLayoutDB(GSETrackerDB)
-    local cfg = GSETrackerDB.layout.elements[elementName]
+    self:EnsureLayoutDB(ActiveDB())
+    local cfg = ActiveDB().layout.elements[elementName]
     if not cfg then return end
     if type(x) == "number" then cfg.x = x end
     if type(y) == "number" then cfg.y = y end

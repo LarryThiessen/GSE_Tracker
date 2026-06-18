@@ -3,20 +3,12 @@ local Utils = ns.Utils or {}
 ns.Utils = Utils
 local C = Utils.Constants or ns.Constants or {}
 
+local PREFIX = C.ADDON_DISPLAY_NAME or "|cFFFFFFFFGS|r|cFF00FFFFE:|r|cFFFFFF00 Tracker|r"
+
+-- Slash-command module. (The old debug-mode toggle was removed -- GSE provides its own
+-- debug tooling, and this addon only ever emitted two trivial debug lines.)
 local DebugModule = Utils.DebugModule or {}
 Utils.DebugModule = DebugModule
-
-local PREFIX = C.ADDON_DISPLAY_NAME or "|cFFFFFFFFGS|r|cFF00FFFFE:|r|cFFFFFF00 Tracker|r"
-local noop = function() end
-
-local function GetDB()
-  local SV = Utils.SV
-  if SV and SV.EnsureDB then
-    return SV:EnsureDB()
-  end
-  _G.GSETrackerDB = _G.GSETrackerDB or {}
-  return _G.GSETrackerDB
-end
 
 local function PrintChat(message)
   if not message or message == "" then
@@ -30,80 +22,8 @@ local function PrintChat(message)
   end
 end
 
-local function BuildMessage(...)
-  local n = select("#", ...)
-  if n == 0 then return "" end
-
-  local out = DebugModule._scratch or {}
-  DebugModule._scratch = out
-
-  for i = 1, n do
-    out[i] = tostring(select(i, ...))
-  end
-  for i = n + 1, #out do
-    out[i] = nil
-  end
-
-  return table.concat(out, " ", 1, n)
-end
-
-function DebugModule:Print(...)
-  local msg = BuildMessage(...)
-  if msg == "" then return end
-  PrintChat(msg)
-end
-
-local function activeLogger(...)
-  DebugModule:Print(...)
-end
-
-function DebugModule:ApplyRuntimeState(enabled)
-  enabled = not not enabled
-  self.enabled = enabled
-  ns.Debug = enabled and activeLogger or noop
-  Utils.Debug = ns.Debug
-
-  local API = Utils.API
-  if API and API.SetDebug then
-    API.SetDebug(enabled, enabled and function(methodName, ...)
-      DebugModule:Print("[API]", methodName, ...)
-    end or nil)
-  end
-end
-
-function DebugModule:IsEnabled()
-  return self.enabled == true
-end
-
-function DebugModule:SetEnabled(enabled)
-  local db = GetDB()
-  db.flags = type(db.flags) == "table" and db.flags or {}
-  db.flags.debug = not not enabled
-  self:ApplyRuntimeState(db.flags.debug)
-  return db.flags.debug
-end
-
 function DebugModule:HandleSlashCommand(msg)
   msg = type(msg) == "string" and msg:lower():match("^%s*(.-)%s*$") or ""
-
-  if msg == "debug" then
-    local enabled = not self:IsEnabled()
-    self:SetEnabled(enabled)
-    PrintChat(enabled and "Debug mode enabled." or "Debug mode disabled.")
-    return
-  end
-
-  if msg == "debug on" then
-    self:SetEnabled(true)
-    PrintChat("Debug mode enabled.")
-    return
-  end
-
-  if msg == "debug off" then
-    self:SetEnabled(false)
-    PrintChat("Debug mode disabled.")
-    return
-  end
 
   if msg == "minimap" then
     if ns.SetMinimapHidden then
@@ -113,6 +33,25 @@ function DebugModule:HandleSlashCommand(msg)
       ns.UI:RefreshMinimapButton()
     end
     PrintChat("Minimap button shown.")
+    return
+  end
+
+  if msg == "reset" or msg == "resetpressed" or msg == "reset pressed" then
+    -- Recover the Pressed Indicator if it was dragged off-screen / lost: re-center it on
+    -- the icon row, ensure it's enabled, then flash it (mark input) so it's visible now.
+    if ns.SetElementOffset then ns:SetElementOffset("pressedIndicator", 0, 0) end
+    if ns.SetElementEnabled then ns:SetElementEnabled("pressedIndicator", true) end
+    ns._lastInputTime = (_G.GetTime and _G.GetTime()) or 0
+    if ns.RefreshPressedIndicator then ns:RefreshPressedIndicator(true) end
+    PrintChat("Pressed Indicator re-centered on the tracker and enabled. Press any key to see it blink.")
+    return
+  end
+
+  if msg == "f1off" or msg == "f1 off" or msg == "ah off" or msg == "assist off" then
+    -- Turn OFF the Assisted Highlight (the "F1" keybind highlight) and hide it now.
+    if ns.SetAssistedHighlightMirrorEnabled then ns:SetAssistedHighlightMirrorEnabled(false) end
+    if ns.RefreshAssistedHighlight then ns:RefreshAssistedHighlight(true) end
+    PrintChat("Assisted Highlight (the F1 keybind highlight) turned OFF.")
     return
   end
 
@@ -127,7 +66,6 @@ function DebugModule:RegisterSlashCommands()
   end
 
   SLASH_GSETRACKER1 = "/gsetracker"
-  SLASH_GSETRACKER2 = "/gsetrackersettings"
   SlashCmdList.GSETRACKER = function(msg)
     self:HandleSlashCommand(msg)
   end
@@ -136,25 +74,5 @@ function DebugModule:RegisterSlashCommands()
 end
 
 function DebugModule:Init()
-  local db = GetDB()
   self:RegisterSlashCommands()
-  self:ApplyRuntimeState(type(db.flags) == "table" and db.flags.debug == true)
-end
-
-ns.IsDebugEnabled = function()
-  return DebugModule:IsEnabled()
-end
-
-ns.SetDebugEnabled = function(_, enabled)
-  return DebugModule:SetEnabled(enabled)
-end
-
-Utils.IsDebugEnabled = ns.IsDebugEnabled
-Utils.SetDebugEnabled = ns.SetDebugEnabled
-
-if ns.Debug == nil then
-  ns.Debug = noop
-end
-if Utils.Debug == nil then
-  Utils.Debug = ns.Debug
 end

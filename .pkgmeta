@@ -9,3 +9,5 @@ ignore:
   - .gitattributes
   - .pkgmeta
   - RELEASE_NOTES.md
+  - SESSION_HANDOFF.md
+  - tools

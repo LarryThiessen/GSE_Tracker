@@ -11,10 +11,6 @@ Compat._warnedKeys = Compat._warnedKeys or {}
 Compat._featureCache = Compat._featureCache or {}
 local ADDON_TITLE_FALLBACK = ((ns.Constants and ns.Constants.ADDON_DISPLAY_NAME) or "|cFFFFFFFFGS|r|cFF00FFFFE:|r|cFFFFFF00 Tracker|r")
 
-local function GetDebugPrinter()
-  return ns and ns.Utils and ns.Utils.DebugModule and ns.Utils.DebugModule.Print
-end
-
 local function GetAddonTitleText()
   if API.GetAddOnMetadata then
     return API.GetAddOnMetadata(ADDON_NAME, "Title") or ADDON_TITLE_FALLBACK
@@ -28,10 +24,7 @@ local function WarnOnce(key, message)
   end
   Compat._warnedKeys[key] = true
 
-  local debugPrint = GetDebugPrinter()
-  if debugPrint then
-    debugPrint(message)
-  elseif _G and _G.DEFAULT_CHAT_FRAME and _G.DEFAULT_CHAT_FRAME.AddMessage then
+  if _G and _G.DEFAULT_CHAT_FRAME and _G.DEFAULT_CHAT_FRAME.AddMessage then
     _G.DEFAULT_CHAT_FRAME:AddMessage(GetAddonTitleText() .. " " .. tostring(message))
   end
 end

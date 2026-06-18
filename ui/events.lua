@@ -9,10 +9,11 @@ local function HandleModifierStateChanged(_, _, key, state)
   if not ui then return end
 
   local changed = uiShared.ApplyModifierEvent and uiShared.ApplyModifierEvent(ui, key, state)
-  if changed then
-    addon:UpdateModifiers()
-    if addon.RefreshDragMouseState then addon:RefreshDragMouseState() end
-  end
+  -- Always refresh the combo readout: a side-specific change (e.g. pressing RShift
+  -- while LShift is already held) doesn't change the combined state but DOES change
+  -- what's displayed. UpdateModifiers itself no-ops when the string is unchanged.
+  addon:UpdateModifiers()
+  if changed and addon.RefreshDragMouseState then addon:RefreshDragMouseState() end
 end
 
 local function HandleCombatEvent(_, event)
@@ -23,17 +24,34 @@ local function HandleCombatEvent(_, event)
     addon:ApplyVisibility()
     if addon.RefreshPlayerTracker then addon:RefreshPlayerTracker()
     elseif addon.RefreshCombatMarker then addon:RefreshCombatMarker() end
+    -- Assisted highlight self-gates its OnUpdate while hidden (see the IsShown()
+    -- early-out in assisted_highlight.lua) and relies on an event-driven refresh to
+    -- wake back up when its Show mode (In Combat / Has Harm Target) flips. Without
+    -- this call those modes never re-appear after combat/target changes.
+    if addon.RefreshAssistedHighlight then addon:RefreshAssistedHighlight() end
     return
   end
 
   if event == "PLAYER_REGEN_DISABLED" then
     if ui._combatState == true then return end
     ui._combatState = true
+    -- Reset the AH match counters so the % reflects THIS combat (enter -> leave).
+    addon._ahCastCount = 0
+    addon._ahMatchCount = 0
+    addon._ahSbaCastCount = 0
+    addon._ahSbaMatchCount = 0
+    addon._sbaEventActive = false
+    addon._lastCastSbaCounted = false
     addon:RevealPendingSequenceText()
     addon:ApplyVisibility()
     if addon.RefreshDragMouseState then addon:RefreshDragMouseState() end
     if addon.RefreshPlayerTracker then addon:RefreshPlayerTracker()
     elseif addon.RefreshCombatMarker then addon:RefreshCombatMarker() end
+    -- Assisted highlight self-gates its OnUpdate while hidden (see the IsShown()
+    -- early-out in assisted_highlight.lua) and relies on an event-driven refresh to
+    -- wake back up when its Show mode (In Combat / Has Harm Target) flips. Without
+    -- this call those modes never re-appear after combat/target changes.
+    if addon.RefreshAssistedHighlight then addon:RefreshAssistedHighlight() end
     return
   end
 
@@ -51,6 +69,11 @@ local function HandleCombatEvent(_, event)
     if addon.RefreshDragMouseState then addon:RefreshDragMouseState() end
     if addon.RefreshPlayerTracker then addon:RefreshPlayerTracker()
     elseif addon.RefreshCombatMarker then addon:RefreshCombatMarker() end
+    -- Assisted highlight self-gates its OnUpdate while hidden (see the IsShown()
+    -- early-out in assisted_highlight.lua) and relies on an event-driven refresh to
+    -- wake back up when its Show mode (In Combat / Has Harm Target) flips. Without
+    -- this call those modes never re-appear after combat/target changes.
+    if addon.RefreshAssistedHighlight then addon:RefreshAssistedHighlight() end
     return
   end
 
@@ -69,6 +92,11 @@ local function HandleCombatEvent(_, event)
     end
     if addon.RefreshPlayerTracker then addon:RefreshPlayerTracker()
     elseif addon.RefreshCombatMarker then addon:RefreshCombatMarker() end
+    -- Assisted highlight self-gates its OnUpdate while hidden (see the IsShown()
+    -- early-out in assisted_highlight.lua) and relies on an event-driven refresh to
+    -- wake back up when its Show mode (In Combat / Has Harm Target) flips. Without
+    -- this call those modes never re-appear after combat/target changes.
+    if addon.RefreshAssistedHighlight then addon:RefreshAssistedHighlight() end
   end
 end
 

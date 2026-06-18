@@ -17,7 +17,7 @@ function UI:GetIconGap()
   end
   ensureDatabase()
   local display = GetRootDefaults().display or {}
-  return clampValue(tonumber(display.iconGap) or 3, 1, 5)
+  return clampValue(tonumber(display.iconGap) or 3, 0, 5)
 end
 
 function UI:GetIconCount()
@@ -39,9 +39,8 @@ function UI:GetShowWhen()
 end
 
 function UI:GetStrata()
-  ensureDatabase()
-
-  local db = _G[(C.DB_NAME or "GSETrackerDB")] or _G.GSETrackerDB or {}
+  -- Use the ACTIVE store (account or per-character), not the raw account global.
+  local db = (ensureDatabase and ensureDatabase()) or _G.GSETrackerDB or {}
   local general = type(db.general) == "table" and db.general or {}
   local strata = tostring(general.strata or (GetRootDefaults().general or {}).strata or (C.DEFAULT_COMBAT_TRACKER_STRATA or C.STRATA_MEDIUM or "MEDIUM"))
   local valid = C.VALID_FRAME_STRATA or { BACKGROUND = true, LOW = true, MEDIUM = true, HIGH = true, DIALOG = true, FULLSCREEN = true, FULLSCREEN_DIALOG = true, TOOLTIP = true }

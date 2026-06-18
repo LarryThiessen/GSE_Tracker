@@ -9,7 +9,7 @@ Tracker._eventFrame = frame
 local DUPLICATE_SPELL_WINDOW = 0.05
 local TEXTURE_CACHE_MAX = 256
 
-local function TrackerEventOnEvent(_, _, unitTarget, _, spellID)
+local function TrackerEventOnEvent(_, _, unitTarget, castGUID, spellID)
   if not spellID then
     return
   end
@@ -26,7 +26,7 @@ local function TrackerEventOnEvent(_, _, unitTarget, _, spellID)
     return
   end
 
-  Tracker:HandleSpellcast(spellID)
+  Tracker:HandleSpellcast(spellID, castGUID)
 end
 
 addon._recentIcons = addon._recentIcons or {}
@@ -36,6 +36,8 @@ Tracker._textureCache = Tracker._textureCache or {}
 Tracker._textureCacheCount = Tracker._textureCacheCount or 0
 Tracker._lastSpellID = Tracker._lastSpellID or false
 Tracker._lastSpellAt = Tracker._lastSpellAt or 0
+Tracker._lastCastGUID = Tracker._lastCastGUID or nil
+Tracker._lastTexture = Tracker._lastTexture or false
 
 local function GetMaxIconCount()
   local count = (addon.GetIconCount and addon:GetIconCount()) or 4
@@ -86,6 +88,8 @@ function Tracker:ResetIcons()
   addon._recentIconCount = 0
   self._lastSpellID = false
   self._lastSpellAt = 0
+  self._lastCastGUID = nil
+  self._lastTexture = false
 
   if API.wipe then
     API.wipe(recent)
@@ -103,6 +107,10 @@ function Tracker:ResetIcons()
     addon:ClearSpellHistory()
   elseif addon.SetIconRow then
     addon:SetIconRow(recent)
+  end
+
+  if addon.ClearModkeyStacks then
+    addon:ClearModkeyStacks()
   end
 end
 
@@ -147,14 +155,14 @@ function Tracker:PushRecentTexture(texture)
   return true
 end
 
-function Tracker:HandleSpellcast(spellID)
+function Tracker:HandleSpellcast(spellID, castGUID)
   if not spellID then
     return false
   end
 
-  local now = API.GetTime()
-  local lastSpellID = self._lastSpellID
-  if lastSpellID == spellID and (now - (self._lastSpellAt or 0)) <= DUPLICATE_SPELL_WINDOW then
+  -- Exact-duplicate guard: the same cast instance always carries the same castGUID,
+  -- so a re-delivered UNIT_SPELLCAST_SUCCEEDED for that cast is rejected.
+  if castGUID and castGUID == self._lastCastGUID then
     return false
   end
 
@@ -163,10 +171,101 @@ function Tracker:HandleSpellcast(spellID)
     return false
   end
 
+  local now = API.GetTime()
+
+  -- Same-ability double-fire guard. Some abilities fire TWO
+  -- UNIT_SPELLCAST_SUCCEEDED events in the SAME frame under different spellIDs that
+  -- share one name/icon (proven: Shadow Dance = 185313 + 185422, identical
+  -- timestamp). They differ in spellID and castGUID, so only the shared TEXTURE
+  -- identifies them -- reject the second when its texture matches the last push
+  -- within the window. Real recasts of the same ability are GCD-spaced (~1s+), far
+  -- outside DUPLICATE_SPELL_WINDOW, so legitimate repeats still register.
+  if self._lastTexture == texture and (now - (self._lastSpellAt or 0)) <= DUPLICATE_SPELL_WINDOW then
+    self._lastCastGUID = castGUID or self._lastCastGUID
+    return false
+  end
+
   self._lastSpellID = spellID
   self._lastSpellAt = now
+  self._lastCastGUID = castGUID or self._lastCastGUID
+  self._lastTexture = texture
 
-  return self:PushRecentTexture(texture)
+  -- Spell-name display mode: show this spell's name where the sequence name normally
+  -- goes, via the same label/render path (class-coloured, no keybind). In sequence
+  -- mode this is skipped and the GSE bridge drives the name as before.
+  if addon.GetActionTrackerUseSpellName and addon:GetActionTrackerUseSpellName()
+    and addon.SetSequenceText then
+    local spellName = API.GetSpellName and API.GetSpellName(spellID)
+    if type(spellName) == "string" and spellName ~= "" then
+      addon:SetSequenceText(spellName, nil, nil, nil)
+    end
+  end
+
+  -- Did this cast match what the AH was suggesting? (current suggestion, or the one
+  -- just before it if GetNextCastSpell already advanced). Match by spellID OR texture
+  -- so base/override IDs of one ability still count. Evaluated for EVERY cast so the
+  -- % stat covers all of them; the proc icon below only shows on the main-row path.
+  local matchedSuggestion = false
+  local procEnabled = (addon.GetProcGlowEnabled == nil) or addon:GetProcGlowEnabled()
+  if procEnabled then
+    if addon._ahSuggestedSpellID and (spellID == addon._ahSuggestedSpellID or texture == addon._ahSuggestedTexture) then
+      matchedSuggestion = true
+    elseif addon._ahPrevSuggestedSpellID
+      and (spellID == addon._ahPrevSuggestedSpellID or texture == addon._ahPrevSuggestedTexture)
+      and (now - (addon._ahPrevSuggestedAt or 0)) <= 0.5 then
+      matchedSuggestion = true
+    end
+    -- Per-combat stats (the "AH Match %" readout) + audible alert.
+    addon._ahCastCount = (addon._ahCastCount or 0) + 1
+    if matchedSuggestion then
+      addon._ahMatchCount = (addon._ahMatchCount or 0) + 1
+      if addon.PlayAHMatchSound then addon:PlayAHMatchSound() end
+    end
+
+    -- Single-Button Assistant correlation by time window. Record this cast so the AH
+    -- event handler can retro-count it if the SBA event arrives just AFTER; and count
+    -- it now if the SBA event was already armed (event BEFORE the cast).
+    addon._lastCastAt = now
+    addon._lastCastMatched = matchedSuggestion
+    addon._lastCastSbaCounted = false
+    if addon._sbaEventActive and (now - (addon._sbaEventAt or 0)) <= 1.0 then
+      addon._sbaEventActive = false
+      addon._lastCastSbaCounted = true
+      addon._ahSbaCastCount = (addon._ahSbaCastCount or 0) + 1
+      if matchedSuggestion then addon._ahSbaMatchCount = (addon._ahSbaMatchCount or 0) + 1 end
+    end
+
+    if addon.UpdateAHMatchReadout then addon:UpdateAHMatchReadout() end
+  end
+
+  -- Route the cast. A Ctrl/Alt-bearing modifier combo is a "proc" -- it goes ONLY to
+  -- the centered stack (main row pauses). SHIFT-ONLY (any side, no Ctrl/Alt) and the
+  -- no-modifier case both scroll the MAIN row normally and clear the stack.
+  local mod = ""
+  local stackEnabled = (addon.GetModkeyStackEnabled == nil) or addon:GetModkeyStackEnabled()
+  if stackEnabled and addon.GetHeldModifierString then
+    mod = addon:GetHeldModifierString() or ""
+  end
+  local isModkeyStack = (mod ~= "") and (mod:find("Ctrl") ~= nil or mod:find("Alt") ~= nil)
+
+  if isModkeyStack then
+    if addon.PushModkeyStackIcon then
+      addon:PushModkeyStackIcon(texture, mod)
+    end
+    return true
+  end
+
+  if addon.ClearModkeyStacks then
+    addon:ClearModkeyStacks()
+  end
+
+  local pushed = self:PushRecentTexture(texture)
+  -- On an AH-suggestion match, show the proc as a separate CENTERED icon (grows in,
+  -- glows, fades) so the main row stays undisturbed.
+  if pushed and matchedSuggestion and addon.ShowProcCenterIcon then
+    addon:ShowProcCenterIcon(texture)
+  end
+  return pushed
 end
 
 function Tracker:InitTracker()
