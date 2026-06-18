@@ -33,7 +33,7 @@ Integrates natively with **[GSE](https://www.curseforge.com/wow/addons/gse-gnome
 
 **GSE: Tracker** gives you a cleaner, more customizable way to see what your macros are doing in combat — then adds the awareness tools you'd otherwise need three separate addons for. Everything is configurable from one settings window with **live previews**.
 
-> **Access:** type `/gsetracker` or click the **minimap button**.
+> **Option Access:** with `In Game Option Panel` > `/gsetracker` > `minimap button`.
 
 ---
 
