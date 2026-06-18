@@ -640,6 +640,14 @@ local function MakeEnableShow(pane, y, desc)
   local dd = CreateWowDropdown(pane, 220, desc.showOptions, sget, sset)
   dd:SetPoint("LEFT", cb, "RIGHT", 180, 0)
   AttachTooltip(dd, "Show When", desc.tooltip2 or "When this element is visible: Always, only In Combat, only when you have a Harm Target, or Never.")
+  -- Optional column header drawn above this dropdown (set on the top row to label the
+  -- whole show-when column).
+  if desc.showHeader then
+    local sh = pane:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    sh:SetPoint("BOTTOMLEFT", dd, "TOPLEFT", 2, 5)
+    sh:SetText(desc.showHeader)
+    sh:SetTextColor(1, 1, 1)
+  end
   return 40
 end
 
@@ -1123,8 +1131,11 @@ local function GeneralRows()
       get = function() return not (addon.GetMinimapHidden and addon:GetMinimapHidden()) end,
       set = function(v) if addon.SetMinimapHidden then addon:SetMinimapHidden(not v) end end,
       tooltip = "Show or hide the GSE: Tracker minimap button." },
+    { type = "check", label = "Hide Login Message",
+      get = "GetHideLoginMessage", set = "SetHideLoginMessage",
+      tooltip = "Stop showing the GSE: Tracker welcome window each time you log in." },
     { type = "header", text = "Enable" },
-    { type = "enableshow", label = "Meters", tooltip = "Enable the Meters readout (DPS/HPS, GCD, and AH match %).",
+    { type = "enableshow", label = "Meters", showHeader = "Visibility", tooltip = "Enable the Meters readout (DPS/HPS, GCD, and AH match %).",
       get = function() return _G.MetersSavedVars and _G.MetersSavedVars.enabled ~= false end,
       set = function(v)
         if _G.MetersSavedVars then _G.MetersSavedVars.enabled = v and true or false end
@@ -1602,6 +1613,16 @@ local function RegisterSettings()
 end
 
 function Options:OpenSettingsWindow()
+  -- Combat lock: the Blizzard Settings panel is a PROTECTED frame, so Settings.OpenToCategory
+  -- (which ShowUIPanel's it) is blocked in combat and throws an ADDON_ACTION_BLOCKED error --
+  -- even though it's Blizzard's own panel. Bail politely instead; the user can retry OOC.
+  if _G.InCombatLockdown and _G.InCombatLockdown() then
+    local cf = _G.DEFAULT_CHAT_FRAME
+    if cf and cf.AddMessage then
+      cf:AddMessage("|cFFFFFFFFGS|r|cFF00FFFFE|r|cFFFFFF00: Tracker|r |cffff5555Options can't be opened during combat.|r Try again after combat.")
+    end
+    return
+  end
   RegisterSettings()
   -- Re-scan marker-images and repopulate the option tables IN PLACE so the dropdowns show
   -- the current files each time the window opens (the menus read these tables live on open).
@@ -1635,6 +1656,163 @@ function Options:CloseSettingsWindow()
   if SettingsPanel and SettingsPanel:IsShown() and SettingsPanel.Close then
     SettingsPanel:Close()
   end
+end
+
+-- ── Login / welcome window (5-page) ──────────────────────────────────────────
+-- Shown once per login UNLESS "Hide Login Message" (General tab) is checked. A paged
+-- walkthrough: each page shows an image (and optional caption). To drop in artwork
+-- later, just set `image` on the matching LOGIN_PAGES entry (a texture path) and it
+-- renders automatically; until then each page shows a grey placeholder.
+local LOGIN_PAGES = {
+  { image = "Interface\\AddOns\\GSE_Tracker\\media\\GTLogin\\GSETRK-LoginGEN.png", w = 500, h = 500, caption = "" },
+  { image = "Interface\\AddOns\\GSE_Tracker\\media\\GTLogin\\GSETRK-LoginMeters.png", w = 500, h = 500, caption = "" },
+  { image = "Interface\\AddOns\\GSE_Tracker\\media\\GTLogin\\GSETRK-LoginAssistedHighlight.png", w = 500, h = 500, caption = "" },
+  { image = "Interface\\AddOns\\GSE_Tracker\\media\\GTLogin\\GSETRK-LoginActionTracker.png", w = 500, h = 500, caption = "" },
+  { image = "Interface\\AddOns\\GSE_Tracker\\media\\GTLogin\\GSETRK-LoginQoL.png", w = 500, h = 500, caption = "" },
+}
+
+local loginMessageFrame
+
+local function UpdateLoginPage(f)
+  local total = #LOGIN_PAGES
+  local page = f._page or 1
+  if page < 1 then page = 1 elseif page > total then page = total end
+  f._page = page
+  local data = LOGIN_PAGES[page] or {}
+
+  local INSET_L, INSET_R, INSET_T, INSET_B = 11, 12, 12, 11
+  if data.image then
+    -- Frame wraps the image EXACTLY: dialog size = image size + backdrop insets.
+    -- Prefer the image's NATIVE size (data.w/h) -- no downscaling. Fall back to an
+    -- aspect-fit only for pages that don't declare explicit dimensions.
+    local w, h = tonumber(data.w), tonumber(data.h)
+    if not (w and h) then
+      local MAX_IMG = 380
+      local aspect = tonumber(data.aspect) or 1
+      if aspect >= 1 then w, h = MAX_IMG, MAX_IMG / aspect else w, h = MAX_IMG * aspect, MAX_IMG end
+    end
+    f.image:SetTexture(data.image)
+    f.image:ClearAllPoints()
+    f.image:SetPoint("TOPLEFT", f, "TOPLEFT", INSET_L, -INSET_T)
+    f.image:SetSize(w, h)
+    f.image:Show()
+    f.imgText:Hide()
+    f:SetSize(w + INSET_L + INSET_R, h + INSET_T + INSET_B)
+  else
+    f.image:Hide()
+    f.imgText:SetText("IMAGE WILL GO HERE LATER\n(Page " .. page .. " of " .. total .. ")")
+    f.imgText:Show()
+    f:SetSize(420, 300)
+  end
+
+  if f.prev then if page <= 1 then f.prev:Disable() else f.prev:Enable() end end
+  if f.next then if page >= total then f.next:Disable() else f.next:Enable() end end
+end
+
+local function BuildLoginMessageFrame()
+  if loginMessageFrame then return loginMessageFrame end
+
+  local f = CreateFrame("Frame", "GSETrackerLoginMessageFrame", UIParent, "BackdropTemplate")
+  f:SetSize(480, 400)
+  f:SetPoint("CENTER")
+  f:SetFrameStrata("DIALOG")
+  f:SetToplevel(true)
+  f:EnableMouse(true)
+  f:SetMovable(true)
+  f:RegisterForDrag("LeftButton")
+  f:SetScript("OnDragStart", f.StartMoving)
+  f:SetScript("OnDragStop", f.StopMovingOrSizing)
+  f:SetBackdrop({
+    bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+    edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+    tile = true, tileSize = 32, edgeSize = 32,
+    insets = { left = 11, right = 12, top = 12, bottom = 11 },
+  })
+  -- ESC closes it (add a key to the Blizzard table -- never reassign the table).
+  if UISpecialFrames then table.insert(UISpecialFrames, "GSETrackerLoginMessageFrame") end
+
+  -- Corner close (X) -- no title bar / labels; the image is the whole content.
+  local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+  close:SetPoint("TOPRIGHT", -2, -2)
+
+  -- Page image (size/anchor set per-page in UpdateLoginPage).
+  local image = f:CreateTexture(nil, "ARTWORK")
+  image:SetPoint("TOPLEFT", f, "TOPLEFT", 11, -12)
+  image:Hide()
+  f.image = image
+
+  -- Placeholder text for pages that don't have an image yet.
+  local imgText = f:CreateFontString(nil, "ARTWORK", "GameFontDisableLarge")
+  imgText:SetPoint("CENTER")
+  imgText:SetJustifyH("CENTER")
+  imgText:SetText("IMAGE WILL GO HERE LATER")
+  f.imgText = imgText
+
+  -- Small Prev / Next arrows, centred at the bottom (overlaid on the image edge).
+  local prev = CreateFrame("Button", nil, f)
+  prev:SetSize(32, 32)
+  prev:SetPoint("BOTTOM", f, "BOTTOM", -22, 18)
+  prev:SetNormalTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Up")
+  prev:SetPushedTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Down")
+  prev:SetDisabledTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Disabled")
+  prev:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight", "ADD")
+  prev:SetScript("OnClick", function() f._page = (f._page or 1) - 1; UpdateLoginPage(f) end)
+  f.prev = prev
+
+  local nextb = CreateFrame("Button", nil, f)
+  nextb:SetSize(32, 32)
+  nextb:SetPoint("BOTTOM", f, "BOTTOM", 22, 18)
+  nextb:SetNormalTexture("Interface\\Buttons\\UI-SpellbookIcon-NextPage-Up")
+  nextb:SetPushedTexture("Interface\\Buttons\\UI-SpellbookIcon-NextPage-Down")
+  nextb:SetDisabledTexture("Interface\\Buttons\\UI-SpellbookIcon-NextPage-Disabled")
+  nextb:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight", "ADD")
+  nextb:SetScript("OnClick", function() f._page = (f._page or 1) + 1; UpdateLoginPage(f) end)
+  f.next = nextb
+
+  -- "Hide Login Message" checkbox -- no visible label (tooltip explains it), bottom-left.
+  local check = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
+  check:SetSize(24, 24)
+  check:SetPoint("LEFT", f, "BOTTOMLEFT", 33, 34)  -- vertical centre aligned with the arrow row (arrows: bottom 18 + half of 32)
+  check:SetScript("OnClick", function(self)
+    if addon.SetHideLoginMessage then addon:SetHideLoginMessage(self:GetChecked() and true or false) end
+  end)
+  check:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    GameTooltip:SetText("Hide Login Message", 1, 1, 1)
+    GameTooltip:AddLine("Don't show this window on future logins.", 0.8, 0.8, 0.8, true)
+    GameTooltip:Show()
+  end)
+  check:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  local checkLabel = f:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+  checkLabel:SetPoint("LEFT", check, "RIGHT", 2, 0)
+  checkLabel:SetText("Hide Login Message")
+  f.check = check
+
+  loginMessageFrame = f
+  return f
+end
+
+function Options:ShowLoginMessage()
+  -- Respect the opt-out, and don't pop a movable frame during combat lockdown.
+  if addon.GetHideLoginMessage and addon:GetHideLoginMessage() then return end
+  if _G.InCombatLockdown and _G.InCombatLockdown() then return end
+  local f = BuildLoginMessageFrame()
+  if f.check and f.check.SetChecked then
+    f.check:SetChecked(addon.GetHideLoginMessage and addon:GetHideLoginMessage() or false)
+  end
+  f._page = 1
+  UpdateLoginPage(f)
+  -- Showing during PLAYER_LOGIN gets swept away by the loading-screen / CloseSpecialWindows
+  -- pass (UISpecialFrames are hidden as the world finishes loading). Defer the show to the
+  -- first PLAYER_ENTERING_WORLD so the window lands AFTER the loading screen.
+  if not f._pewWaiter then f._pewWaiter = CreateFrame("Frame") end
+  f._pewWaiter:RegisterEvent("PLAYER_ENTERING_WORLD")
+  f._pewWaiter:SetScript("OnEvent", function(waiter)
+    waiter:UnregisterEvent("PLAYER_ENTERING_WORLD")
+    -- Re-check the opt-out in case it was toggled between login and world-load.
+    if addon.GetHideLoginMessage and addon:GetHideLoginMessage() then return end
+    f:Show()
+  end)
 end
 
 local loginFrame = CreateFrame("Frame")

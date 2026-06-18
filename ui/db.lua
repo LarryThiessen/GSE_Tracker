@@ -366,6 +366,17 @@ function Utils:SetMinimapHidden(value)
   PersistRuntimeChange(db)
 end
 
+function Utils:GetHideLoginMessage()
+  local _, general = GetRuntimeDB()
+  return general.hideLoginMessage and true or false
+end
+
+function Utils:SetHideLoginMessage(value)
+  local db, general = GetRuntimeDB()
+  general.hideLoginMessage = not not value
+  PersistRuntimeChange(db)
+end
+
 
 local NormalizeAssistedHighlightPointName
 local NormalizeAssistedHighlightAnchorTarget

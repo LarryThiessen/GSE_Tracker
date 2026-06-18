@@ -1,3 +1,16 @@
+## 1.2.1
+
+### New
+- **First-login welcome walkthrough.** A 5-page visual guide (General, Meters, Assisted Highlight, Action Tracker, Quality of Life) shows once each login. Page through it with the arrows; tick **Hide Login Message** to stop showing it (also under General settings).
+- **GitHub & bug-report links** added to the options social bar.
+
+### Changed
+- Added a **Visibility** heading above the show-when dropdowns on the General tab.
+
+### Fixed
+- Opening the options window **in combat** no longer errors — it's deferred with a notice until combat ends.
+- Removed the false **"compatibility mode"** warning on the current client (interface target updated to 120007).
+
 ## 1.2.0
 
 ### New

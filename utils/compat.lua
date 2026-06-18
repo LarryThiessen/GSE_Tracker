@@ -5,7 +5,9 @@ local API = (ns.Utils and ns.Utils.API) or {}
 local Compat = ns.Utils.Compat or {}
 ns.Utils.Compat = Compat
 
-Compat.TARGET_INTERFACE = 120001
+-- Keep this in sync with the TOC "## Interface:" number on every patch bump, or the
+-- "future interface / compatibility mode" warning fires on the current client.
+Compat.TARGET_INTERFACE = 120007
 Compat.MIN_TESTED_INTERFACE = 110000
 Compat._warnedKeys = Compat._warnedKeys or {}
 Compat._featureCache = Compat._featureCache or {}

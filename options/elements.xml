@@ -26,14 +26,54 @@
   </Frame>
 
   <Frame name="GSETrackerSocialTemplate" virtual="true" mixin="GSETrackerSocialMixin">
-    <Size x="150" y="52"/>
+    <Size x="240" y="52"/>
     <Frames>
       <!-- Button widths match each logo's aspect ratio (height 26) so the icons
-           render at their natural proportions instead of being squished square. -->
+           render at their natural proportions instead of being squished square.
+           Order L->R: GitHub, Report Bug, Discord, Patreon, Ko-fi; centred 47px
+           centre-to-centre about the frame centre. -->
+      <Button parentKey="GitHub">
+        <Size x="26" y="26"/>
+        <Anchors>
+          <Anchor point="CENTER" x="-94" y="0"/>
+        </Anchors>
+        <NormalTexture file="Interface\AddOns\GSE_Tracker\media\github.png"/>
+        <HighlightTexture file="Interface\AddOns\GSE_Tracker\media\github.png" alphaMode="ADD"/>
+        <Scripts>
+          <OnEnter>
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:SetText("GitHub", 1, 0.82, 0)
+            GameTooltip:AddLine("View the source on GitHub", 0.8, 0.8, 0.8, true)
+            GameTooltip:AddLine("Click to open in your browser", 0.6, 0.8, 1, true)
+            GameTooltip:Show()
+          </OnEnter>
+          <OnLeave>GameTooltip:Hide()</OnLeave>
+          <OnClick>GSETracker_OpenLink("https://github.com/LarryThiessen/GSE_Tracker", "GitHub")</OnClick>
+        </Scripts>
+      </Button>
+      <Button parentKey="Bug">
+        <Size x="26" y="26"/>
+        <Anchors>
+          <Anchor point="CENTER" x="-47" y="0"/>
+        </Anchors>
+        <NormalTexture file="Interface\AddOns\GSE_Tracker\media\bug.png"/>
+        <HighlightTexture file="Interface\AddOns\GSE_Tracker\media\bug.png" alphaMode="ADD"/>
+        <Scripts>
+          <OnEnter>
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:SetText("Report a Bug", 1, 0.82, 0)
+            GameTooltip:AddLine("Report a bug or request a feature on GitHub", 0.8, 0.8, 0.8, true)
+            GameTooltip:AddLine("Click to open in your browser", 0.6, 0.8, 1, true)
+            GameTooltip:Show()
+          </OnEnter>
+          <OnLeave>GameTooltip:Hide()</OnLeave>
+          <OnClick>GSETracker_OpenLink("https://github.com/LarryThiessen/GSE_Tracker/issues", "GitHub Issues")</OnClick>
+        </Scripts>
+      </Button>
       <Button parentKey="Discord">
         <Size x="31" y="26"/>
         <Anchors>
-          <Anchor point="CENTER" x="-46" y="0"/>
+          <Anchor point="CENTER" x="0" y="0"/>
         </Anchors>
         <NormalTexture file="Interface\AddOns\GSE_Tracker\media\Discord-Logo.png"/>
         <HighlightTexture file="Interface\AddOns\GSE_Tracker\media\Discord-Logo.png" alphaMode="ADD"/>
@@ -52,7 +92,7 @@
       <Button parentKey="Patreon">
         <Size x="26" y="26"/>
         <Anchors>
-          <Anchor point="CENTER" x="0" y="0"/>
+          <Anchor point="CENTER" x="47" y="0"/>
         </Anchors>
         <NormalTexture file="Interface\AddOns\GSE_Tracker\media\patreon.png"/>
         <HighlightTexture file="Interface\AddOns\GSE_Tracker\media\patreon.png" alphaMode="ADD"/>
@@ -71,7 +111,7 @@
       <Button parentKey="Kofi">
         <Size x="40" y="26"/>
         <Anchors>
-          <Anchor point="CENTER" x="48" y="0"/>
+          <Anchor point="CENTER" x="94" y="0"/>
         </Anchors>
         <NormalTexture file="Interface\AddOns\GSE_Tracker\media\kofi_s_logo_nolabel.png"/>
         <HighlightTexture file="Interface\AddOns\GSE_Tracker\media\kofi_s_logo_nolabel.png" alphaMode="ADD"/>

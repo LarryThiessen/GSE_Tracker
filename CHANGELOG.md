@@ -6,6 +6,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-06-18
+
+### Added
+- First-login welcome walkthrough: a 5-page visual guide (General, Meters, Assisted Highlight, Action Tracker, Quality of Life) shown once per login. Page through it with the arrows; dismiss with "Hide Login Message" (also a General-tab option).
+- GitHub and bug-report links in the options social bar.
+- A "Visibility" heading above the General-tab show-when dropdowns.
+
+### Fixed
+- Opening the options window while in combat no longer throws an error — it's deferred with a notice until combat ends.
+- Removed the false "compatibility mode" warning on the current client (interface target updated to 120007).
+
 ## [1.1.5] - 2026-04-12
 
 ### Changed

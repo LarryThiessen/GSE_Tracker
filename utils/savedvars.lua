@@ -36,6 +36,7 @@ local ROOT_DEFAULTS = {
     locked = true,
     showWhen = C.MODE_ALWAYS or "Always",
     strata = C.DEFAULT_COMBAT_TRACKER_STRATA or (C.STRATA_MEDIUM or "MEDIUM"),
+    hideLoginMessage = false,
   },
   display = {
     scale = C.DEFAULT_SCALE or 1.00,
@@ -341,6 +342,7 @@ local function NormalizeCanonical(db)
   general.locked = not not general.locked
   general.showWhen = VALID_SHOW[tostring(general.showWhen)] and tostring(general.showWhen) or ROOT_DEFAULTS.general.showWhen
   general.strata = VALID_FRAME_STRATA[tostring(general.strata)] and tostring(general.strata) or ROOT_DEFAULTS.general.strata
+  general.hideLoginMessage = not not general.hideLoginMessage
 
   local appearance = EnsureTable(db, "appearance")
   appearance.skin = VALID_SKIN[tostring(appearance.skin)] and tostring(appearance.skin) or ROOT_DEFAULTS.appearance.skin

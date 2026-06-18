@@ -6,7 +6,7 @@
 
 **<font color="#f06292">Meters</font> ·&nbsp; <font color="#ffd54f">Assisted Highlight</font> &nbsp;·&nbsp; <font color="#4fc3f7">Action Tracker</font> &nbsp; ·&nbsp;<font color="#4fc3f7">Quality of Life</font> &nbsp;**
 
-[![Version](https://img.shields.io/badge/Version-1.2.0-4fc3f7?style=for-the-badge&logoColor=white)](https://www.curseforge.com/wow/addons/gse-tracker)
+[![Version](https://img.shields.io/badge/Version-1.2.1-4fc3f7?style=for-the-badge&logoColor=white)](https://www.curseforge.com/wow/addons/gse-tracker)
 [![WoW](https://img.shields.io/badge/WoW-Retail-00b4d8?style=for-the-badge)](https://www.curseforge.com/wow/addons/gse-tracker)
 [![License](https://img.shields.io/badge/License-MIT-ffd54f?style=for-the-badge)](License)
 [![CurseForge](https://img.shields.io/badge/CurseForge-Download-f16436?style=for-the-badge&logo=curseforge&logoColor=white)](https://www.curseforge.com/wow/addons/gse-tracker)
