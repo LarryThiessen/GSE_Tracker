@@ -1,3 +1,9 @@
+## 1.3.1
+
+### Fixed
+- **Element positions now save.** Dragged elements — the **Pressed Indicator**, the **Sequence/Macro/Spell name**, and the **Modifier text** — were snapping back to default after relocking/reloading; a saved-variable key collision was wiping the stored offsets on every save. They persist correctly now.
+- The **Pressed Indicator** stays above the Action Tracker icons (no longer drops behind them when the options panel is open).
+
 ## 1.3.0
 
 ### New

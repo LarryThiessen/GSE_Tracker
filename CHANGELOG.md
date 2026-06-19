@@ -6,6 +6,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-06-19
+
+### Fixed
+- Element positions now persist. A saved-variable key collision (the legacy "layout" flat key vs the current `layout` element table) wiped the saved offsets on every save, so dragged elements — the Pressed Indicator, the Sequence/Macro/Spell name, and the Modifier text — snapped back to their default positions after relocking or reloading.
+- The Pressed Indicator now stays above the Action Tracker icons (it no longer drops behind them when the options panel is open).
+
 ## [1.3.0] - 2026-06-18
 
 ### Added

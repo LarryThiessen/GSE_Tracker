@@ -90,11 +90,8 @@ function UI:UpdatePressedIndicatorDragState()
 
   frame:SetMovable(unlocked)
   frame:EnableMouse(unlocked)
-  -- While the options panel is open, sit BELOW it (LOW) so it neither grabs the mouse nor draws
-  -- over the panel -- regardless of lock state. Prominent (HIGH) otherwise. (LOW, not MEDIUM:
-  -- the Classic options panel sits at MEDIUM.)
-  local optionsOpen = _G.SettingsPanel and _G.SettingsPanel.IsShown and _G.SettingsPanel:IsShown()
-  frame:SetFrameStrata(optionsOpen and "LOW" or "HIGH")
+  -- Strata stays HIGH (set at creation); while the options panel is open the indicator is
+  -- HIDDEN by RefreshPressedIndicator rather than lowered, so it never goes behind its icons.
 end
 
 -- Thin wrapper so the OnDragStop closure (which only has the addon table) can reach the

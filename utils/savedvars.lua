@@ -568,7 +568,8 @@ function SV:SyncLegacyMirrorToCanonical(db)
   if db.scale ~= nil then display.scale = db.scale end
   if db.iconCount ~= nil then display.iconCount = db.iconCount end
   if db.iconGap ~= nil then display.iconGap = db.iconGap end
-  if db.layout ~= nil then display.layout = db.layout end
+  -- Only the LEGACY string form maps to the direction; the new db.layout is the element table.
+  if type(db.layout) == "string" then display.layout = db.layout end
   if db.scrollDirection ~= nil then display.scrollDirection = db.scrollDirection end
   if db.border ~= nil then display.border = db.border end
   if db.borderThickness ~= nil then display.borderThickness = db.borderThickness end
@@ -645,7 +646,13 @@ end
 local function CleanupLegacyFlatKeys(db)
   if type(db) ~= "table" then return end
   for _, key in ipairs(LEGACY_IMPORT_KEYS) do
-    db[key] = nil
+    -- NAME COLLISION: "layout" is a legacy FLAT key (the HORIZONTAL/VERTICAL direction string),
+    -- but the CURRENT schema also stores db.layout as the element-layout TABLE
+    -- (db.layout.elements = drag offsets). Only strip the legacy STRING form -- nil-ing the
+    -- table here wiped every element's saved position on each flush.
+    if not (key == "layout" and type(db.layout) == "table") then
+      db[key] = nil
+    end
   end
   db._schemaVersion = nil
 end

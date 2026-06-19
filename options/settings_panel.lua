@@ -1696,8 +1696,7 @@ end
 local function RefreshOverlayStrata()
   if not (C_Timer and C_Timer.After) then return end
   C_Timer.After(0, function()
-    if _G.Meter_UpdateVisibility then _G.Meter_UpdateVisibility() end
-    if addon.UpdatePressedIndicatorDragState then addon:UpdatePressedIndicatorDragState() end
+    if _G.Meter_UpdateVisibility then _G.Meter_UpdateVisibility() end  -- marker drops below the panel while open
   end)
 end
 
