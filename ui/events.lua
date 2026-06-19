@@ -86,6 +86,15 @@ local function HandleCombatEvent(_, event)
       local changed = uiShared.SyncModifiers(ui)
       addon:UpdateModifiers(changed)
     end
+    -- Once the load settles, reconcile modifier state from live key queries to clear any side
+    -- left stuck by a key-up missed during the loading screen (the "LCtrl shows for no reason
+    -- on login" case). Live is reliable here -- this isn't a press-event moment.
+    if C_Timer and C_Timer.After and uiShared.ReconcileModifiersFromLive then
+      C_Timer.After(1.0, function()
+        uiShared.ReconcileModifiersFromLive(ui)
+        if addon.UpdateModifiers then addon:UpdateModifiers(true) end
+      end)
+    end
     if addon.RefreshDragMouseState then addon:RefreshDragMouseState() end
     if combatChanged or ui._lastVisible == nil or needsTargetVisibilityRefresh then
       addon:ApplyVisibility()

@@ -8,6 +8,11 @@ panel:Hide()
 local LSM = LibStub("LibSharedMedia-3.0")
 MetersSavedVars = MetersSavedVars or {}
 
+-- Retail-only readouts depend on C_DamageMeter (absent on Classic). Detected directly here
+-- because the addon's ns.Caps isn't populated until ADDON_LOADED (after this file runs).
+local METERS_CAPABLE = ((not _G.WOW_PROJECT_ID) or (_G.WOW_PROJECT_ID == (_G.WOW_PROJECT_MAINLINE or 1)))
+  and (_G.C_DamageMeter and _G.C_DamageMeter.GetAvailableCombatSessions) and true or false
+
 if MetersSavedVars.showAHLight == nil and MetersSavedVars.showSBA ~= nil then
     MetersSavedVars.showAHLight = MetersSavedVars.showSBA
 end
@@ -828,6 +833,19 @@ resetBtn:SetScript("OnClick", function()
     ApplyFontSettings(); ApplyDisplayToggles(); ApplyDetailsToggle(); ApplyDetailsCombatToggle()
     UpdateLockState(); UpdateLockLabel(); ApplyOpacity(); ApplyRefreshRate(); UpdateVisibility()
 end)
+
+-- Classic: grey out + lock the retail-only readout controls (the Center Marker, rendered
+-- separately, and the frame controls stay usable). Done once at build time -- NOT in OnShow,
+-- which would mutate the embedded Settings canvas and risk taint.
+if not METERS_CAPABLE then
+    local function dim(w)
+        if not w then return end
+        if w.SetEnabled then w:SetEnabled(false) elseif w.Disable then w:Disable() end
+        if w.Text and w.Text.SetTextColor then w.Text:SetTextColor(0.5, 0.5, 0.5) end
+    end
+    dim(gcdCB); dim(dpsCB); dim(hpsCB); dim(ahLightUsageCB)
+    dim(detailsCB); dim(detailsCombatCB); dim(refreshRateSlider)
+end
 
 panel:SetScript("OnShow", function()
     SyncLegacyShowAHLight()

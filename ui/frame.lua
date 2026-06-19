@@ -116,8 +116,12 @@ local function GetActionTrackerRowRelativeBaselineOffsets(ui)
     }
   end
 
-  -- Sit just below the icon row, nudged up 2px to tuck the labels closer.
-  local modsY = -(rowHalfY + (uiShared.GAP_ICONS_MODS or 6) + ((uiShared.MODS_H or 14) * 0.5)) + 2
+  -- Sit just below the icon row, nudged up 2px to tuck the labels closer. On Classic flavors
+  -- the default action-button border art is a touch larger, crowding the modifier label, so
+  -- drop it 5px more there (Retail unchanged).
+  local mainline = (not _G.WOW_PROJECT_ID) or (_G.WOW_PROJECT_ID == (_G.WOW_PROJECT_MAINLINE or 1))
+  local modsExtraY = mainline and 0 or -5
+  local modsY = -(rowHalfY + (uiShared.GAP_ICONS_MODS or 6) + ((uiShared.MODS_H or 14) * 0.5)) + 2 + modsExtraY
   -- Sequence name sits above the icon with the SAME gap the mods use below it
   -- (mirror of modsY); keybind stacks 10px above the name (the original spacing).
   -- Was hardcoded 17/27, which overlapped the icon's top.

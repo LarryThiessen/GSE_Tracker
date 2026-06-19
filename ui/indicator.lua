@@ -90,6 +90,11 @@ function UI:UpdatePressedIndicatorDragState()
 
   frame:SetMovable(unlocked)
   frame:EnableMouse(unlocked)
+  -- While the options panel is open, sit BELOW it (LOW) so it neither grabs the mouse nor draws
+  -- over the panel -- regardless of lock state. Prominent (HIGH) otherwise. (LOW, not MEDIUM:
+  -- the Classic options panel sits at MEDIUM.)
+  local optionsOpen = _G.SettingsPanel and _G.SettingsPanel.IsShown and _G.SettingsPanel:IsShown()
+  frame:SetFrameStrata(optionsOpen and "LOW" or "HIGH")
 end
 
 -- Thin wrapper so the OnDragStop closure (which only has the addon table) can reach the
@@ -107,6 +112,9 @@ local function ResolvePressedIndicatorRGB(self)
   elseif mode == "class" then
     local UnitClass = _G.UnitClass
     local _, classFile = (UnitClass and UnitClass("player"))
+    -- Classic quirk: RAID_CLASS_COLORS.SHAMAN is Paladin pink. Force the real blue when there's
+    -- no CUSTOM_CLASS_COLORS override (harmless on Retail).
+    if classFile == "SHAMAN" and not _G.CUSTOM_CLASS_COLORS then return 0.0, 0.44, 0.87 end
     local colors = _G.CUSTOM_CLASS_COLORS or _G.RAID_CLASS_COLORS
     local c = classFile and colors and colors[classFile]
     if c then return c.r, c.g, c.b end

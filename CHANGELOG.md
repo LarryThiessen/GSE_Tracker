@@ -6,6 +6,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-06-18
+
+### Added
+- **Classic support.** GSE: Tracker now loads on Classic Era (Vanilla), Burning Crusade Classic (Anniversary), and Mists of Pandaria Classic, each via its own TOC (`_Vanilla` / `_TBC` / `_Mists`).
+- Retail-only features (Assisted Highlight, and the Meters readouts: DPS / HPS / GCD / SBA% / Details) are automatically greyed out and disabled on Classic, where their APIs don't exist. The Center Marker still works on Classic.
+- The "loaded" chat line now shows the running interface version; on Classic it adds a note that greyed-out features aren't available on that version.
+
+### Fixed
+- Classic: Shaman class color showed Paladin pink (a Blizzard `RAID_CLASS_COLORS` data quirk) — now forced to the correct blue.
+- Classic: Action Tracker icons no longer show a gap between the icon and the stock button border; the modifier label spacing was tidied.
+- The Center Marker and Pressed Indicator now drop below the options panel while it's open (they no longer grab its sliders or draw over it) and return to the top when it closes.
+- Fixed a phantom modifier (e.g. "LCtrl") sometimes shown right after logging in — modifier state now reconciles from live key state.
+- Removed the false "below minimum tested / compatibility mode" warning on Classic.
+
 ## [1.2.1] - 2026-06-18
 
 ### Added

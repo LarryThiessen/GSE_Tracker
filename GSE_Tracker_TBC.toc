@@ -1,4 +1,4 @@
-## Interface: 120007
+## Interface: 20505
 ## Title: |cFFFFFFFFGS|r|cFF00FFFFE:|r|cFFFFFF00 Tracker|r
 ## Notes: Standalone Action Tracker
 ## Author: Artseeker
@@ -75,9 +75,8 @@ tracker\tracker.lua
 tracker\gse_bridge.lua
 
 # Meters (ported from Gnomester -- self-contained meters engine + options panel).
-# Builds the global _G.MetersOptionsPanel which the Meters settings tab embeds.
-# MetersStore loads FIRST: aliases MetersSavedVars into GSE_Tracker's own store so
-# meters settings save in the same file and follow the Account Wide / per-char toggle.
+# On Classic these stay loaded but inert: C_DamageMeter / C_AssistedCombat are absent,
+# so the meters cluster is gated off (ns.Caps.meters) and its option is greyed out.
 meters\MetersStore.lua
 meters\Details.lua
 meters\AHLight.lua

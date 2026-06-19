@@ -271,6 +271,8 @@ function uiShared.GetSkinAccentColor()
     if ok and type(r) == "number" then return r, g, b end
   end
   local ok, _, class = pcall(API.UnitClass or _G.UnitClass, "player")
+  -- Classic quirk: RAID_CLASS_COLORS.SHAMAN is Paladin pink; force the real blue (no CUSTOM override).
+  if ok and class == "SHAMAN" and not _G.CUSTOM_CLASS_COLORS then return 0.0, 0.44, 0.87 end
   local t = _G.CUSTOM_CLASS_COLORS or _G.RAID_CLASS_COLORS
   local c = ok and class and t and t[class]
   if c then return c.r, c.g, c.b end
@@ -384,6 +386,15 @@ function uiShared.GetActionButtonBorder()
       return { atlas = "UI-HUD-ActionBar-IconFrame", wRatio = 46 / 45, hRatio = 45 / 45 }
     end
     return nil
+  end
+
+  -- Classic flavors have no clean icon-frame atlas, and their stock button border (the gold
+  -- Quickslot art) has a big transparent margin that, when adopted, leaves a GAP between the
+  -- icon and the visible ring. Don't auto-adopt it -- use the native atlas if present, else no
+  -- frame art (icons render tight, no gap).
+  local mainline = (not _G.WOW_PROJECT_ID) or (_G.WOW_PROJECT_ID == (_G.WOW_PROJECT_MAINLINE or 1))
+  if not mainline then
+    return NativeAtlasBorder()
   end
 
   -- Force Native -> Blizzard default; AUTO -> adopt the player's actual ActionButton1 art.
@@ -509,6 +520,12 @@ local function GetPlayerClassColorRGB(fallbackR, fallbackG, fallbackB)
   end
 
   local class = classFile or localizedClass
+  -- Classic data quirk: RAID_CLASS_COLORS.SHAMAN is the Paladin PINK (Shaman/Paladin are
+  -- faction-mirror classes in Classic). With no CUSTOM_CLASS_COLORS override, force the real
+  -- Shaman blue. Harmless on Retail (already this colour).
+  if class == "SHAMAN" and not CUSTOM_CLASS_COLORS then
+    return 0.0, 0.44, 0.87
+  end
   local colors = CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS
   local c = class and colors and colors[class]
   if c then

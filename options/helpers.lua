@@ -120,6 +120,11 @@ function optionsModule.GetClassColor()
   if UnitClass then
     _, classTag = UnitClass("player")
   end
+  -- Classic quirk: RAID_CLASS_COLORS.SHAMAN is Paladin pink. Force the real blue when there's
+  -- no CUSTOM_CLASS_COLORS override (harmless on Retail).
+  if classTag == "SHAMAN" and not CUSTOM_CLASS_COLORS then
+    return 0.0, 0.44, 0.87
+  end
   local color = classTag and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classTag]
   if color then
     return color.r, color.g, color.b

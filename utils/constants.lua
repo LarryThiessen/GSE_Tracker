@@ -7,7 +7,7 @@ local C = Utils.Constants or {}
 Utils.Constants = C
 addon.Constants = C
 
-C.ADDON_VERSION = "1.2.1"
+C.ADDON_VERSION = "1.3.0"
 C.SCHEMA_VERSION = 3 -- NOTE: bump MAX_IMPLEMENTED_MIGRATION in savedvars.lua in sync with this value, and add the corresponding MigrateToVersion<N> function first
 C.DB_NAME = "GSETrackerDB"
 C.ADDON_DISPLAY_NAME = "|cFFFFFFFFGS|r|cFF00FFFFE:|r|cFFFFFF00 Tracker|r"

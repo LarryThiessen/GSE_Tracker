@@ -492,18 +492,37 @@ function uiShared.SyncModifiers(ui)
   ui._modAlt = alt
   ui._modShift = shift
   ui._modCtrl = ctrl
-  -- Seed the SIDE-specific state from live queries (timing is fine here -- this is
-  -- not a press event). The combo readout reads this table.
-  local g = _G
+  -- Do NOT seed the SIDE-specific state from live IsXKeyDown() here. Right after /reload
+  -- (this runs on PLAYER_ENTERING_WORLD) the client can still report a modifier as "down"
+  -- because the key-up was never seen -- which made the readout show e.g. "LCtrl" for no
+  -- reason until the user pressed+released that key. Start CLEARED; MODIFIER_STATE_CHANGED
+  -- (ApplyModifierEvent) populates the real side state the moment a modifier is pressed.
   local s = ui._sideMod or {}
-  s.LSHIFT = (g.IsLeftShiftKeyDown    and g.IsLeftShiftKeyDown())    and true or false
-  s.RSHIFT = (g.IsRightShiftKeyDown   and g.IsRightShiftKeyDown())   and true or false
-  s.LCTRL  = (g.IsLeftControlKeyDown  and g.IsLeftControlKeyDown())  and true or false
-  s.RCTRL  = (g.IsRightControlKeyDown and g.IsRightControlKeyDown()) and true or false
-  s.LALT   = (g.IsLeftAltKeyDown      and g.IsLeftAltKeyDown())      and true or false
-  s.RALT   = (g.IsRightAltKeyDown     and g.IsRightAltKeyDown())     and true or false
+  s.LSHIFT, s.RSHIFT, s.LCTRL, s.RCTRL, s.LALT, s.RALT = false, false, false, false, false, false
   ui._sideMod = s
   return changed
+end
+
+-- Set the side-specific modifier state from LIVE key queries. Safe to call OUTSIDE a press
+-- event (where IsXKeyDown is accurate); clears a side left stuck by a missed key-up (e.g. a
+-- key released during the loading screen, which left our tracking "down" while the client
+-- itself reports it up). `exceptKey` skips the just-pressed key, whose live state lags at its
+-- own event -- the caller sets that one from the event instead.
+function uiShared.ReconcileModifiersFromLive(ui, exceptKey)
+  if not ui then return end
+  local g = _G
+  local s = ui._sideMod or {}
+  local function set(k, fn)
+    if k == exceptKey then return end
+    s[k] = (fn and fn()) and true or false
+  end
+  set("LSHIFT", g.IsLeftShiftKeyDown)
+  set("RSHIFT", g.IsRightShiftKeyDown)
+  set("LCTRL",  g.IsLeftControlKeyDown)
+  set("RCTRL",  g.IsRightControlKeyDown)
+  set("LALT",   g.IsLeftAltKeyDown)
+  set("RALT",   g.IsRightAltKeyDown)
+  ui._sideMod = s
 end
 
 function uiShared.ApplyModifierEvent(ui, key, state)
@@ -514,6 +533,9 @@ function uiShared.ApplyModifierEvent(ui, key, state)
     or key == "LALT" or key == "RALT" then
     ui._sideMod = ui._sideMod or {}
     ui._sideMod[key] = down
+    -- Reconcile the OTHER sides from live so a stuck side (missed key-up) self-corrects on the
+    -- next modifier press. The just-pressed key keeps its event value (live lags for it).
+    uiShared.ReconcileModifiersFromLive(ui, key)
   end
   if key == "LALT" or key == "RALT" then
     if ui._modAlt == down then return false end

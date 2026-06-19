@@ -1,3 +1,17 @@
+## 1.3.0
+
+### New
+- **Now works on Classic!** Loads on **Classic Era**, **Burning Crusade Classic** (Anniversary), and **Mists of Pandaria Classic**.
+- Features that need Retail-only APIs — **Assisted Highlight** and the **Meters** readouts (DPS / HPS / GCD / SBA% / Details) — are **greyed out** on Classic; the **Center Marker** still works there.
+- The "loaded" chat line now shows your interface version, with a note on Classic that greyed-out options aren't available on that version.
+
+### Fixed
+- **Classic Shaman** class color was Paladin-pink (a Blizzard data quirk) — now the correct blue.
+- **Classic** Action Tracker icons no longer have a gap to the border; modifier-label spacing tidied.
+- The **Center Marker** and **Pressed Indicator** now sit below the options panel while it's open (they no longer grab its sliders or cover it).
+- Fixed a **phantom modifier** ("LCtrl") sometimes shown right after logging in.
+- Removed a false **"compatibility mode / below minimum tested"** warning on Classic.
+
 ## 1.2.1
 
 ### New

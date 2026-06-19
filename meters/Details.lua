@@ -269,6 +269,13 @@ local function ApplySavedWindowState(keepCurrentView)
 end
 
 local function IsDetailsEnabled()
+    -- Retail-only (needs C_DamageMeter). On Classic the window must NEVER show, even though
+    -- showDetails defaults true -- this gates the auto-show-on-login path too. Checked via the
+    -- project flavor + API directly so it's correct regardless of init timing.
+    local mainline = (not _G.WOW_PROJECT_ID) or (_G.WOW_PROJECT_ID == (_G.WOW_PROJECT_MAINLINE or 1))
+    if not (mainline and _G.C_DamageMeter and _G.C_DamageMeter.GetAvailableCombatSessions) then
+        return false
+    end
     return not (MetersSavedVars and MetersSavedVars.showDetails == false)
 end
 
@@ -1913,6 +1920,7 @@ function Details_SetView(viewKey)
 end
 
 function Details_Show(viewKey)
+    if not _G.GSETracker_MetersCapable then return end  -- retail-only (C_DamageMeter); greyed on Classic
     if not IsDetailsEnabled() then return end
     local db = GetDetailsDB()
     currentView = viewKey and NormalizeViewKey(viewKey) or NormalizeViewKey(db.viewKey)

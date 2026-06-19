@@ -180,9 +180,15 @@ local function RebuildMarkerOptionLists()
   clear(PRESSED_SHAPE_OPTIONS)
   for _, o in ipairs(IMAGE_OPTIONS) do PRESSED_SHAPE_OPTIONS[#PRESSED_SHAPE_OPTIONS + 1] = o end
   PRESSED_SHAPE_OPTIONS[#PRESSED_SHAPE_OPTIONS + 1] = { value = "None", text = "None" }
-  -- Center Marker: special modes + image symbols + None.
+  -- Center Marker: special modes + image symbols + None. The "Assisted Highlight" mode
+  -- (value "AHLight") mirrors the AH suggestion, which is retail-only -- drop it on Classic.
   clear(CENTER_MARKER_OPTIONS)
-  for _, o in ipairs(MYMARKER_OPTIONS) do CENTER_MARKER_OPTIONS[#CENTER_MARKER_OPTIONS + 1] = o end
+  local ahOK = ns.Caps and ns.Caps.assistedHighlight
+  for _, o in ipairs(MYMARKER_OPTIONS) do
+    if not (o.value == "AHLight" and not ahOK) then
+      CENTER_MARKER_OPTIONS[#CENTER_MARKER_OPTIONS + 1] = o
+    end
+  end
   for _, o in ipairs(IMAGE_OPTIONS)    do CENTER_MARKER_OPTIONS[#CENTER_MARKER_OPTIONS + 1] = o end
   CENTER_MARKER_OPTIONS[#CENTER_MARKER_OPTIONS + 1] = { value = "None", text = "None" }
 end
@@ -382,6 +388,11 @@ local function MakeCheck(pane, y, desc)
   StyleCheckLabel(lbl)
   AttachTooltip(cb, desc.label, desc.tooltip)
   if desc.center then CenterPaneRow(pane, { cb }, 16, 16 + 26 + 4 + (lbl:GetStringWidth() or 0)) end
+  if desc.unavailable and desc.unavailable() then
+    cb:Disable(); cb:SetAlpha(0.5)
+    if lbl.SetTextColor then lbl:SetTextColor(0.5, 0.5, 0.5) end
+    AttachTooltip(cb, desc.label, "Not available on this WoW version.")
+  end
   return 28
 end
 
@@ -431,6 +442,7 @@ end
 -- Two checkboxes + a dropdown, all on one row (the Match %, Match Audible, sound).
 local function MakeMatchRow(pane, y, desc)
   local frames = {}
+  local labels = {}
   local function check(getName, setName, label, x, tip)
     local get, set = ResolveGet(getName), ResolveSet(setName)
     local cb = CreateFrame("CheckButton", nil, pane, "UICheckButtonTemplate")
@@ -444,6 +456,7 @@ local function MakeMatchRow(pane, y, desc)
     StyleCheckLabel(lbl)
     AttachTooltip(cb, label, tip)
     frames[#frames + 1] = cb
+    labels[#labels + 1] = lbl
   end
   check(desc.get, desc.set, desc.label, 36, desc.tooltip)  -- Match % checkbox
   local ddget, ddset = ResolveGet(desc.ddget), ResolveSet(desc.ddset)
@@ -457,7 +470,19 @@ local function MakeMatchRow(pane, y, desc)
   local albl = pane:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
   albl:SetPoint("RIGHT", dd, "LEFT", -8, 0)
   albl:SetText(desc.label2 or "")
+  labels[#labels + 1] = albl
   if desc.center then CenterPaneRow(pane, frames, 26, 310 + 220) end
+  if desc.unavailable and desc.unavailable() then
+    for i = 1, #frames do
+      local fr = frames[i]
+      if fr.SetEnabled then fr:SetEnabled(false) elseif fr.Disable then fr:Disable() end
+      if fr.SetAlpha then fr:SetAlpha(0.5) end
+    end
+    for i = 1, #labels do
+      if labels[i].SetTextColor then labels[i]:SetTextColor(0.5, 0.5, 0.5) end
+    end
+    AttachTooltip(dd, desc.label2, "Not available on this WoW version.")
+  end
   return 30
 end
 
@@ -507,6 +532,11 @@ local function MakeDropdown(pane, y, desc)
   dd:SetPoint("TOPLEFT", pane, "TOPLEFT", 16, y - 18)
   AttachTooltip(dd, desc.label, desc.tooltip)
   if desc.center then CenterPaneRow(pane, { dd, lbl }, 16, 16 + 220) end
+  if desc.unavailable and desc.unavailable() then
+    if dd.SetEnabled then dd:SetEnabled(false) end
+    if lbl.SetTextColor then lbl:SetTextColor(0.5, 0.5, 0.5) end
+    AttachTooltip(dd, desc.label, "Not available on this WoW version.")
+  end
   return 46
 end
 
@@ -616,6 +646,14 @@ local function MakeDropdownSlider(pane, y, desc)
     end
   end
   if desc.center then CenterPaneRow(pane, { dd, dlbl, s }, 16, 290 + 150 + 8 + (val:GetStringWidth() or 0)) end
+  if desc.unavailable and desc.unavailable() then
+    if dd.SetEnabled then dd:SetEnabled(false) end
+    if s.SetEnabled then s:SetEnabled(false) elseif s.Disable then s:Disable() end
+    if dlbl.SetTextColor then dlbl:SetTextColor(0.5, 0.5, 0.5) end
+    if title and title.SetTextColor then title:SetTextColor(0.5, 0.5, 0.5) end
+    if val.SetTextColor then val:SetTextColor(0.5, 0.5, 0.5) end
+    AttachTooltip(dd, desc.label, "Not available on this WoW version.")
+  end
   return 50
 end
 
@@ -647,6 +685,15 @@ local function MakeEnableShow(pane, y, desc)
     sh:SetPoint("BOTTOMLEFT", dd, "TOPLEFT", 2, 5)
     sh:SetText(desc.showHeader)
     sh:SetTextColor(1, 1, 1)
+  end
+  -- Grey out + lock the row when the feature isn't available on this WoW version.
+  if desc.unavailable and desc.unavailable() then
+    if cb.SetEnabled then cb:SetEnabled(false) else cb:Disable() end
+    if dd.SetEnabled then dd:SetEnabled(false) end
+    if lbl.SetTextColor then lbl:SetTextColor(0.5, 0.5, 0.5) end
+    local why = "Not available on this WoW version."
+    AttachTooltip(cb, desc.label, why)
+    AttachTooltip(dd, desc.label, why)
   end
   return 40
 end
@@ -1108,6 +1155,29 @@ local function Populate(pane, rows, center)
   RunRefreshers() -- set initial enabled/greyed states
 end
 
+-- Build-time grey-out of an ENTIRE tab pane when its feature is unavailable on this client
+-- (e.g. Assisted Highlight on Classic -- no C_AssistedCombat). Disables every interactive
+-- child and dims label text. Runs during BuildPanel (before the canvas is registered), so it
+-- never mutates a live Settings canvas (no taint).
+local function GreyOutPane(pane)
+  if not pane then return end
+  local function walk(fr)
+    local kids = { fr:GetChildren() }
+    for i = 1, #kids do
+      local c = kids[i]
+      if c.SetEnabled then c:SetEnabled(false) elseif c.Disable then pcall(c.Disable, c) end
+      if c.EnableMouse then c:EnableMouse(false) end
+      walk(c)
+    end
+    local regions = { fr:GetRegions() }
+    for i = 1, #regions do
+      local r = regions[i]
+      if r.SetTextColor then r:SetTextColor(0.5, 0.5, 0.5) end
+    end
+  end
+  walk(pane)
+end
+
 -- ── Tab content ─────────────────────────────────────────────────────────────
 local function GeneralRows()
   return {
@@ -1135,7 +1205,7 @@ local function GeneralRows()
       get = "GetHideLoginMessage", set = "SetHideLoginMessage",
       tooltip = "Stop showing the GSE: Tracker welcome window each time you log in." },
     { type = "header", text = "Enable" },
-    { type = "enableshow", label = "Meters", showHeader = "Visibility", tooltip = "Enable the Meters readout (DPS/HPS, GCD, and AH match %).",
+    { type = "enableshow", label = "Meters", showHeader = "Visibility", tooltip = "Enable the Meters cluster. On Classic only the Center Marker is available (DPS/HPS/GCD/Details need retail APIs).",
       get = function() return _G.MetersSavedVars and _G.MetersSavedVars.enabled ~= false end,
       set = function(v)
         if _G.MetersSavedVars then _G.MetersSavedVars.enabled = v and true or false end
@@ -1150,6 +1220,7 @@ local function GeneralRows()
     -- Player Marker has no separate Enable/Show row: it is pinned to the Meters centre and
     -- follows the Meters frame's visibility (see UI:ShouldShowCombatMarker).
     { type = "enableshow", label = "Assisted Highlight", get = "IsAssistedHighlightMirrorEnabled", set = "SetAssistedHighlightMirrorEnabled",
+      unavailable = function() return not (ns.Caps and ns.Caps.assistedHighlight) end,
       tooltip = "Enable the Assisted Highlight icon that shows the next suggested ability.",
       showGet = "GetAssistedHighlightShowWhen", showSet = "SetAssistedHighlightShowWhen", showOptions = SHOW_OPTIONS },
     { type = "enableshow", label = "Action Tracker", get = "IsEnabled", set = "SetEnabled",
@@ -1340,8 +1411,10 @@ local function QoLRows()
       tooltip = "Share these settings across all your characters. Unchecked: settings are saved per-character." },
     { type = "header", text = "Assisted Highlight" },
     { type = "check", label = "Assisted Highlight Rotation Matching System", get = "GetProcGlowEnabled", set = "SetProcGlowEnabled",
+      unavailable = function() return not (ns.Caps and ns.Caps.assistedHighlight) end,
       tooltip = "Track how often your casts match the Assisted Highlight suggestion (drives the AH Match % readout)." },
     { type = "matchrow",
+      unavailable = function() return not (ns.Caps and ns.Caps.assistedHighlight) end,
       label = "Match %", get = "GetAHMatchPercentEnabled", set = "SetAHMatchPercentEnabled",
       tooltip = "Show the AH Match percentage readout under the Action Tracker.",
       tooltip2 = "Play a sound each time your cast matches the suggestion. 'None' disables the audible match.",
@@ -1409,14 +1482,16 @@ local TABS = {
           label = "Font", get = MetersFontFaceGet, set = MetersFontFaceSet, options = FontOptions,
           tooltip = "Font for the Meters readout text (DPS/HPS/GCD/%).",
           sliderLabel = "Font Size", sliderGet = MetersFontSizeGet, sliderSet = MetersFontSizeSet, smin = 6, smax = 24, sstep = 1,
-          tooltip2 = "Meters text size." },
+          tooltip2 = "Meters text size.",
+          unavailable = function() return not (ns.Caps and ns.Caps.meters) end },
         { type = "dropdown", label = "Outline", get = MetersFontOutlineGet, set = MetersFontOutlineSet, options = OUTLINE_OPTIONS,
-          tooltip = "Outline style for the Meters readout text." },
+          tooltip = "Outline style for the Meters readout text.",
+          unavailable = function() return not (ns.Caps and ns.Caps.meters) end },
       }
     end,
     -- Player Marker controls pinned to the BOTTOM of the Meters tab (moved from its own tab).
     bottomRows = PlayerTrackerRows },
-  { key = "AssistedHighlight", text = "Assisted Highlight", rows = AssistedHighlightRows, enableGet = "IsAssistedHighlightMirrorEnabled", centerContent = true },
+  { key = "AssistedHighlight", text = "Assisted Highlight", rows = AssistedHighlightRows, enableGet = "IsAssistedHighlightMirrorEnabled", centerContent = true, cap = "assistedHighlight" },
   { key = "ActionTracker", text = "Action Tracker", rows = ActionTrackerRows, enableGet = "IsEnabled", centerContent = true },
   { key = "QoL", text = "Quality of Life", rows = QoLRows, centerContent = true },
 }
@@ -1578,6 +1653,8 @@ local function BuildPanel()
       scroll:SetScrollChild(pane)
 
       Populate(pane, t.rows(), t.centerContent)
+      -- Whole-tab grey-out when the feature isn't available on this client (e.g. AH on Classic).
+      if t.cap and not (ns.Caps and ns.Caps[t.cap]) then GreyOutPane(pane) end
       panel.tabEntries[i] = { tab = tab, scroll = scroll, pane = pane, enableGet = t.enableGet and ResolveGet(t.enableGet) or nil }
     end
   end
@@ -1612,6 +1689,39 @@ local function RegisterSettings()
   categoryID = category:GetID()
 end
 
+-- After the Settings panel opens/closes, re-evaluate the overlay frames' strata: the Center
+-- Marker and Pressed Indicator drop below the open panel (so they don't draw over it or grab
+-- its controls) and rise back to HIGH when it closes. Deferred a frame so SettingsPanel:IsShown()
+-- reflects the new state.
+local function RefreshOverlayStrata()
+  if not (C_Timer and C_Timer.After) then return end
+  C_Timer.After(0, function()
+    if _G.Meter_UpdateVisibility then _G.Meter_UpdateVisibility() end
+    if addon.UpdatePressedIndicatorDragState then addon:UpdatePressedIndicatorDragState() end
+  end)
+end
+
+-- WoW has no event for the Settings panel showing/hiding, so a tiny watcher polls its
+-- IsShown() on a slow tick and refreshes overlay strata only when it CHANGES. This keeps the
+-- Center Marker / Pressed Indicator below the panel while it's open and snaps them back to
+-- HIGH promptly when it closes (any close path: ESC, the X, or our toggle). Own frame -- no
+-- scripts on the Settings canvas (those taint the Settings/GameMenu path).
+do
+  local watcher = CreateFrame("Frame")
+  local lastShown
+  watcher._t = 0
+  watcher:SetScript("OnUpdate", function(self, elapsed)
+    self._t = self._t + (elapsed or 0)
+    if self._t < 0.2 then return end
+    self._t = 0
+    local shown = (_G.SettingsPanel and _G.SettingsPanel.IsShown and _G.SettingsPanel:IsShown()) and true or false
+    if shown ~= lastShown then
+      lastShown = shown
+      RefreshOverlayStrata()
+    end
+  end)
+end
+
 function Options:OpenSettingsWindow()
   -- Combat lock: the Blizzard Settings panel is a PROTECTED frame, so Settings.OpenToCategory
   -- (which ShowUIPanel's it) is blocked in combat and throws an ADDON_ACTION_BLOCKED error --
@@ -1630,6 +1740,7 @@ function Options:OpenSettingsWindow()
   if categoryID and Settings and Settings.OpenToCategory then
     Settings.OpenToCategory(categoryID)
   end
+  RefreshOverlayStrata()
 end
 
 -- A real toggle (the old `= OpenSettingsWindow` alias only ever opened): close the
@@ -1646,6 +1757,7 @@ function Options:ToggleSettingsWindow()
     end
     if onOurs then
       if _G.HideUIPanel then _G.HideUIPanel(sp) else sp:Hide() end
+      RefreshOverlayStrata()
       return
     end
   end
@@ -1656,6 +1768,7 @@ function Options:CloseSettingsWindow()
   if SettingsPanel and SettingsPanel:IsShown() and SettingsPanel.Close then
     SettingsPanel:Close()
   end
+  RefreshOverlayStrata()
 end
 
 -- ── Login / welcome window (5-page) ──────────────────────────────────────────
@@ -1664,7 +1777,7 @@ end
 -- later, just set `image` on the matching LOGIN_PAGES entry (a texture path) and it
 -- renders automatically; until then each page shows a grey placeholder.
 local LOGIN_PAGES = {
-  { image = "Interface\\AddOns\\GSE_Tracker\\media\\GTLogin\\GSETRK-LoginGEN.png", w = 500, h = 500, caption = "" },
+  { image = "Interface\\AddOns\\GSE_Tracker\\media\\GTLogin\\GSETRK-LoginGeneral.png", w = 500, h = 500, caption = "" },
   { image = "Interface\\AddOns\\GSE_Tracker\\media\\GTLogin\\GSETRK-LoginMeters.png", w = 500, h = 500, caption = "" },
   { image = "Interface\\AddOns\\GSE_Tracker\\media\\GTLogin\\GSETRK-LoginAssistedHighlight.png", w = 500, h = 500, caption = "" },
   { image = "Interface\\AddOns\\GSE_Tracker\\media\\GTLogin\\GSETRK-LoginActionTracker.png", w = 500, h = 500, caption = "" },

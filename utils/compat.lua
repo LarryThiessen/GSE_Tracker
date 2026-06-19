@@ -65,6 +65,14 @@ function Compat:DetectFeatures()
   features.hasLegacySpellAPI = (type(_G.GetSpellTexture) == "function") and true or false
   features.hasCAddOns = (_G.C_AddOns and type(_G.C_AddOns.GetAddOnMetadata) == "function") and true or false
   features.hasLegacyAddOnAPI = (type(_G.GetAddOnMetadata) == "function") and true or false
+  -- Retail-only subsystems (AssistedCombat, the damage-meter API). Gate on the project
+  -- FLAVOR too, not just API presence: some Classic clients expose stub C_* tables that
+  -- pass a bare existence check, which made these features wrongly appear "available".
+  local mainline = (not _G.WOW_PROJECT_ID) or (_G.WOW_PROJECT_ID == (_G.WOW_PROJECT_MAINLINE or 1))
+  features.isMainline = mainline
+  features.hasAssistedCombat = mainline and (_G.C_AssistedCombat and type(_G.C_AssistedCombat.GetNextCastSpell) == "function") and true or false
+  features.hasDamageMeter = mainline and (_G.C_DamageMeter and type(_G.C_DamageMeter.GetAvailableCombatSessions) == "function") and true or false
+  features.hasSettingsCanvas = (_G.Settings and type(_G.Settings.RegisterCanvasLayoutCategory) == "function") and true or false
   return features
 end
 
@@ -84,11 +92,22 @@ function Compat:CheckRuntime()
   info.features = self:DetectFeatures()
   self.runtimeInfo = info
 
+  -- Publish capability flags for feature gating + options grey-out. Read as ns.Caps.*
+  -- (true on Retail; false on Classic where the C_* API is absent).
+  ns.Caps = ns.Caps or {}
+  ns.Caps.assistedHighlight = info.features.hasAssistedCombat
+  ns.Caps.meters = info.features.hasDamageMeter
+  ns.Caps.settingsPanel = info.features.hasSettingsCanvas
+  -- Global mirror for the meters engine files (DPS/HPS/GCD/Details), which don't capture
+  -- the `ns` upvalue. Set before any meter readout runs (PLAYER_LOGIN is later).
+  _G.GSETracker_MetersCapable = info.features.hasDamageMeter
+
   if info.isFuture then
     WarnOnce("future_interface", string.format("running on interface %d while addon target is %d. Compatibility mode is active.", info.interface, info.target))
-  elseif info.isTooOld then
-    WarnOnce("old_interface", string.format("running on interface %d, below the minimum tested %d. Some behavior may be limited.", info.interface, info.minTested))
   end
+  -- No "below minimum tested" warning: Classic flavors use low interface numbers by design
+  -- and are supported, so MIN_TESTED_INTERFACE (a retail number) would false-alarm there.
+  -- The running interface is shown in the friendly "loaded!" line instead.
 
   if not info.features.hasCSpell and not info.features.hasLegacySpellAPI then
     WarnOnce("spell_api_missing", "spell texture APIs were not found. Spell icons may be unavailable until Blizzard restores one of the supported APIs.")
@@ -103,14 +122,33 @@ end
 
 function Compat:PrintLoadedMessage()
   local prefix = GetAddonTitleText()
-  local message = prefix .. "|cffffffff loaded!|r"
+  local info = self:GetStatus()
+  local iface = (info and tonumber(info.interface)) or 0
+  local ver = info and info.addonVersion
+  local suffix = ""
+  if ver and iface > 0 then
+    suffix = string.format(" |cff808080(v%s, interface %d)|r", tostring(ver), iface)
+  elseif iface > 0 then
+    suffix = string.format(" |cff808080(interface %d)|r", iface)
+  end
+  local message = prefix .. "|cffffffff loaded!|r" .. suffix
+
+  -- On clients where some features are unavailable (Classic -- no AssistedCombat/DamageMeter),
+  -- add a one-line note in chat that greyed-out options aren't available here.
+  local caps = ns.Caps
+  local note
+  if caps and not (caps.assistedHighlight and caps.meters) then
+    note = prefix .. "|cffffffff Greyed-out features aren't available in this WoW version.|r"
+  end
 
   if _G and _G.DEFAULT_CHAT_FRAME and _G.DEFAULT_CHAT_FRAME.AddMessage then
     _G.DEFAULT_CHAT_FRAME:AddMessage(message)
+    if note then _G.DEFAULT_CHAT_FRAME:AddMessage(note) end
     return
   end
 
   if print then
     print(message)
+    if note then print(note) end
   end
 end

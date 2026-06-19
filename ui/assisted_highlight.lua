@@ -2268,6 +2268,8 @@ function UI:EnsureAssistedHighlightEvents()
 end
 
 function UI:EnsureAssistedHighlight()
+  -- Retail-only: C_AssistedCombat doesn't exist on Classic, so the whole feature is inert there.
+  if not (ns.Caps and ns.Caps.assistedHighlight) then return end
   self:EnsureAssistedHighlightEvents()
   return Display:Create()
 end
@@ -2358,6 +2360,7 @@ function UI:ShouldShowAssistedHighlight()
 end
 
 function UI:RefreshAssistedHighlight(force)
+  if not (ns.Caps and ns.Caps.assistedHighlight) then return end
   local frame = self:EnsureAssistedHighlight()
   if not addon:IsAssistedHighlightMirrorEnabled() then
     SetMirrorShown(frame, false)

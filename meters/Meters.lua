@@ -33,8 +33,15 @@ local function GetMarker()
     return NormalizeMarker(MetersSavedVars.Marker)
 end
 
+-- Retail-only: the meters READOUTS (DPS/HPS/GCD/SBAssist/Details) and the Assisted-Highlight
+-- marker mode need C_DamageMeter / C_AssistedCombat, absent on Classic. The plain Center
+-- Marker still works there. MetersOK() gates the readout paths; the marker path is left alone.
+local function MetersOK()
+    return (ns.Caps and ns.Caps.meters) and true or false
+end
+
 local function UsingAHLight()
-    return GetMarker() == "AHLight"
+    return MetersOK() and GetMarker() == "AHLight"
 end
 
 local function SyncLegacyShowAHLight()
@@ -305,6 +312,7 @@ local function GetCenterGCDCooldownInfo()
 end
 
 local function UpdateCenterGCDSwipe()
+    if not MetersOK() then if ClearCenterGCDSwipe then ClearCenterGCDSwipe() end return end
     if not centerGCDSwipe then return end
     if not ShouldShowCenterGCDSwipe() then
         ClearCenterGCDSwipe()
@@ -429,6 +437,7 @@ end
 
 local function UpdateAHLightUsageFrame()
     if not AHLightUsageFrame then return end
+    if not MetersOK() then AHLightUsageFrame:Hide() return end
     if (PlayerIsMounted() and not ShouldUseAHLightUsagePreview()) or MetersSavedVars.showAHLightUsage == false then
         ClearAHLightUsageDisplay()
         AHLightUsageFrame:Hide()
@@ -483,7 +492,7 @@ local function ApplyUnlockedPreviewDisplay()
     end
 
     if DPSFrame and DPSFrame.dpsText then
-        if MetersSavedVars.showDPS ~= false then
+        if MetersOK() and MetersSavedVars.showDPS ~= false then
             DPSFrame.dpsText:SetText("12345")
             DPSFrame:Show()
         else
@@ -493,7 +502,7 @@ local function ApplyUnlockedPreviewDisplay()
     end
 
     if HPSFrame and HPSFrame.hpsText then
-        if MetersSavedVars.showHPS ~= false then
+        if MetersOK() and MetersSavedVars.showHPS ~= false then
             HPSFrame.hpsText:SetText("6789")
             HPSFrame:Show()
         else
@@ -503,7 +512,7 @@ local function ApplyUnlockedPreviewDisplay()
     end
 
     if GCDFrame and GCDFrame.gcdText then
-        if MetersSavedVars.showGCD ~= false then
+        if MetersOK() and MetersSavedVars.showGCD ~= false then
             SetGCDPreviewState(true)
             GCDFrame.gcdText:SetText("1.50s")
             GCDFrame:Show()
@@ -515,7 +524,7 @@ local function ApplyUnlockedPreviewDisplay()
     end
 
     if AHLightUsageFrame then
-        if MetersSavedVars.showAHLightUsage ~= false then
+        if MetersOK() and MetersSavedVars.showAHLightUsage ~= false then
             if AHLightUsage_SetPreview then
                 AHLightUsage_SetPreview(true)
             elseif AHLightUsageFrame.ahLightUsageText then
@@ -548,6 +557,11 @@ UpdateAnchorInteractivity = function()
         if anchor.SetMouseClickEnabled  then anchor:SetMouseClickEnabled(true)  end
         if anchor.SetMouseMotionEnabled then anchor:SetMouseMotionEnabled(true) end
     end
+    -- While the options panel is open, sit BELOW it (LOW) so it neither grabs the mouse nor
+    -- draws over the panel -- regardless of lock state. Prominent (HIGH) otherwise. (LOW, not
+    -- MEDIUM: the Classic options panel sits at MEDIUM, so MEDIUM still drew over its bg.)
+    local optionsOpen = _G.SettingsPanel and _G.SettingsPanel.IsShown and _G.SettingsPanel:IsShown()
+    anchor:SetFrameStrata(optionsOpen and "LOW" or "HIGH")
     ApplyEffectiveOpacity()
 end
 
@@ -800,6 +814,14 @@ function Meter_UpdateVisibility()
         end
     end
 
+    -- Classic: the Center Marker is shown above; keep all readouts hidden (they need
+    -- retail-only data APIs). The marker path (SyncMarkerState) already ran.
+    if not MetersOK() then
+        if DPSFrame then DPSFrame:Hide() end
+        if HPSFrame then HPSFrame:Hide() end
+        if GCDFrame then GCDFrame:Hide() end
+        if AHLightUsageFrame then AHLightUsageFrame:Hide() end
+    end
     UpdateCenterGCDSwipe()
     UpdateAnchorInteractivity()
 end
@@ -872,10 +894,14 @@ function Meter_SetDisplay(showAHLight, showDPS, showHPS, showGCD, showAHLightUsa
         return
     end
 
-    if DPSFrame then DPSFrame:SetShown(showDPS) end
-    if HPSFrame then HPSFrame:SetShown(showHPS) end
+    if DPSFrame then DPSFrame:SetShown(MetersOK() and showDPS) end
+    if HPSFrame then HPSFrame:SetShown(MetersOK() and showHPS) end
 
-    if GCDFrame then
+    if GCDFrame and not MetersOK() then
+        SetGCDPreviewState(false)
+        if GCDFrame.gcdText then GCDFrame.gcdText:SetText("") end
+        GCDFrame:Hide()
+    elseif GCDFrame then
         local usePreview = (not IsFramePositionLocked()) and (not PlayerIsMounted())
         if usePreview then
             SetGCDPreviewState(showGCD)
@@ -1037,11 +1063,16 @@ eventFrame:RegisterEvent("SPELL_UPDATE_COOLDOWN")
 eventFrame:RegisterEvent("SPELLS_CHANGED")
 eventFrame:RegisterEvent("ACTIONBAR_UPDATE_STATE")
 eventFrame:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
-eventFrame:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED")
-eventFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
-eventFrame:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
-eventFrame:RegisterEvent("DAMAGE_METER_COMBAT_SESSION_UPDATED")
-eventFrame:RegisterEvent("ASSISTED_COMBAT_ACTION_SPELL_CAST")
+-- These events exist only on Retail (mount/spec/talent + the C_DamageMeter and
+-- C_AssistedCombat backends). On Classic, RegisterEvent THROWS for an unknown event,
+-- so pcall-guard them -- the addon still loads, and the meters cluster is gated off
+-- there anyway (ns.Caps.meters).
+local function SafeRegisterEvent(ev) pcall(eventFrame.RegisterEvent, eventFrame, ev) end
+SafeRegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED")
+SafeRegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+SafeRegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
+SafeRegisterEvent("DAMAGE_METER_COMBAT_SESSION_UPDATED")
+SafeRegisterEvent("ASSISTED_COMBAT_ACTION_SPELL_CAST")
 if eventFrame.RegisterUnitEvent then
     eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
 else
@@ -1130,6 +1161,7 @@ end
 
 local function RunActionRefresh(forceIcon)
     scheduledActionRefresh = nil
+    if not MetersOK() then return end
     if InMountTransitionSuppress() then
         return
     end
@@ -1279,18 +1311,23 @@ eventFrame:SetScript("OnUpdate", function(_, elapsed)
 end)
 
 eventFrame:SetScript("OnEvent", function(_, event, ...)
+    -- Classic: meters engine is unavailable -- hide the whole cluster once and bail.
     local arg1 = ...
-    if event == "PLAYER_ENTERING_WORLD"
-        or event == "PLAYER_REGEN_DISABLED"
-        or event == "PLAYER_REGEN_ENABLED" then
-        if DPS_ControllerEvent then DPS_ControllerEvent(event) end
-        if HPS_ControllerEvent then HPS_ControllerEvent(event) end
-        if AHLightUsage_ControllerEvent then AHLightUsage_ControllerEvent(event, ...) end
-    elseif event == "DAMAGE_METER_COMBAT_SESSION_UPDATED" then
-        if DPS_ControllerEvent then DPS_ControllerEvent(event) end
-        if HPS_ControllerEvent then HPS_ControllerEvent(event) end
-    elseif event == "ASSISTED_COMBAT_ACTION_SPELL_CAST" or event == "UNIT_SPELLCAST_SUCCEEDED" then
-        if AHLightUsage_ControllerEvent then AHLightUsage_ControllerEvent(event, ...) end
+    -- Readout controllers are retail-only (C_DamageMeter / C_AssistedCombat). On Classic
+    -- skip them; the marker + lifecycle handling below still runs so the Center Marker works.
+    if MetersOK() then
+        if event == "PLAYER_ENTERING_WORLD"
+            or event == "PLAYER_REGEN_DISABLED"
+            or event == "PLAYER_REGEN_ENABLED" then
+            if DPS_ControllerEvent then DPS_ControllerEvent(event) end
+            if HPS_ControllerEvent then HPS_ControllerEvent(event) end
+            if AHLightUsage_ControllerEvent then AHLightUsage_ControllerEvent(event, ...) end
+        elseif event == "DAMAGE_METER_COMBAT_SESSION_UPDATED" then
+            if DPS_ControllerEvent then DPS_ControllerEvent(event) end
+            if HPS_ControllerEvent then HPS_ControllerEvent(event) end
+        elseif event == "ASSISTED_COMBAT_ACTION_SPELL_CAST" or event == "UNIT_SPELLCAST_SUCCEEDED" then
+            if AHLightUsage_ControllerEvent then AHLightUsage_ControllerEvent(event, ...) end
+        end
     end
 
     if event == "PLAYER_LOGIN" then
