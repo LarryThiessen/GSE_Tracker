@@ -70,8 +70,8 @@ function Core:ApplyDB()
   if self.UpdateActionTrackerMoveMarker then
     self:UpdateActionTrackerMoveMarker()
   end
-  if self.RefreshPlayerTracker then
-    self:RefreshPlayerTracker()
+  if self.RefreshCenterMarker then
+    self:RefreshCenterMarker()
   elseif self.RefreshCombatMarker then
     self:RefreshCombatMarker()
   end

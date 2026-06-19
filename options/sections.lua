@@ -214,9 +214,9 @@ function optionsModule.LayoutSettingsWindow(frame, content, sections, selectedTa
     FinalizeScrollableContent(content, totalHeight)
   end
 
-  if ((selectedTab == "PlayerTracker") or (selectedTab == "Combat")) and sections.playerTrackerGeneralSection and sections.playerTrackerDisplaySection then
-    local generalSection = sections.playerTrackerGeneralSection
-    local displaySection = sections.playerTrackerDisplaySection
+  if ((selectedTab == "CenterMarker") or (selectedTab == "PlayerTracker") or (selectedTab == "Combat")) and sections.centerMarkerGeneralSection and sections.centerMarkerDisplaySection then
+    local generalSection = sections.centerMarkerGeneralSection
+    local displaySection = sections.centerMarkerDisplaySection
 
     if singleColumn then
       StackSections({ generalSection, displaySection })
@@ -239,19 +239,19 @@ function optionsModule.LayoutSettingsWindow(frame, content, sections, selectedTa
     optionsModule.LayoutRows(displaySection, SECTION_START_Y)
     FinalizeScrollableContent(content, topRowH)
     return
-  elseif ((selectedTab == "PlayerTracker") or (selectedTab == "Combat")) and (sections.playerTrackerSection or sections.combatSection) then
-    local playerTrackerSection = sections.playerTrackerSection or sections.combatSection
+  elseif ((selectedTab == "CenterMarker") or (selectedTab == "PlayerTracker") or (selectedTab == "Combat")) and (sections.centerMarkerSection or sections.combatSection) then
+    local centerMarkerSection = sections.centerMarkerSection or sections.combatSection
     local contentLeftInset = optionsModule.SECTION_INSET_X or 14
     local contentRightInset = optionsModule.SECTION_INSET_X or 14
     local desiredSectionW = (optionsModule.CONTROL_X or 0) + (optionsModule.CONTROL_TOTAL_W or 0) + contentLeftInset + contentRightInset + 18
     local minSectionW = math.max(desiredSectionW, 500)
     local sectionW = math.min(contentW, minSectionW)
-    playerTrackerSection:ClearAllPoints()
-    playerTrackerSection:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 0)
-    playerTrackerSection:SetWidth(sectionW)
-    playerTrackerSection:SetHeight(optionsModule.GetSectionHeight(playerTrackerSection))
-    optionsModule.LayoutRows(playerTrackerSection, SECTION_START_Y)
-    FinalizeScrollableContent(content, optionsModule.GetSectionHeight(playerTrackerSection))
+    centerMarkerSection:ClearAllPoints()
+    centerMarkerSection:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 0)
+    centerMarkerSection:SetWidth(sectionW)
+    centerMarkerSection:SetHeight(optionsModule.GetSectionHeight(centerMarkerSection))
+    optionsModule.LayoutRows(centerMarkerSection, SECTION_START_Y)
+    FinalizeScrollableContent(content, optionsModule.GetSectionHeight(centerMarkerSection))
     return
   end
 

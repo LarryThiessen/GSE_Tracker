@@ -22,7 +22,7 @@ local function HandleCombatEvent(_, event)
 
   if event == "PLAYER_TARGET_CHANGED" then
     addon:ApplyVisibility()
-    if addon.RefreshPlayerTracker then addon:RefreshPlayerTracker()
+    if addon.RefreshCenterMarker then addon:RefreshCenterMarker()
     elseif addon.RefreshCombatMarker then addon:RefreshCombatMarker() end
     -- Assisted highlight self-gates its OnUpdate while hidden (see the IsShown()
     -- early-out in assisted_highlight.lua) and relies on an event-driven refresh to
@@ -45,7 +45,7 @@ local function HandleCombatEvent(_, event)
     addon:RevealPendingSequenceText()
     addon:ApplyVisibility()
     if addon.RefreshDragMouseState then addon:RefreshDragMouseState() end
-    if addon.RefreshPlayerTracker then addon:RefreshPlayerTracker()
+    if addon.RefreshCenterMarker then addon:RefreshCenterMarker()
     elseif addon.RefreshCombatMarker then addon:RefreshCombatMarker() end
     -- Assisted highlight self-gates its OnUpdate while hidden (see the IsShown()
     -- early-out in assisted_highlight.lua) and relies on an event-driven refresh to
@@ -67,7 +67,7 @@ local function HandleCombatEvent(_, event)
     addon._gseActive = false
     addon:ApplyVisibility()
     if addon.RefreshDragMouseState then addon:RefreshDragMouseState() end
-    if addon.RefreshPlayerTracker then addon:RefreshPlayerTracker()
+    if addon.RefreshCenterMarker then addon:RefreshCenterMarker()
     elseif addon.RefreshCombatMarker then addon:RefreshCombatMarker() end
     -- Assisted highlight self-gates its OnUpdate while hidden (see the IsShown()
     -- early-out in assisted_highlight.lua) and relies on an event-driven refresh to
@@ -99,7 +99,7 @@ local function HandleCombatEvent(_, event)
     if combatChanged or ui._lastVisible == nil or needsTargetVisibilityRefresh then
       addon:ApplyVisibility()
     end
-    if addon.RefreshPlayerTracker then addon:RefreshPlayerTracker()
+    if addon.RefreshCenterMarker then addon:RefreshCenterMarker()
     elseif addon.RefreshCombatMarker then addon:RefreshCombatMarker() end
     -- Assisted highlight self-gates its OnUpdate while hidden (see the IsShown()
     -- early-out in assisted_highlight.lua) and relies on an event-driven refresh to

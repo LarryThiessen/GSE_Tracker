@@ -4,6 +4,7 @@ manual-changelog: RELEASE_NOTES.md
 
 ignore:
   - .claude
+  - CLAUDE.md
   - .github
   - .gitignore
   - .gitattributes

@@ -554,6 +554,22 @@ function Utils:SetCombatMarkerSymbol(value)
   PersistRuntimeChange(db)
 end
 
+-- "Press Detection": when on, the Center Marker monitors input and blinks like the Pressed
+-- Indicator (always shown, pulses on each key/GSE press). Off by default; independent of the
+-- standalone Pressed Indicator and of the chosen marker symbol.
+function Utils:GetCombatMarkerPressDetection()
+  local db = GetRuntimeDB()
+  local combatMarker = EnsureTable(db, "combatMarker")
+  return combatMarker.pressDetection and true or false
+end
+
+function Utils:SetCombatMarkerPressDetection(enabled)
+  local db = GetRuntimeDB()
+  local combatMarker = EnsureTable(db, "combatMarker")
+  combatMarker.pressDetection = not not enabled
+  PersistRuntimeChange(db)
+end
+
 function Utils:GetCombatMarkerSize()
   local db = GetRuntimeDB()
   local combatMarker = EnsureTable(db, "combatMarker")
@@ -800,115 +816,115 @@ function Utils:SetCombatMarkerBorderSize(value)
   PersistRuntimeChange(db)
 end
 
-function Utils:IsPlayerTrackerEnabled()
+function Utils:IsCenterMarkerEnabled()
   return self:IsCombatMarkerEnabled()
 end
 
-function Utils:SetPlayerTrackerEnabled(enabled)
+function Utils:SetCenterMarkerEnabled(enabled)
   self:SetCombatMarkerEnabled(enabled)
 end
 
-function Utils:GetPlayerTrackerPreviewEnabled()
+function Utils:GetCenterMarkerPreviewEnabled()
   return self:GetCombatMarkerPreviewEnabled()
 end
 
-function Utils:SetPlayerTrackerPreviewEnabled(enabled)
+function Utils:SetCenterMarkerPreviewEnabled(enabled)
   self:SetCombatMarkerPreviewEnabled(enabled)
 end
 
-function Utils:GetPlayerTrackerSymbol()
+function Utils:GetCenterMarkerSymbol()
   return self:GetCombatMarkerSymbol()
 end
 
-function Utils:SetPlayerTrackerSymbol(value)
+function Utils:SetCenterMarkerSymbol(value)
   self:SetCombatMarkerSymbol(value)
 end
 
-function Utils:GetPlayerTrackerSize()
+function Utils:GetCenterMarkerSize()
   return self:GetCombatMarkerSize()
 end
 
-function Utils:SetPlayerTrackerSize(value)
+function Utils:SetCenterMarkerSize(value)
   self:SetCombatMarkerSize(value)
 end
 
-function Utils:GetPlayerTrackerAlpha()
+function Utils:GetCenterMarkerAlpha()
   return self:GetCombatMarkerAlpha()
 end
 
-function Utils:SetPlayerTrackerAlpha(value)
+function Utils:SetCenterMarkerAlpha(value)
   self:SetCombatMarkerAlpha(value)
 end
 
-function Utils:GetPlayerTrackerUseClassColor()
+function Utils:GetCenterMarkerUseClassColor()
   return self:GetCombatMarkerUseClassColor()
 end
 
-function Utils:SetPlayerTrackerUseClassColor(enabled)
+function Utils:SetCenterMarkerUseClassColor(enabled)
   self:SetCombatMarkerUseClassColor(enabled)
 end
 
-function Utils:GetPlayerTrackerColor()
+function Utils:GetCenterMarkerColor()
   return self:GetCombatMarkerColor()
 end
 
-function Utils:SetPlayerTrackerColor(r, g, b)
+function Utils:SetCenterMarkerColor(r, g, b)
   self:SetCombatMarkerColor(r, g, b)
 end
 
-function Utils:GetPlayerTrackerPoint()
+function Utils:GetCenterMarkerPoint()
   return self:GetCombatMarkerPoint()
 end
 
-function Utils:SetPlayerTrackerPoint(point, relName, relPoint, x, y)
+function Utils:SetCenterMarkerPoint(point, relName, relPoint, x, y)
   self:SetCombatMarkerPoint(point, relName, relPoint, x, y)
 end
 
-function Utils:GetPlayerTrackerAnchorPoint()
+function Utils:GetCenterMarkerAnchorPoint()
   return self:GetCombatMarkerAnchorPoint()
 end
 
-function Utils:SetPlayerTrackerAnchorPoint(anchorPoint)
+function Utils:SetCenterMarkerAnchorPoint(anchorPoint)
   self:SetCombatMarkerAnchorPoint(anchorPoint)
 end
 
-function Utils:GetPlayerTrackerOffset()
+function Utils:GetCenterMarkerOffset()
   return self:GetCombatMarkerOffset()
 end
 
-function Utils:SetPlayerTrackerOffset(x, y)
+function Utils:SetCenterMarkerOffset(x, y)
   self:SetCombatMarkerOffset(x, y)
 end
 
-function Utils:GetPlayerTrackerLocked()
+function Utils:GetCenterMarkerLocked()
   return self:GetCombatMarkerLocked()
 end
 
-function Utils:SetPlayerTrackerLocked(enabled)
+function Utils:SetCenterMarkerLocked(enabled)
   self:SetCombatMarkerLocked(enabled)
 end
 
-function Utils:GetPlayerTrackerShowWhen()
+function Utils:GetCenterMarkerShowWhen()
   return self:GetCombatMarkerShowWhen()
 end
 
-function Utils:SetPlayerTrackerShowWhen(value)
+function Utils:SetCenterMarkerShowWhen(value)
   self:SetCombatMarkerShowWhen(value)
 end
 
-function Utils:GetPlayerTrackerThickness()
+function Utils:GetCenterMarkerThickness()
   return self:GetCombatMarkerThickness()
 end
 
-function Utils:SetPlayerTrackerThickness(value)
+function Utils:SetCenterMarkerThickness(value)
   self:SetCombatMarkerThickness(value)
 end
 
-function Utils:GetPlayerTrackerBorderSize()
+function Utils:GetCenterMarkerBorderSize()
   return self:GetCombatMarkerBorderSize()
 end
 
-function Utils:SetPlayerTrackerBorderSize(value)
+function Utils:SetCenterMarkerBorderSize(value)
   self:SetCombatMarkerBorderSize(value)
 end
 

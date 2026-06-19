@@ -6,7 +6,7 @@ local C = (ns.Utils and ns.Utils.Constants) or addon.Constants or {}
 
 -- =========================================================================
 -- GSE: Tracker -- options panel: a Blizzard Settings "canvas" category with a
--- top tab bar [General][Action Tracker][Player Tracker][Assisted Highlight].
+-- top tab bar [General][Action Tracker][Center Marker][Assisted Highlight].
 -- Controls are native Blizzard widgets that work on a canvas: CheckButton,
 -- OptionsSlider, the modern WowStyle1 dropdown (caret style, taint-free) and
 -- ColorPicker. Bound to the addon's db getters/setters.
@@ -1308,8 +1308,8 @@ local function ActionTrackerRows()
   }
 end
 
--- Player Mark (Center Marker) controls on the Player Tracker tab.
-local function PlayerTrackerRows()
+-- Player Mark (Center Marker) controls on the Center Marker tab.
+local function CenterMarkerRows()
   return {
     -- Center Marker dropdown + Scale on ONE row (dropdown left, Scale slider right).
     { type = "dropdownslider", label = "Center Marker", options = CENTER_MARKER_OPTIONS,
@@ -1321,7 +1321,7 @@ local function PlayerTrackerRows()
       set = function(v)
         if addon.SetCombatMarkerSymbol then addon:SetCombatMarkerSymbol(v) end
         if _G.Meters_SetCenterMarker then _G.Meters_SetCenterMarker("None") end
-        if addon.RefreshPlayerTracker then addon:RefreshPlayerTracker(false)
+        if addon.RefreshCenterMarker then addon:RefreshCenterMarker(false)
         elseif addon.RefreshCombatMarker then addon:RefreshCombatMarker(false) end
         if addon.RefreshAssistedHighlight then addon:RefreshAssistedHighlight(true) end
       end,
@@ -1338,6 +1338,15 @@ local function PlayerTrackerRows()
     -- Row under the dropdown: Class / Custom colour + swatch, tri-state like the Pressed
     -- Indicator -- unchecking both = no colour (the image shows its own colours).
     { type = "tricolor", label = "Class Color", label2 = "Custom",
+      -- Leading toggle: Press Detection makes the chosen Center Marker monitor input and blink
+      -- like the Pressed Indicator (always shown, pulses on each key/macro press).
+      leadLabel = "Press Detection",
+      leadGet = function() return addon.GetCombatMarkerPressDetection and addon:GetCombatMarkerPressDetection() end,
+      leadSet = function(v)
+        if addon.SetCombatMarkerPressDetection then addon:SetCombatMarkerPressDetection(v) end
+        if addon.RefreshCombatMarker then addon:RefreshCombatMarker(false) end
+      end,
+      tooltipLead = "Make the Center Marker monitor your input and blink like the Pressed Indicator: always shown, pulsing on each key/macro press (procedural shapes flash green then dim red; image/class icons keep their colour and just pulse). The separate Pressed Indicator is unaffected.",
       get = "GetCombatMarkerColorMode",
       set = function(m)
         if addon.SetCombatMarkerColorMode then addon:SetCombatMarkerColorMode(m) end
@@ -1351,7 +1360,7 @@ local function PlayerTrackerRows()
         if addon.RefreshAssistedHighlight then addon:RefreshAssistedHighlight(true) end
       end,
       tooltip = "Tint the Center Marker with your class colour.",
-      tooltip2 = "Tint the Center Marker with a custom colour (click the swatch). With neither Class nor Custom selected, the image shows in its own colours." },
+      tooltip2 = "Tint the Center Marker with a custom colour (click the swatch). With neither Class nor Custom selected, white/greyscale shapes fall back to red; full-colour art shows its own colours." },
     -- (Scale now shares the Center Marker row above. Thickness / Border Size were removed --
     -- they only affected the old procedural vector shapes, no longer offered as markers.)
   }
@@ -1490,7 +1499,7 @@ local TABS = {
       }
     end,
     -- Player Marker controls pinned to the BOTTOM of the Meters tab (moved from its own tab).
-    bottomRows = PlayerTrackerRows },
+    bottomRows = CenterMarkerRows },
   { key = "AssistedHighlight", text = "Assisted Highlight", rows = AssistedHighlightRows, enableGet = "IsAssistedHighlightMirrorEnabled", centerContent = true, cap = "assistedHighlight" },
   { key = "ActionTracker", text = "Action Tracker", rows = ActionTrackerRows, enableGet = "IsEnabled", centerContent = true },
   { key = "QoL", text = "Quality of Life", rows = QoLRows, centerContent = true },

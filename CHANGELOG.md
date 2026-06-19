@@ -6,6 +6,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.3.3] - 2026-06-19
+
+### Added
+- Press Detection toggle for the Center Marker: the chosen Center Marker monitors input and blinks like the Pressed Indicator (always shown, pulses on each key/GSE press) via the shared `UI:ComputePressState`. Tintable (white) symbols flash green-on-press / red-when-idle when no colour is chosen, or use the Class/Custom colour; full-colour art and Class/Spec icons keep their own colours. The standalone Pressed Indicator is unaffected.
+- Marker images: Crosshairs009, Crosshairs010, YingYang.
+
+### Changed
+- Renamed "Player Tracker" to "Center Marker" across the options and code (legacy tab keys preserved for compatibility).
+- White/tintable markers with no colour selected now fall back to red instead of white.
+- Added a root `CLAUDE.md` documenting the cross-version compatibility rule and sanctioned patterns (excluded from the packaged addon via `.pkgmeta`).
+
+### Fixed
+- Marker images saved as indexed-palette PNGs (Dot, Crosshairs009/010) rendered as green blocks in-game; re-encoded to 8-bit RGBA.
+- Author field corrected to ScaryLarryGames in all flavor TOCs.
+
 ## [1.3.2] - 2026-06-19
 
 ### Fixed

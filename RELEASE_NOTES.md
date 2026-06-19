@@ -1,3 +1,16 @@
+## 1.3.3
+
+### New
+- **Press Detection** for the Center Marker (Player Tracker tab). Tick it and your chosen Center Marker monitors your input and blinks like the **Pressed Indicator** — always shown, pulsing on each key/macro press. White shapes flash **green on press / red when idle** (or your Class/Custom colour if set); full-colour art keeps its own colours. The separate Pressed Indicator is unaffected.
+- New marker images: **Crosshair 9**, **Crosshair 10**, and **YingYang**.
+
+### Changed
+- **"Player Tracker" is now called "Center Marker"** throughout the options.
+- A **white** marker/shape with no colour selected now falls back to **red** (instead of white) so it stays visible. Full-colour art and Class/Spec icons keep their own colours.
+
+### Fixed
+- Some marker images showed as a **green block** in-game (Dot, Crosshair 9/10) — they were saved as indexed-palette PNGs, which WoW can't load. Re-saved as standard images.
+
 ## 1.3.2
 
 ### Fixed

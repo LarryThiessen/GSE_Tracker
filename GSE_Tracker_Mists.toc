@@ -1,9 +1,9 @@
 ## Interface: 50504
 ## Title: |cFFFFFFFFGS|r|cFF00FFFFE:|r|cFFFFFF00 Tracker|r
 ## Notes: Standalone Action Tracker
-## Author: Artseeker
+## Author: ScaryLarryGames
 ## IconTexture: Interface\AddOns\GSE_Tracker\media\GSE_Tracker.png
-## Version: 1.3.2
+## Version: 1.3.3
 ## SavedVariables: GSETrackerDB
 ## SavedVariablesPerCharacter: GSETrackerCharDB
 ## OptionalDeps: LibSharedMedia-3.0

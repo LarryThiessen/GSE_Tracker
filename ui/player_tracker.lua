@@ -36,7 +36,9 @@ end
 
 local function GetResolvedMarkerColor()
   -- Tri-state colour mode (mirrors the Pressed Indicator): "class" / "custom" / "none".
-  -- "none" = no tint (1,1,1) so image markers show their own colours.
+  -- "none" = fall back to RED so a white/greyscale shape or crosshair stays visible instead of
+  -- washing out. Full-colour art and Class/Spec icons ignore the tint and keep their own colours
+  -- (see DrawSymbolOnFrame), so this only affects tintable (white) symbols.
   local mode = (addon.GetCombatMarkerColorMode and addon:GetCombatMarkerColorMode()) or "none"
   if mode == "class" then
     return GetClassColorRGB()
@@ -46,7 +48,7 @@ local function GetResolvedMarkerColor()
     end
     return 1.00, 0.82, 0.20
   end
-  return 1, 1, 1
+  return C.COLOR_RED_R or 1, C.COLOR_RED_G or 0.20, C.COLOR_RED_B or 0.20
 end
 
 local function ParentUnitsFromCanonical(value, parent)
@@ -317,6 +319,28 @@ function UI:DrawSymbolOnFrame(frame, symbol, size, thickness, borderSize, r, g, 
   end
 end
 
+-- Forward declaration: ApplyMarkerStyleToFrame (below) references this, but its full definition
+-- lives further down. Declared local here so the reference binds to the upvalue, not a nil global.
+local IsEditingCenterMarkerTab
+
+-- "Press Detection" Center Marker behaviour --------------------------------------------------
+-- When Press Detection is ON the chosen Center Marker (whatever symbol it is) MONITORS input and
+-- BLINKS like the standalone Pressed Indicator: it is always shown, pulses at the input rate, and
+-- (for procedural shapes) flashes green-on-press then dim-red while held -- image / Class / Spec
+-- markers keep their resolved colour and just pulse. The standalone Pressed Indicator is
+-- unaffected. Both read the same input clock (addon._lastInputTime / _lastGSEPressTime).
+local function IsPressDetectionOn()
+  return (addon.GetCombatMarkerPressDetection and addon:GetCombatMarkerPressDetection()) and true or false
+end
+
+-- Delegates to the Pressed Indicator's shared press-state (ui/indicator.lua: UI:ComputePressState),
+-- so the Center Marker's Press Detection Monitors / Shows / Blinks with the SAME code as the PI.
+-- Returns: active (just-pressed flash), recentlyUsed (stay shown), pulse (blink alpha 0..1).
+local function GetMarkerPressedState()
+  if UI.ComputePressState then return UI:ComputePressState() end
+  return false, false, 1
+end
+
 local function ApplyMarkerStyleToFrame(frame)
   if not frame then return end
 
@@ -326,6 +350,37 @@ local function ApplyMarkerStyleToFrame(frame)
   local alpha = addon.GetCombatMarkerAlpha and addon:GetCombatMarkerAlpha() or (C.COMBAT_MARKER_DEFAULT_ALPHA or 0.85)
   local symbol = addon.GetCombatMarkerSymbol and addon:GetCombatMarkerSymbol() or (C.COMBAT_MARKER_DEFAULT_SYMBOL or "x")
   local r, g, b = GetResolvedMarkerColor()
+
+  -- "Press Detection": keep the user's chosen symbol but override its colour/draw-alpha with the
+  -- press flash (procedural shapes only); image / Class / Spec keep their resolved colour. The
+  -- blink (whole-frame alpha) is applied AFTER the style cache so it animates without an
+  -- expensive symbol redraw every tick.
+  local piMode = IsPressDetectionOn()
+  local pulse = 1
+  if piMode then
+    local active, _, blinkPulse = GetMarkerPressedState()
+    pulse = blinkPulse
+    -- Hold solid (no blink) while the options/preview is open or it's being dragged, so it can
+    -- be seen and positioned.
+    if IsEditingCenterMarkerTab() or frame._isDragging then pulse = 1 end
+    -- Which symbols are tintable (white) vs keep-their-own-colours:
+    local isImage = C.COMBAT_MARKER_IMAGE_VALID and C.COMBAT_MARKER_IMAGE_VALID[symbol]
+    local isDynamic = C.COMBAT_MARKER_DYNAMIC_VALID and C.COMBAT_MARKER_DYNAMIC_VALID[symbol]
+    local isTintable = (not isImage and not isDynamic)  -- procedural vector shapes
+      or (isImage and C.COMBAT_MARKER_IMAGE_TINT and C.COMBAT_MARKER_IMAGE_TINT[symbol])  -- white art
+    local mode = (addon.GetCombatMarkerColorMode and addon:GetCombatMarkerColorMode()) or "none"
+    local hasColorChoice = (mode == "class" or mode == "custom")
+    if isTintable and not hasColorChoice then
+      -- No colour chosen: flash GREEN while active (pressed), RED while idle.
+      if active then
+        r, g, b, alpha = C.COLOR_GREEN_R or 0.20, C.COLOR_GREEN_G or 1, C.COLOR_GREEN_B or 0.20, C.ALPHA_STRONG or 0.95
+      else
+        r, g, b, alpha = C.COLOR_RED_R or 1, C.COLOR_RED_G or 0.20, C.COLOR_RED_B or 0.20, C.ALPHA_DIM or 0.60
+      end
+    end
+    -- Otherwise: tintable + Class/Custom keeps its resolved colour (r,g,b from GetResolvedMarkerColor);
+    -- full-colour art / Class / Spec keep their own colours (DrawSymbolOnFrame ignores the tint).
+  end
 
   size = Clamp(tonumber(size) or 40, C.COMBAT_MARKER_MIN_SIZE or 16, C.COMBAT_MARKER_MAX_SIZE or 128)
   thickness = Clamp(tonumber(thickness) or 4, C.COMBAT_MARKER_MIN_THICKNESS or 1, C.COMBAT_MARKER_MAX_THICKNESS or 12)
@@ -342,16 +397,16 @@ local function ApplyMarkerStyleToFrame(frame)
     tostring(symbol), tostring(size), tostring(thickness), tostring(borderSize),
     string.format("%.3f", alpha),
     string.format("%.3f", r or 1), string.format("%.3f", g or 1), string.format("%.3f", b or 1),
-    dynToken,
+    dynToken, piMode and "pi" or "",
   }, "|")
-  if frame._combatMarkerStyleSig == styleSig then
-    return
+  if frame._combatMarkerStyleSig ~= styleSig then
+    frame._combatMarkerStyleSig = styleSig
+    frame:SetSize(PixelSnap(size, frame), PixelSnap(size, frame))
+    UI:DrawSymbolOnFrame(frame, symbol, size, thickness, borderSize, r, g, b, alpha)
   end
-  frame._combatMarkerStyleSig = styleSig
 
-  frame:SetSize(PixelSnap(size, frame), PixelSnap(size, frame))
-  frame:SetAlpha(1)
-  UI:DrawSymbolOnFrame(frame, symbol, size, thickness, borderSize, r, g, b, alpha)
+  -- Blink: cheap whole-frame alpha applied every call. Non-PI mode stays solid at 1.
+  frame:SetAlpha(piMode and pulse or 1)
 end
 
 local function ApplyMarkerPointToFrame(frame, parent, point, x, y)
@@ -379,11 +434,11 @@ local function ApplyMarkerPointToFrame(frame, parent, point, x, y)
 end
 
 
-local function IsEditingPlayerTrackerTab()
+function IsEditingCenterMarkerTab()
   if not addon._editingOptions then return false end
   local settingsWindow = addon.settingsWindow
   if not (settingsWindow and settingsWindow.GetSelectedTopTab) then return true end
-  return settingsWindow:GetSelectedTopTab() == "PlayerTracker"
+  return settingsWindow:GetSelectedTopTab() == "CenterMarker"
 end
 
 local function GetLiveActionTrackerStrataAndLevel(self)
@@ -411,7 +466,7 @@ end
 function UI:EnsureCombatMarker()
   local strata, level = GetLiveActionTrackerStrataAndLevel(self)
   addon.combatMarkerFrame = EnsureMarkerFrame(addon.combatMarkerFrame, UIParent, strata, level)
-  addon.playerTrackerFrame = addon.combatMarkerFrame
+  addon.centerMarkerFrame = addon.combatMarkerFrame
   if addon.combatMarkerFrame and not addon.combatMarkerFrame._gseMarkerDragScripts then
     local frame = addon.combatMarkerFrame
     frame._gseMarkerDragScripts = true
@@ -439,7 +494,7 @@ function UI:EnsureCombatMarker()
   if mAnchor and not mAnchor._gseMarkerVisibilityHook then
     mAnchor._gseMarkerVisibilityHook = true
     local function syncMarker()
-      if addon.ui and addon.ui.RefreshCombatMarker then addon.ui:RefreshCombatMarker() end
+      if addon.RefreshCombatMarker then addon:RefreshCombatMarker() end
     end
     mAnchor:HookScript("OnShow", syncMarker)
     mAnchor:HookScript("OnHide", syncMarker)
@@ -567,14 +622,58 @@ function UI:ShouldShowCombatMarker(forceOverride)
   -- enable/show of its own -- it simply follows the Meters frame's visibility: shown when
   -- the Meters readout is shown, hidden otherwise. (forceOverride / editing-tab preview
   -- still forces it visible so it can be seen while the options window is open.)
-  if forceOverride == true or IsEditingPlayerTrackerTab() then
+  if forceOverride == true or IsEditingCenterMarkerTab() then
     return true
+  end
+  -- Press Detection: behave exactly like the standalone Pressed Indicator -- ALWAYS AVAILABLE
+  -- (independent of combat / the Meters readout), shown and pulsing while there's recent input,
+  -- and faded ALL THE WAY out (hidden) when no input is detected. The blink/colour is handled in
+  -- ApplyMarkerStyleToFrame.
+  if IsPressDetectionOn() then
+    local _, recentlyUsed = GetMarkerPressedState()
+    return recentlyUsed and true or false
   end
   local anchor = _G.MetersAnchor
   if anchor and anchor.IsShown then
     return anchor:IsShown() and true or false
   end
   return false
+end
+
+-- Lightweight ~20Hz ticker that re-refreshes the Center Marker while it's in Pressed Indicator
+-- mode and recently used, so it blinks and auto-hides after the hold window -- exactly like the
+-- standalone indicator. Uses a DEDICATED frame, NOT the marker's own OnUpdate (which the drag
+-- system owns), so the two never fight over the script.
+local function CombatMarkerPiOnUpdate(driver, elapsed)
+  driver._tick = (driver._tick or 0) + (elapsed or 0)
+  if driver._tick < 0.05 then return end
+  driver._tick = 0
+  if not (addon and addon.RefreshCombatMarker) then
+    driver._active = false
+    driver:SetScript("OnUpdate", nil)
+    return
+  end
+  addon:RefreshCombatMarker()
+end
+
+function UI:StartCombatMarkerPiDriver()
+  local d = addon._combatMarkerPiDriver
+  if not d then
+    d = (API.CreateFrame and API.CreateFrame("Frame")) or _G.CreateFrame("Frame")
+    addon._combatMarkerPiDriver = d
+  end
+  if d._active then return end
+  d._active = true
+  d._tick = 0
+  d:SetScript("OnUpdate", CombatMarkerPiOnUpdate)
+end
+
+function UI:StopCombatMarkerPiDriver()
+  local d = addon._combatMarkerPiDriver
+  if not (d and d._active) then return end
+  d._active = false
+  d._tick = 0
+  d:SetScript("OnUpdate", nil)
 end
 
 function UI:RefreshCombatMarker(force)
@@ -584,62 +683,77 @@ function UI:RefreshCombatMarker(force)
   self:ApplyCombatMarkerStyle(frame)
   self:ApplyCombatMarkerPosition(frame)
 
-  if self:ShouldShowCombatMarker(force) then
+  local show = self:ShouldShowCombatMarker(force)
+  if show then
     frame:Show()
   else
     frame:Hide()
   end
+
+  -- With Press Detection on, keep the blink ticker running while it's shown and there's recent
+  -- input; stop it otherwise (and always when off).
+  if show and IsPressDetectionOn() then
+    local _, recentlyUsed = GetMarkerPressedState()
+    if recentlyUsed then
+      self:StartCombatMarkerPiDriver()
+    else
+      self:StopCombatMarkerPiDriver()
+    end
+  else
+    self:StopCombatMarkerPiDriver()
+  end
+
   self:RefreshCombatMarkerDragMouseState()
 end
 
-function UI:ApplyPlayerTrackerStrata(frame)
+function UI:ApplyCenterMarkerStrata(frame)
   return self:ApplyCombatMarkerStrata(frame)
 end
 
-function UI:EnsurePlayerTracker()
+function UI:EnsureCenterMarker()
   return self:EnsureCombatMarker()
 end
 
-function UI:ApplyPlayerTrackerStyle(frame)
+function UI:ApplyCenterMarkerStyle(frame)
   return self:ApplyCombatMarkerStyle(frame)
 end
 
-function UI:ApplyPlayerTrackerPosition(frame, parent, point, x, y)
+function UI:ApplyCenterMarkerPosition(frame, parent, point, x, y)
   return self:ApplyCombatMarkerPosition(frame, parent, point, x, y)
 end
 
-function UI:LayoutPlayerTrackerPreview()
+function UI:LayoutCenterMarkerPreview()
   return self:LayoutCombatMarkerPreview()
 end
 
-function UI:HidePlayerTrackerPreview()
+function UI:HideCenterMarkerPreview()
   return self:HideCombatMarkerPreview()
 end
 
-function UI:BeginPlayerTrackerDrag(frame)
+function UI:BeginCenterMarkerDrag(frame)
   return self:BeginCombatMarkerDrag(frame)
 end
 
-function UI:EndPlayerTrackerDrag(commit)
+function UI:EndCenterMarkerDrag(commit)
   return self:EndCombatMarkerDrag(commit)
 end
 
-function UI:CanDragPlayerTracker()
+function UI:CanDragCenterMarker()
   return self:CanDragCombatMarker()
 end
 
-function UI:RefreshPlayerTrackerDragMouseState()
+function UI:RefreshCenterMarkerDragMouseState()
   return self:RefreshCombatMarkerDragMouseState()
 end
 
-function UI:SyncActivePlayerTrackerDragPosition()
+function UI:SyncActiveCenterMarkerDragPosition()
   return self:SyncActiveCombatMarkerDragPosition()
 end
 
-function UI:ShouldShowPlayerTracker(forceOverride)
+function UI:ShouldShowCenterMarker(forceOverride)
   return self:ShouldShowCombatMarker(forceOverride)
 end
 
-function UI:RefreshPlayerTracker(force)
+function UI:RefreshCenterMarker(force)
   return self:RefreshCombatMarker(force)
 end

@@ -70,9 +70,9 @@ function UI:InitUI()
   if self.BuildMainFrame then
     self:BuildMainFrame()
   end
-  if self.EnsurePlayerTracker then
-    self:EnsurePlayerTracker()
-    self:RefreshPlayerTracker()
+  if self.EnsureCenterMarker then
+    self:EnsureCenterMarker()
+    self:RefreshCenterMarker()
   elseif self.EnsureCombatMarker then
     self:EnsureCombatMarker()
     self:RefreshCombatMarker()

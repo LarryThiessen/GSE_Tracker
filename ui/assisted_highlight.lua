@@ -1701,7 +1701,7 @@ function Display:UpdateGCDSwipe(frame)
 end
 
 -- ── Center-marker mirror ─────────────────────────────────────────────────────
--- When the Player Tracker "Center Marker" is set to AHLight, we show a SECOND copy of
+-- When the Center Marker is set to AHLight, we show a SECOND copy of
 -- THIS Assisted Highlight icon at the unified marker centre. There is only one AH
 -- engine (this file) -- the centre display is just a mirror of the same suggestion +
 -- GCD swipe. "One at the centre, one wherever the AH tab placed it." No second engine.

@@ -25,13 +25,13 @@ local SHAPE_TEXT = {
   cross = "Cross",
 }
 
-local function IsPlayerTrackerEffect(effect)
-  return effect == "playerTracker" or effect == "combatMarker"
+local function IsCenterMarkerEffect(effect)
+  return effect == "centerMarker" or effect == "combatMarker"
 end
 
-local function RefreshPlayerTracker()
-  if addon.RefreshPlayerTracker then
-    addon:RefreshPlayerTracker()
+local function RefreshCenterMarker()
+  if addon.RefreshCenterMarker then
+    addon:RefreshCenterMarker()
   elseif addon.RefreshCombatMarker then
     addon:RefreshCombatMarker()
   end
@@ -112,7 +112,7 @@ function optionsModule.ApplyTargetedRefresh(effect, elementName, changeKind)
   elseif effect == "lock" then
     if addon.RefreshDragMouseState then addon:RefreshDragMouseState() end
     if addon.UpdateActionTrackerMoveMarker then addon:UpdateActionTrackerMoveMarker() end
-    RefreshPlayerTracker()
+    RefreshCenterMarker()
     if addon.RefreshAssistedHighlight then addon:RefreshAssistedHighlight(true) end
   elseif effect == "performanceMode" then
     if addon.ui and addon.SetIconRow then
@@ -121,9 +121,9 @@ function optionsModule.ApplyTargetedRefresh(effect, elementName, changeKind)
       addon:RebuildIcons(true)
     end
     if addon._editingOptions and addon.RefreshEditingPreviewState then addon:RefreshEditingPreviewState() end
-  elseif IsPlayerTrackerEffect(effect) then
+  elseif IsCenterMarkerEffect(effect) then
     if addon.UpdateEventSubscriptions then addon:UpdateEventSubscriptions() end
-    RefreshPlayerTracker()
+    RefreshCenterMarker()
   elseif effect == "assistedHighlight" then
     if changeKind == "layout" then
       if addon.ApplyAssistedHighlightLayout then
@@ -188,7 +188,7 @@ function optionsModule.ApplyTargetedRefresh(effect, elementName, changeKind)
     if addon.RevealPendingSequenceText then addon:RevealPendingSequenceText() end
     RefreshRuntimeSequenceAndKeybind()
     if addon.RefreshPressedIndicator then addon:RefreshPressedIndicator(true) end
-    RefreshPlayerTracker()
+    RefreshCenterMarker()
     if addon.RefreshAssistedHighlight then addon:RefreshAssistedHighlight(true) end
   end
 

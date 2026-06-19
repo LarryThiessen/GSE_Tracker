@@ -129,7 +129,7 @@ local function WireAssistedHighlightCallbacks(C, ctx, fontNames)
     OpenAssistedHighlightColorPicker()
   end)
 
-  -- Player Tracker slider callbacks (wired here alongside AH due to file ordering)
+  -- Center Marker slider callbacks (wired here alongside AH due to file ordering)
 
   C.sCombatMarkerSize:SetScript("OnValueChanged", function(_, v)
     if C.sCombatMarkerSize._gseApplyingFromInput or ctx.IsRefreshing() or not addon:IsCombatMarkerEnabled() then return end
@@ -138,14 +138,14 @@ local function WireAssistedHighlightCallbacks(C, ctx, fontNames)
     ctx.setSlider(C.sCombatMarkerSize, value)
     if addon:GetCombatMarkerSize() == value then return end
     addon:SetCombatMarkerSize(value)
-    ctx.ApplyEffect("playerTracker")
+    ctx.ApplyEffect("centerMarker")
   end)
   ctx.bindNumeric(C.sCombatMarkerSize,
     function() return addon:GetCombatMarkerSize() end,
     function(value)
       ctx.ensureDB()
       addon:SetCombatMarkerSize(value)
-      ctx.ApplyEffect("playerTracker")
+      ctx.ApplyEffect("centerMarker")
     end,
     16, 128)
 
@@ -158,14 +158,14 @@ local function WireAssistedHighlightCallbacks(C, ctx, fontNames)
     ctx.ensureDB()
     if addon:GetCombatMarkerAlpha() == value then return end
     addon:SetCombatMarkerAlpha(value)
-    ctx.ApplyEffect("playerTracker")
+    ctx.ApplyEffect("centerMarker")
   end)
   ctx.bindFloat(C.sCombatMarkerAlpha,
     function() return addon:GetCombatMarkerAlpha() end,
     function(value)
       ctx.ensureDB()
       addon:SetCombatMarkerAlpha(ctx.clamp(value, 0.05, 1.00))
-      ctx.ApplyEffect("playerTracker")
+      ctx.ApplyEffect("centerMarker")
     end,
     0.05, 1.00, 2)
 
@@ -177,7 +177,7 @@ local function WireAssistedHighlightCallbacks(C, ctx, fontNames)
     ctx.setSlider(C.sCombatMarkerX, value)
     if value == (addon:GetCombatMarkerOffset()) then return end
     addon:SetCombatMarkerOffset(value, y)
-    ctx.ApplyEffect("playerTracker")
+    ctx.ApplyEffect("centerMarker")
   end)
   ctx.bindNumeric(C.sCombatMarkerX,
     function()
@@ -187,7 +187,7 @@ local function WireAssistedHighlightCallbacks(C, ctx, fontNames)
     function(value)
       local _, y = addon:GetCombatMarkerOffset()
       addon:SetCombatMarkerOffset(value, y)
-      ctx.ApplyEffect("playerTracker")
+      ctx.ApplyEffect("centerMarker")
     end,
     -3000, 3000)
 
@@ -199,7 +199,7 @@ local function WireAssistedHighlightCallbacks(C, ctx, fontNames)
     ctx.setSlider(C.sCombatMarkerY, value)
     if currentY == value then return end
     addon:SetCombatMarkerOffset(x, value)
-    ctx.ApplyEffect("playerTracker")
+    ctx.ApplyEffect("centerMarker")
   end)
   ctx.bindNumeric(C.sCombatMarkerY,
     function()
@@ -209,7 +209,7 @@ local function WireAssistedHighlightCallbacks(C, ctx, fontNames)
     function(value)
       local x = addon:GetCombatMarkerOffset()
       addon:SetCombatMarkerOffset(x, value)
-      ctx.ApplyEffect("playerTracker")
+      ctx.ApplyEffect("centerMarker")
     end,
     -3000, 3000)
 
@@ -220,14 +220,14 @@ local function WireAssistedHighlightCallbacks(C, ctx, fontNames)
     ctx.setSlider(C.sCombatMarkerThickness, value)
     if addon:GetCombatMarkerThickness() == value then return end
     addon:SetCombatMarkerThickness(value)
-    ctx.ApplyEffect("playerTracker")
+    ctx.ApplyEffect("centerMarker")
   end)
   ctx.bindNumeric(C.sCombatMarkerThickness,
     function() return addon:GetCombatMarkerThickness() end,
     function(value)
       ctx.ensureDB()
       addon:SetCombatMarkerThickness(value)
-      ctx.ApplyEffect("playerTracker")
+      ctx.ApplyEffect("centerMarker")
     end,
     1, 12)
 
@@ -239,7 +239,7 @@ local function WireAssistedHighlightCallbacks(C, ctx, fontNames)
     if C.cbCombatMarkerBorder then C.cbCombatMarkerBorder:SetChecked(value > 0) end
     if addon:GetCombatMarkerBorderSize() == value then return end
     addon:SetCombatMarkerBorderSize(value)
-    ctx.ApplyEffect("playerTracker")
+    ctx.ApplyEffect("centerMarker")
   end)
   ctx.bindNumeric(C.sCombatMarkerBorderSize,
     function() return addon:GetCombatMarkerBorderSize() end,
@@ -247,7 +247,7 @@ local function WireAssistedHighlightCallbacks(C, ctx, fontNames)
       ctx.ensureDB()
       addon:SetCombatMarkerBorderSize(value)
       if C.cbCombatMarkerBorder then C.cbCombatMarkerBorder:SetChecked(value > 0) end
-      ctx.ApplyEffect("playerTracker")
+      ctx.ApplyEffect("centerMarker")
     end,
     0, 8)
 
@@ -1080,25 +1080,25 @@ function Options:InitOptions()
   end
 
   local actionTrackerScroll, actionTrackerContent = CreateTabScrollContent(content)
-  local playerTrackerScroll, playerTrackerContent = CreateTabScrollContent(content)
+  local centerMarkerScroll, centerMarkerContent = CreateTabScrollContent(content)
   local assistedHighlightScroll, assistedHighlightContent = CreateTabScrollContent(content)
 
   frame.tabContents = {
     ActionTracker = actionTrackerScroll,
-    PlayerTracker = playerTrackerScroll,
-    Combat = playerTrackerScroll,
+    CenterMarker = centerMarkerScroll,
+    Combat = centerMarkerScroll,
     AssistedHighlight = assistedHighlightScroll,
   }
   frame.tabCanvases = {
     ActionTracker = actionTrackerContent,
-    PlayerTracker = playerTrackerContent,
-    Combat = playerTrackerContent,
+    CenterMarker = centerMarkerContent,
+    Combat = centerMarkerContent,
     AssistedHighlight = assistedHighlightContent,
   }
 
   local sidebarTabs = {
     { key = "ActionTracker", text = "Action Tracker" },
-    { key = "PlayerTracker", text = "Player Tracker" },
+    { key = "CenterMarker", text = "Center Marker" },
     { key = "AssistedHighlight", text = "Assisted Highlight" },
   }
   buildTopTabs(frame, navRail, sidebarTabs)
@@ -1115,8 +1115,8 @@ function Options:InitOptions()
   local modsCard = createSection(actionTrackerContent, "Modifiers")
   local keyCard = createSection(actionTrackerContent, "Keybind")
   local pressedCard = createSection(actionTrackerContent, "Indicator")
-  local playerTrackerGeneralSection = createSection(playerTrackerContent, "General")
-  local playerTrackerDisplaySection = createSection(playerTrackerContent, "Display")
+  local centerMarkerGeneralSection = createSection(centerMarkerContent, "General")
+  local centerMarkerDisplaySection = createSection(centerMarkerContent, "Display")
   local assistedHighlightGeneralSection = createSection(assistedHighlightContent, "General")
   local assistedHighlightDisplaySection = createSection(assistedHighlightContent, "Display")
   local assistedHighlightKeybindSection = createSection(assistedHighlightContent, "Keybind")
@@ -1199,7 +1199,7 @@ function Options:InitOptions()
 
     if effect == "actionTrackerPosition" then
       if frame.RefreshActionTrackerPositionControls then frame:RefreshActionTrackerPositionControls() end
-    elseif effect == "playerTracker" or effect == "combatMarker" then
+    elseif effect == "centerMarker" or effect == "combatMarker" then
       if frame.RefreshCombatMarkerControls then frame:RefreshCombatMarkerControls() end
     end
 
@@ -1253,25 +1253,25 @@ function Options:InitOptions()
     { text = "In Combat", value = Constants.MODE_IN_COMBAT or "InCombat" },
     { text = "Never", value = Constants.MODE_NEVER or "Never" },
   }
-  local cbCombatMarkerEnabled = createCheck(playerTrackerGeneralSection, "")
-  local cbCombatMarkerLock = createCheck(playerTrackerGeneralSection, "")
-  local combatMarkerShowWhenHolder, ddCombatMarkerShowWhen = createDropdown(playerTrackerGeneralSection, "GSE_TrackerCombatMarkerShowWhenDropDown", CONTROL_TOTAL_W)
-  local combatMarkerSymbolHolder, ddCombatMarkerSymbol = createDropdown(playerTrackerDisplaySection, "GSE_TrackerCombatMarkerSymbolDropDown", CONTROL_TOTAL_W)
-  local combatMarkerXHolder, sCombatMarkerX = createSlider(playerTrackerGeneralSection, "GSE_TrackerCombatMarkerXSlider", -3000, 3000, 1, CONTROL_TRACK_W)
-  local combatMarkerYHolder, sCombatMarkerY = createSlider(playerTrackerGeneralSection, "GSE_TrackerCombatMarkerYSlider", -3000, 3000, 1, CONTROL_TRACK_W)
-  local combatMarkerSizeHolder, sCombatMarkerSize = createSlider(playerTrackerGeneralSection, "GSE_TrackerCombatMarkerSizeSlider", 16, 128, 1, CONTROL_TRACK_W)
-  local combatMarkerAlphaHolder, sCombatMarkerAlpha = createSlider(playerTrackerDisplaySection, "GSE_TrackerCombatMarkerAlphaSlider", 0.05, 1.00, 0.01, CONTROL_TRACK_W)
+  local cbCombatMarkerEnabled = createCheck(centerMarkerGeneralSection, "")
+  local cbCombatMarkerLock = createCheck(centerMarkerGeneralSection, "")
+  local combatMarkerShowWhenHolder, ddCombatMarkerShowWhen = createDropdown(centerMarkerGeneralSection, "GSE_TrackerCombatMarkerShowWhenDropDown", CONTROL_TOTAL_W)
+  local combatMarkerSymbolHolder, ddCombatMarkerSymbol = createDropdown(centerMarkerDisplaySection, "GSE_TrackerCombatMarkerSymbolDropDown", CONTROL_TOTAL_W)
+  local combatMarkerXHolder, sCombatMarkerX = createSlider(centerMarkerGeneralSection, "GSE_TrackerCombatMarkerXSlider", -3000, 3000, 1, CONTROL_TRACK_W)
+  local combatMarkerYHolder, sCombatMarkerY = createSlider(centerMarkerGeneralSection, "GSE_TrackerCombatMarkerYSlider", -3000, 3000, 1, CONTROL_TRACK_W)
+  local combatMarkerSizeHolder, sCombatMarkerSize = createSlider(centerMarkerGeneralSection, "GSE_TrackerCombatMarkerSizeSlider", 16, 128, 1, CONTROL_TRACK_W)
+  local combatMarkerAlphaHolder, sCombatMarkerAlpha = createSlider(centerMarkerDisplaySection, "GSE_TrackerCombatMarkerAlphaSlider", 0.05, 1.00, 0.01, CONTROL_TRACK_W)
   if sCombatMarkerAlpha.inputBox then sCombatMarkerAlpha.inputBox:Show() end
-  local cbCombatMarkerBorder = createCheck(playerTrackerDisplaySection, "")
-  local combatMarkerBorderSizeHolder, sCombatMarkerBorderSize = createSlider(playerTrackerDisplaySection, "GSE_TrackerCombatMarkerBorderSizeSlider", 0, 8, 1, CONTROL_TRACK_W)
-  local combatMarkerThicknessHolder, sCombatMarkerThickness = createSlider(playerTrackerDisplaySection, "GSE_TrackerCombatMarkerThicknessSlider", 1, 12, 1, CONTROL_TRACK_W)
+  local cbCombatMarkerBorder = createCheck(centerMarkerDisplaySection, "")
+  local combatMarkerBorderSizeHolder, sCombatMarkerBorderSize = createSlider(centerMarkerDisplaySection, "GSE_TrackerCombatMarkerBorderSizeSlider", 0, 8, 1, CONTROL_TRACK_W)
+  local combatMarkerThicknessHolder, sCombatMarkerThickness = createSlider(centerMarkerDisplaySection, "GSE_TrackerCombatMarkerThicknessSlider", 1, 12, 1, CONTROL_TRACK_W)
 
-  addInlineCheckRow(playerTrackerGeneralSection, "Enable", cbCombatMarkerEnabled)
-  addInlineCheckRow(playerTrackerGeneralSection, "Lock", cbCombatMarkerLock)
-  addRow(playerTrackerGeneralSection, "Show", combatMarkerShowWhenHolder)
-  addRow(playerTrackerGeneralSection, "Size", combatMarkerSizeHolder)
-  addRow(playerTrackerGeneralSection, "X Offset", combatMarkerXHolder)
-  addRow(playerTrackerGeneralSection, "Y Offset", combatMarkerYHolder)
+  addInlineCheckRow(centerMarkerGeneralSection, "Enable", cbCombatMarkerEnabled)
+  addInlineCheckRow(centerMarkerGeneralSection, "Lock", cbCombatMarkerLock)
+  addRow(centerMarkerGeneralSection, "Show", combatMarkerShowWhenHolder)
+  addRow(centerMarkerGeneralSection, "Size", combatMarkerSizeHolder)
+  addRow(centerMarkerGeneralSection, "X Offset", combatMarkerXHolder)
+  addRow(centerMarkerGeneralSection, "Y Offset", combatMarkerYHolder)
 
   local function normalizeSectionVerticalAlignment(section)
     if not (section and section.rows) then return end
@@ -1300,20 +1300,20 @@ function Options:InitOptions()
     end
   end
 
-  local function normalizePlayerTrackerVerticalAlignment()
-    for _, section in ipairs({ playerTrackerGeneralSection, playerTrackerDisplaySection }) do
+  local function normalizeCenterMarkerVerticalAlignment()
+    for _, section in ipairs({ centerMarkerGeneralSection, centerMarkerDisplaySection }) do
       normalizeSectionVerticalAlignment(section)
     end
   end
 
-  local cbCombatMarkerUseClassColor = createCheck(playerTrackerDisplaySection, "")
-  local btnCombatMarkerColor = createColorSwatch(playerTrackerDisplaySection, 20, 20)
-  addRow(playerTrackerDisplaySection, "Symbol", combatMarkerSymbolHolder)
-  addRow(playerTrackerDisplaySection, "Alpha", combatMarkerAlphaHolder)
-  addRow(playerTrackerDisplaySection, "Thickness", combatMarkerThicknessHolder)
-  addInlineCheckRow(playerTrackerDisplaySection, "Border", cbCombatMarkerBorder)
-  addRow(playerTrackerDisplaySection, "Border Size", combatMarkerBorderSizeHolder)
-  addColorCheckRow(playerTrackerDisplaySection, "Symbol Color", btnCombatMarkerColor, "Class Color", cbCombatMarkerUseClassColor)
+  local cbCombatMarkerUseClassColor = createCheck(centerMarkerDisplaySection, "")
+  local btnCombatMarkerColor = createColorSwatch(centerMarkerDisplaySection, 20, 20)
+  addRow(centerMarkerDisplaySection, "Symbol", combatMarkerSymbolHolder)
+  addRow(centerMarkerDisplaySection, "Alpha", combatMarkerAlphaHolder)
+  addRow(centerMarkerDisplaySection, "Thickness", combatMarkerThicknessHolder)
+  addInlineCheckRow(centerMarkerDisplaySection, "Border", cbCombatMarkerBorder)
+  addRow(centerMarkerDisplaySection, "Border Size", combatMarkerBorderSizeHolder)
+  addColorCheckRow(centerMarkerDisplaySection, "Symbol Color", btnCombatMarkerColor, "Class Color", cbCombatMarkerUseClassColor)
 
   local cbAssistedHighlightEnabled = createCheck(assistedHighlightGeneralSection, "")
   local cbAssistedHighlightLock = createCheck(assistedHighlightGeneralSection, "")
@@ -1355,7 +1355,7 @@ function Options:InitOptions()
   addRow(assistedHighlightKeybindSection, "Y Offset", assistedHighlightKeybindYHolder)
 
   normalizeAssistedHighlightVerticalAlignment()
-  normalizePlayerTrackerVerticalAlignment()
+  normalizeCenterMarkerVerticalAlignment()
 
   local function SetSliderInteractivity(slider, enabled, alpha)
     if not slider then return end
@@ -1463,7 +1463,7 @@ function Options:InitOptions()
       ensureDatabase()
       addon:SetCombatMarkerShowWhen(value)
       setDropdownValue(ddCombatMarkerShowWhen, value, text)
-      ApplyOptionEffect("playerTracker")
+      ApplyOptionEffect("centerMarker")
     end)
 
   initSimpleDropdown(ddCombatMarkerSymbol, combatMarkerOptions,
@@ -1472,7 +1472,7 @@ function Options:InitOptions()
       ensureDatabase()
       addon:SetCombatMarkerSymbol(value)
       setDropdownValue(ddCombatMarkerSymbol, value, text)
-      ApplyOptionEffect("playerTracker")
+      ApplyOptionEffect("centerMarker")
     end)
 
 
@@ -1721,14 +1721,14 @@ function Options:InitOptions()
     ensureDatabase()
     addon:SetCombatMarkerEnabled(cbCombatMarkerEnabled:GetChecked())
     SetCombatMarkerControlsEnabled(cbCombatMarkerEnabled:GetChecked())
-    ApplyOptionEffect("playerTracker")
+    ApplyOptionEffect("centerMarker")
   end)
 
   cbCombatMarkerLock:SetScript("OnClick", function()
     ensureDatabase()
     addon:SetCombatMarkerLocked(cbCombatMarkerLock:GetChecked())
     SetCombatMarkerControlsEnabled(addon:IsCombatMarkerEnabled())
-    ApplyOptionEffect("playerTracker")
+    ApplyOptionEffect("centerMarker")
   end)
 
 
@@ -1747,7 +1747,7 @@ function Options:InitOptions()
       setSliderBoxValue(sCombatMarkerBorderSize, target)
     end
     cbCombatMarkerBorder:SetChecked(target > 0)
-    ApplyOptionEffect("playerTracker")
+    ApplyOptionEffect("centerMarker")
   end)
 
   frame.UpdateCombatMarkerColorButton = function(_, r, g, b)
@@ -1760,7 +1760,7 @@ function Options:InitOptions()
     ensureDatabase()
     addon:SetCombatMarkerColor(r, g, b)
     frame:UpdateCombatMarkerColorButton(r, g, b)
-    ApplyOptionEffect("playerTracker")
+    ApplyOptionEffect("centerMarker")
   end
 
   local function OpenCombatMarkerColorPicker()
@@ -1888,7 +1888,7 @@ function Options:InitOptions()
     ensureDatabase()
     addon:SetCombatMarkerUseClassColor(cbCombatMarkerUseClassColor:GetChecked())
     SetCombatMarkerControlsEnabled(addon:IsCombatMarkerEnabled())
-    ApplyOptionEffect("playerTracker")
+    ApplyOptionEffect("centerMarker")
   end)
 
   btnCombatMarkerColor:SetScript("OnClick", function()
@@ -2053,9 +2053,9 @@ function Options:InitOptions()
       keyCard = keyCard,
       pressedCard = pressedCard,
     },
-    PlayerTracker = {
-      playerTrackerGeneralSection = playerTrackerGeneralSection,
-      playerTrackerDisplaySection = playerTrackerDisplaySection,
+    CenterMarker = {
+      centerMarkerGeneralSection = centerMarkerGeneralSection,
+      centerMarkerDisplaySection = centerMarkerDisplaySection,
     },
     AssistedHighlight = {
       assistedHighlightGeneralSection = assistedHighlightGeneralSection,
@@ -2124,8 +2124,9 @@ function Options:InitOptions()
 
   frame.SelectTopTab = function(_, tabKey)
     local normalized
-    if (tabKey == "PlayerTracker") or (tabKey == "Combat") then
-      normalized = "PlayerTracker"
+    -- "PlayerTracker" / "Combat" are legacy tab keys kept for backward compatibility.
+    if (tabKey == "CenterMarker") or (tabKey == "PlayerTracker") or (tabKey == "Combat") then
+      normalized = "CenterMarker"
     elseif tabKey == "AssistedHighlight" then
       normalized = "AssistedHighlight"
     else

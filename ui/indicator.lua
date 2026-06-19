@@ -119,6 +119,28 @@ local function ResolvePressedIndicatorRGB(self)
   return 1, 1, 1
 end
 
+-- Resolve the draw colour for a Pressed Indicator shape given the press state. TINTABLE (white)
+-- symbols -- procedural shapes and white/greyscale image art -- follow the chosen colour mode;
+-- with NO colour chosen they flash GREEN while active (pressed) and RED while idle. Full-colour
+-- art keeps its own colours (the renderer ignores the tint for those). Returns r, g, b, a.
+local function ResolvePressedIndicatorShapeColor(self, shape, active)
+  local isImage = C.COMBAT_MARKER_IMAGE_VALID and C.COMBAT_MARKER_IMAGE_VALID[shape]
+  local isTintable = (not isImage)  -- procedural vector shapes are always tintable
+    or (C.COMBAT_MARKER_IMAGE_TINT and C.COMBAT_MARKER_IMAGE_TINT[shape])  -- white/greyscale art
+  if not isTintable then
+    return 1, 1, 1, 1  -- full-colour art: render as-is (no recolour)
+  end
+  local mode = self:GetPressedIndicatorColorMode()
+  if mode == "class" or mode == "custom" then
+    local r, g, b = ResolvePressedIndicatorRGB(self)
+    return r, g, b, 1
+  end
+  if active then
+    return C.COLOR_GREEN_R or 0.20, C.COLOR_GREEN_G or 1, C.COLOR_GREEN_B or 0.20, C.ALPHA_STRONG or 0.95
+  end
+  return C.COLOR_RED_R or 1, C.COLOR_RED_G or 0.20, C.COLOR_RED_B or 0.20, C.ALPHA_DIM or 0.60
+end
+
 function UI:SetPressedIndicatorColor(frame, r, g, b, a)
   local target = frame or (self.ui and self.ui.pressedIndicator)
   if not target then return end
@@ -161,23 +183,37 @@ function UI:ApplyPressedIndicatorStyle(frame)
   target._piDrawSize = baseSize
   target._piThickness = thickness
 
-  local isImage = C.COMBAT_MARKER_IMAGE_VALID and C.COMBAT_MARKER_IMAGE_VALID[shape]
-  local r, g, b, a
-  if isImage then
-    -- Image symbols: tint by the chosen colour mode (Class / Custom / None=no tint), at
-    -- full opacity. They don't take the procedural green/red flash.
-    r, g, b = ResolvePressedIndicatorRGB(self)
-    a = 1
-  else
-    -- Procedural shapes use the current flash/dim colour.
-    r = target._piColorR or (C.COLOR_RED_R or 1)
-    g = target._piColorG or (C.COLOR_RED_G or 0.20)
-    b = target._piColorB or (C.COLOR_RED_B or 0.20)
-    a = target._piColorA or (C.ALPHA_DEFAULT or 0.90)
-  end
+  -- Tintable shapes (procedural + white image art) follow the colour mode, or flash green/red
+  -- when no colour is chosen; full-colour art keeps its own colours. Use the current press state.
+  local active = (ui and ui._pressedIndicatorActive) or false
+  local r, g, b, a = ResolvePressedIndicatorShapeColor(self, shape, active)
   if self.DrawSymbolOnFrame then
     self:DrawSymbolOnFrame(target, shape, baseSize, thickness, 0, r, g, b, a)
   end
+end
+
+-- Shared press state, used by BOTH the Pressed Indicator (below) and the Center Marker's Press
+-- Detection mode (ui/player_tracker.lua), so the two Monitor / Show / Blink with the SAME code.
+-- Reads the most recent of ANY key/wheel input (addon._lastInputTime) or a GSE macro fire
+-- (addon._lastGSEPressTime). Returns:
+--   active       -- within the brief just-pressed flash window (green tint for procedural shapes)
+--   recentlyUsed -- within the hold window -> stay shown (hidden / faded out otherwise)
+--   pulse        -- blink alpha 0..1 (full-bright on press, easing to the dim floor between)
+function UI:ComputePressState()
+  local now = API.GetTime()
+  local lastInput = math.max(tonumber(addon._lastInputTime) or 0, tonumber(addon._lastGSEPressTime) or 0)
+  local active, recentlyUsed, pulse = false, false, 1
+  if lastInput > 0 and now and now > 0 then
+    local dt = now - lastInput
+    active = dt <= (C.PRESSED_INDICATOR_ACTIVE_WINDOW or 0.20)
+    recentlyUsed = dt <= (C.PRESSED_INDICATOR_HOLD_WINDOW or 1.5)
+    local blinkDur = C.PRESSED_INDICATOR_BLINK_DURATION or 0.16
+    local minAlpha = C.PRESSED_INDICATOR_BLINK_MIN_ALPHA or 0.40
+    local t = dt / blinkDur
+    if t < 0 then t = 0 elseif t > 1 then t = 1 end
+    pulse = minAlpha + (1 - minAlpha) * (1 - t)
+  end
+  return active, recentlyUsed, pulse
 end
 
 local function PressedIndicatorOnUpdate(driverFrame, elapsed)
@@ -249,6 +285,12 @@ function UI:SetupPressedIndicator(ui)
     local function mark()
       addon._lastInputTime = API.GetTime()
       if addon.RefreshPressedIndicator then addon:RefreshPressedIndicator() end
+      -- If the Center Marker has Press Detection on, wake it on the same input so it
+      -- monitors/blinks in lockstep with the standalone indicator.
+      if addon.RefreshCombatMarker and addon.GetCombatMarkerPressDetection
+        and addon:GetCombatMarkerPressDetection() then
+        addon:RefreshCombatMarker()
+      end
     end
     mon:SetScript("OnKeyDown", mark)
     mon:SetScript("OnMouseWheel", mark)
@@ -282,15 +324,9 @@ function UI:RefreshPressedIndicator(force)
 
   local inCombat = (API.InCombatLockdown and API.InCombatLockdown()) and true or false
   local editing = addon._editingOptions or (self.IsEditModePreviewActive and self:IsEditModePreviewActive()) or false
-  local active = false        -- brief "just pressed" flash (green tint for shapes)
-  local recentlyUsed = false  -- stays visible while there's recent input
-  -- Use the most recent of ANY key input or a GSE macro fire.
-  local lastInput = math.max(tonumber(self._lastInputTime) or 0, tonumber(self._lastGSEPressTime) or 0)
-  if lastInput > 0 then
-    local dt = API.GetTime() - lastInput
-    active = dt <= (C.PRESSED_INDICATOR_ACTIVE_WINDOW or 0.20)
-    recentlyUsed = dt <= (C.PRESSED_INDICATOR_HOLD_WINDOW or 1.5)
-  end
+  -- Shared press state (the SAME code the Center Marker's Press Detection uses). active = brief
+  -- just-pressed flash; recentlyUsed = stay shown; blinkPulse = blink alpha for the pulse below.
+  local active, recentlyUsed, blinkPulse = UI:ComputePressState()
   -- Show whenever there's recent input -- in OR out of combat, tracker shown or
   -- hidden -- so a left-on spammer is always visible. Always show in editing/preview, and
   -- while UNLOCKED, so it can be positioned by dragging.
@@ -320,15 +356,8 @@ function UI:RefreshPressedIndicator(force)
   -- Held solid while editing or unlocked so it can be dragged into place. Set on the frame
   -- BEFORE the image early-return below, so IMAGE shapes (e.g. Crosshair) pulse too.
   do
-    local pulse = 1
-    if not (editing or unlocked) then
-      local blinkDur = C.PRESSED_INDICATOR_BLINK_DURATION or 0.16
-      local sinceInput = (lastInput > 0) and (API.GetTime() - lastInput) or blinkDur
-      local minAlpha = C.PRESSED_INDICATOR_BLINK_MIN_ALPHA or 0.40
-      local t = sinceInput / blinkDur
-      if t < 0 then t = 0 elseif t > 1 then t = 1 end
-      pulse = minAlpha + (1 - minAlpha) * (1 - t)
-    end
+    -- Held solid while editing or unlocked so it can be dragged into place; otherwise blink.
+    local pulse = (editing or unlocked) and 1 or blinkPulse
     ui.pressedIndicator:SetAlpha(pulse)
   end
 
@@ -344,15 +373,15 @@ function UI:RefreshPressedIndicator(force)
     self:StopPressedIndicatorDriver(ui.pressedIndicator)
   end
 
-  -- Image symbols keep their own colours (no green/red tint); procedural shapes flash
-  -- green on press then sit dim-red while still held.
-  if C.COMBAT_MARKER_IMAGE_VALID and C.COMBAT_MARKER_IMAGE_VALID[shape] then return end
+  -- Tintable shapes (procedural + white/greyscale image art) recolour on press; full-colour art
+  -- keeps its own colours and never takes the green/red flash.
+  local isImage = C.COMBAT_MARKER_IMAGE_VALID and C.COMBAT_MARKER_IMAGE_VALID[shape]
+  local isTintable = (not isImage) or (C.COMBAT_MARKER_IMAGE_TINT and C.COMBAT_MARKER_IMAGE_TINT[shape])
+  if not isTintable then return end
 
   if not force and ui._pressedIndicatorActive == active then return end
   ui._pressedIndicatorActive = active
-  if active then
-    self:SetPressedIndicatorColor(ui.pressedIndicator, C.COLOR_GREEN_R or 0.20, C.COLOR_GREEN_G or 1, C.COLOR_GREEN_B or 0.20, C.ALPHA_STRONG or 0.95)
-  else
-    self:SetPressedIndicatorColor(ui.pressedIndicator, C.COLOR_RED_R or 1, C.COLOR_RED_G or 0.20, C.COLOR_RED_B or 0.20, C.ALPHA_DIM or 0.60)
-  end
+  -- Class/Custom -> that colour; no colour chosen -> GREEN while active, RED while idle.
+  local r, g, b, a = ResolvePressedIndicatorShapeColor(self, shape, active)
+  self:SetPressedIndicatorColor(ui.pressedIndicator, r, g, b, a)
 end
