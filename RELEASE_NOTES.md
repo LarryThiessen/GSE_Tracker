@@ -1,3 +1,8 @@
+## 1.3.2
+
+### Fixed
+- The Action Tracker **Scale** slider now scales the **whole tracker** (icons + text), not just the text. (At Scale 1.00 the icons still match your action bar.)
+
 ## 1.3.1
 
 ### Fixed

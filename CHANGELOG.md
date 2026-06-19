@@ -6,6 +6,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-06-19
+
+### Fixed
+- The Action Tracker **Scale** slider now scales the whole tracker (icons + text), not just the text. The icons were being pinned to the action-bar button's on-screen size, which cancelled the Scale slider for them. At Scale 1.00 they still match the action bar exactly.
+
 ## [1.3.1] - 2026-06-19
 
 ### Fixed

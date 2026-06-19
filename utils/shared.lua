@@ -135,8 +135,12 @@ function uiShared.RefreshIconSize(refFrame)
       -- rendered icon == the bar on screen EXACTLY, whatever the tracker's own scale
       -- is. Falls back to UIParent when no reference frame is supplied.
       local btnEff = (btn.GetEffectiveScale and btn:GetEffectiveScale()) or 1
-      local refEff = (refFrame and refFrame.GetEffectiveScale and refFrame:GetEffectiveScale())
-        or (_G.UIParent and _G.UIParent.GetEffectiveScale and _G.UIParent:GetEffectiveScale()) or 1
+      -- Convert the button's screen size into UIParent space (the WoW UI scale) -- NOT the
+      -- tracker's own effective scale. Using the tracker's effective scale (which includes its
+      -- Scale slider, display.scale) cancelled that slider for the icons, so only the text
+      -- scaled. Sizing in UIParent space means the tracker's SetScale(display.scale) scales the
+      -- icons too; at Scale 1.00 they still match the action-bar button exactly.
+      local refEff = (_G.UIParent and _G.UIParent.GetEffectiveScale and _G.UIParent:GetEffectiveScale()) or 1
       size = (refEff > 0) and (w * btnEff / refEff) or w
     end
   end
