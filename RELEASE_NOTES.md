@@ -1,7 +1,7 @@
 ## 1.3.3
 
 ### New
-- **Press Detection** for the Center Marker (Player Tracker tab). Tick it and your chosen Center Marker monitors your input and blinks like the **Pressed Indicator** — always shown, pulsing on each key/macro press. White shapes flash **green on press / red when idle** (or your Class/Custom colour if set); full-colour art keeps its own colours. The separate Pressed Indicator is unaffected.
+- **Press Detection** for the Center Marker (at the bottom of the **Meters** tab). Tick it and your chosen Center Marker monitors your input and blinks like the **Pressed Indicator** — always shown, pulsing on each key/macro press. White shapes flash **green on press / red when idle** (or your Class/Custom colour if set); full-colour art keeps its own colours. The separate Pressed Indicator is unaffected.
 - New marker images: **Crosshair 9**, **Crosshair 10**, and **YingYang**.
 
 ### Changed
