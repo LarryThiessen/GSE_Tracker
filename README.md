@@ -116,7 +116,8 @@ Tracks the spells your sequence/macro fires and shows them as a clean, fully-con
 
 ## <font color="#ffb74d">Compatibility</font>
 
-Built for current **Retail** with cross-version-safe APIs. Works **with or without GSE** installed.
+All Versions of World of Warcraft
+Note: Some Features maybe Greyed out due to not being Avaible in your current version of the game.
 
 ---
 
