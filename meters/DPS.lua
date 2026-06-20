@@ -126,6 +126,8 @@ function DPS_ControllerEvent(event)
         lastMeterRefresh = 0
 
     elseif event == "PLAYER_REGEN_DISABLED" then
+        -- Cancel any post-combat fade-out still running and restore full opacity for this fight.
+        if GSETracker_CancelFade then GSETracker_CancelFade(frame) end
         dpsText:SetText("")
         peakText:SetText("")
         frame:Show()
@@ -134,15 +136,26 @@ function DPS_ControllerEvent(event)
     elseif event == "PLAYER_REGEN_ENABLED" then
         StopTicker()
         if MetersSavedVars.locked then
-            -- Locked: clear the live value and hide shortly after combat (idle UI).
+            -- Locked: re-read the final value, then smoothly fade the readout out over 3s
+            -- (it stays readable while it ramps) and hide. GSETracker_CancelFade restores
+            -- alpha if combat restarts before the fade completes.
             C_Timer.After(0.3, function() RefreshFromMeterProtected(true) end)
-            dpsText:SetText("")
-            C_Timer.After(3.0, function()
-                if MetersSavedVars.locked and not UnitAffectingCombat("player") then frame:Hide() end
-            end)
+            if GSETracker_SmoothFadeOut then
+                GSETracker_SmoothFadeOut(frame, 3.0, function()
+                    if MetersSavedVars.locked and not UnitAffectingCombat("player") then frame:Hide() end
+                    -- The fade left the frame at ~0 alpha; restore it (while hidden) so the next
+                    -- show -- combat OR the unlocked example preview -- isn't invisible.
+                    frame:SetAlpha(1)
+                end)
+            else
+                C_Timer.After(3.0, function()
+                    if MetersSavedVars.locked and not UnitAffectingCombat("player") then frame:Hide() end
+                end)
+            end
         else
             -- Unlocked = placement preview: restore the example value instead of clearing/
             -- hiding (the Meters engine's ApplyUnlockedPreviewDisplay sets "12345" + shows it).
+            if GSETracker_CancelFade then GSETracker_CancelFade(frame) end
             if Meter_UpdateVisibility then Meter_UpdateVisibility() end
         end
 

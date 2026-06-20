@@ -35,6 +35,12 @@ local function HandleCombatEvent(_, event)
   if event == "PLAYER_REGEN_DISABLED" then
     if ui._combatState == true then return end
     ui._combatState = true
+    -- A post-combat name fade may still be running from the previous fight; cancel it so the
+    -- names snap back to full opacity for the new combat.
+    ui._namesFading = false
+    uiShared.CancelFade(ui.nameText)
+    uiShared.CancelFade(ui.nameText2)
+    uiShared.CancelFade(ui.keybindText)
     -- Reset the AH match counters so the % reflects THIS combat (enter -> leave).
     addon._ahCastCount = 0
     addon._ahMatchCount = 0
@@ -59,7 +65,28 @@ local function HandleCombatEvent(_, event)
     if ui._combatState == false then return end
     ui._combatState = false
     addon:ClearSpellHistory()
-    addon:SetSequenceText("")
+    -- Smoothly fade the top-row names + keybind out over 3s (instead of an instant clear), then
+    -- clear them. ui._namesFading tells ApplyRuntimeSequenceVisibility to leave the name alpha
+    -- alone for the duration so the fade ramp isn't snapped back to full (Always) or zero
+    -- (In Combat). A fresh cast/combat cancels the fade and restores full opacity.
+    local NAME_FADE = 3
+    ui._namesFading = true
+    uiShared.SmoothFadeOut(ui.nameText, NAME_FADE)
+    uiShared.SmoothFadeOut(ui.nameText2, NAME_FADE)
+    uiShared.SmoothFadeOut(ui.keybindText, NAME_FADE)
+    if _G.C_Timer and _G.C_Timer.After then
+      _G.C_Timer.After(NAME_FADE + 0.1, function()
+        ui._namesFading = false
+        uiShared.CancelFade(ui.nameText)
+        uiShared.CancelFade(ui.nameText2)
+        uiShared.CancelFade(ui.keybindText)
+        addon:SetSequenceText("")
+        addon:ApplyVisibility()
+      end)
+    else
+      ui._namesFading = false
+      addon:SetSequenceText("")
+    end
     -- Clear active sequence state so ApplyVisibility does not
     -- re-resolve stale text from the GSE bridge.
     addon._activeSeqKey = nil

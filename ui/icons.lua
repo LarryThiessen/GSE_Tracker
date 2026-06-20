@@ -709,6 +709,17 @@ end
 -- GSE name (addon._gseSeqName) is fed by the GSE bridge; spell name (addon._lastSpellName) by the
 -- tracker -- each calls this after updating its own slot.
 function UI:RebuildNameDisplay()
+  -- A fresh name means a new cast/press: cancel any post-combat fade-out still ramping the name
+  -- labels so they snap back to full opacity (covers casting out of combat during the fade window).
+  local nui = self.ui
+  if nui and nui._namesFading then
+    nui._namesFading = false
+    if uiShared.CancelFade then
+      uiShared.CancelFade(nui.nameText)
+      uiShared.CancelFade(nui.nameText2)
+      uiShared.CancelFade(nui.keybindText)
+    end
+  end
   local showSeq = self.GetActionTrackerShowSequenceName and self:GetActionTrackerShowSequenceName()
   local showSpell = self.GetActionTrackerShowSpellName and self:GetActionTrackerShowSpellName()
   local gse = (showSeq and self._gseSeqName) or ""

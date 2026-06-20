@@ -119,6 +119,12 @@ local function ApplyRuntimeSequenceVisibility(self, show)
   local ui = self.ui
   if not ui then return end
 
+  -- A post-combat name fade-out is in progress (see ui/events.lua PLAYER_REGEN_ENABLED). Let
+  -- SmoothFadeOut own the name/keybind alpha for the duration so a visibility refresh can't snap
+  -- them back to full (Always) or zero (In Combat) mid-ramp. A fresh cast/combat clears the flag
+  -- via RebuildNameDisplay before this runs again.
+  if ui._namesFading then return end
+
   local seqText = show and GetRuntimeSequenceText(ui) or ""
   local keyText = show and GetRuntimeKeybindText(ui) or ""
 

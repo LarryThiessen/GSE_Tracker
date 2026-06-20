@@ -508,6 +508,9 @@ local function ApplyUnlockedPreviewDisplay()
 
     if DPSFrame and DPSFrame.dpsText then
         if DPSHPSOK() and MetersSavedVars.showDPS ~= false then
+            -- Stop any in-flight post-combat fade and restore full opacity, or the example
+            -- preview would show at the fade's leftover (possibly zero) alpha.
+            if GSETracker_CancelFade then GSETracker_CancelFade(DPSFrame) end
             DPSFrame.dpsText:SetText("12345")
             DPSFrame:Show()
         else
@@ -518,6 +521,7 @@ local function ApplyUnlockedPreviewDisplay()
 
     if HPSFrame and HPSFrame.hpsText then
         if DPSHPSOK() and MetersSavedVars.showHPS ~= false then
+            if GSETracker_CancelFade then GSETracker_CancelFade(HPSFrame) end
             HPSFrame.hpsText:SetText("6789")
             HPSFrame:Show()
         else

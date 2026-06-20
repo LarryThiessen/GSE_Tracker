@@ -478,6 +478,50 @@ function uiShared.GetActionButtonBorder()
   return info
 end
 
+-- Smoothly fade a region's alpha to 0 over `seconds`, then run `onDone` (e.g. hide/clear). A
+-- monotonic token guards against overlapping fades: a newer fade (or CancelFade) invalidates an
+-- older fade's pending onDone, so an interrupted-then-restarted fade never double-fires its clear.
+-- Used for every post-combat fade-out (names + meter readouts) so they ramp instead of snapping.
+function uiShared.SmoothFadeOut(region, seconds, onDone)
+  if not region then if onDone then onDone() end return end
+  seconds = tonumber(seconds) or 3
+  region._gseFadeToken = (region._gseFadeToken or 0) + 1
+  local token = region._gseFadeToken
+  if seconds <= 0 then
+    if region.SetAlpha then region:SetAlpha(0) end
+    if onDone then onDone() end
+    return
+  end
+  local from = (region.GetAlpha and region:GetAlpha()) or 1
+  if from <= 0 then from = 1 end
+  if _G.UIFrameFadeOut then
+    pcall(_G.UIFrameFadeOut, region, seconds, from, 0)
+  elseif region.SetAlpha then
+    region:SetAlpha(0)
+  end
+  if _G.C_Timer and _G.C_Timer.After then
+    _G.C_Timer.After(seconds + 0.05, function()
+      if region._gseFadeToken == token and onDone then onDone() end
+    end)
+  elseif onDone then
+    onDone()
+  end
+end
+
+-- Cancel any in-flight fade on `region` and restore full alpha. Call before showing/refreshing a
+-- region so a stale fade (left at alpha 0) can't leave the freshly-set content invisible.
+function uiShared.CancelFade(region)
+  if not region then return end
+  region._gseFadeToken = (region._gseFadeToken or 0) + 1  -- invalidate any pending onDone
+  if _G.UIFrameFadeRemoveFrame then pcall(_G.UIFrameFadeRemoveFrame, region) end
+  if region.SetAlpha then region:SetAlpha(1) end
+end
+
+-- Global mirrors for the meters engine files (DPS/HPS/Details), which don't capture the `ns`
+-- upvalue and so can't reach uiShared directly.
+_G.GSETracker_SmoothFadeOut = uiShared.SmoothFadeOut
+_G.GSETracker_CancelFade = uiShared.CancelFade
+
 -- Adopt the player's action-bar font STYLE (face + outline flags) so the tracker's
 -- text matches the UI skin, exactly like GetActionButtonBorder adopts the frame art.
 -- kind: "hotkey" (keybind/modifiers), "name" (sequence/macro/spell) or "count".

@@ -77,13 +77,19 @@ end
 
 local function CancelFade()
     fadeDeadline = nil
+    -- Pull the frame out of the alpha-fade manager before restoring full opacity, or a
+    -- still-running UIFrameFadeOut would keep ramping it back down past our SetAlpha(1).
+    if UIFrameFadeRemoveFrame then UIFrameFadeRemoveFrame(frame) end
     frame:SetAlpha(1)
     if UpdateAHLightUsagePolling then UpdateAHLightUsagePolling() end
 end
 
 local function StartFadeTimer()
     fadeDeadline = GetTime() + FADE_DELAY
+    -- Smoothly ramp the SBAssist % out over the linger window instead of holding full then
+    -- snapping off; the OnUpdate hides it once the deadline (= end of the ramp) is reached.
     frame:SetAlpha(1)
+    if UIFrameFadeOut then UIFrameFadeOut(frame, FADE_DELAY, 1, 0) end
     if UpdateAHLightUsagePolling then UpdateAHLightUsagePolling() end
 end
 
@@ -274,6 +280,10 @@ local function AHLightUsage_OnUpdate(_, elapsed)
         if frame:IsShown() and AHLightUsage_ShouldShow and not AHLightUsage_ShouldShow() then
             frame:Hide()
         end
+        -- The fade left the frame at ~0 alpha; restore it (while hidden) so the next show
+        -- isn't invisible.
+        if UIFrameFadeRemoveFrame then UIFrameFadeRemoveFrame(frame) end
+        frame:SetAlpha(1)
         if UpdateAHLightUsagePolling then UpdateAHLightUsagePolling() end
     end
 end

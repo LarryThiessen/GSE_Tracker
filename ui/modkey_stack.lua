@@ -470,7 +470,7 @@ local function EnsureMatchReadout(self)
   if ui._ahMatchReadout then return ui._ahMatchReadout end
   local fs = _G.UIParent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   fs:ClearAllPoints()
-  fs:SetPoint("TOP", ui, "BOTTOM", 0, -4)
+  fs:SetPoint("TOP", ui, "BOTTOM", 0, 6)
   fs:Hide()
   ui._ahMatchReadout = fs
   return fs
@@ -535,17 +535,28 @@ end
 -- Post-combat hold for the AH Match / SBA readout: keep it on screen briefly after combat ends
 -- (mirrors the DPS/HPS hold), then hide. Counters reset on combat ENTER (see events.lua), so the
 -- final values stay readable during the hold.
-local AH_MATCH_FADE = 2  -- seconds
+local AH_MATCH_FADE = 3  -- seconds (matches the DPS/HPS/SBAssist/name fades)
 do
   local matchEvents = _G.CreateFrame("Frame")
   matchEvents:RegisterEvent("PLAYER_REGEN_DISABLED")
   matchEvents:RegisterEvent("PLAYER_REGEN_ENABLED")
   matchEvents:SetScript("OnEvent", function(_, ev)
+    local ui = addon.ui
     if ev == "PLAYER_REGEN_DISABLED" then
       addon._ahMatchHoldUntil = nil
-    else  -- PLAYER_REGEN_ENABLED: hold the readout for AH_MATCH_FADE seconds, then hide it.
+      -- Cancel any post-combat fade still ramping and restore full opacity for this fight.
+      if ui and _G.GSETracker_CancelFade then
+        _G.GSETracker_CancelFade(ui._ahMatchReadout)
+        _G.GSETracker_CancelFade(ui._ahSbaReadout)
+      end
+    else  -- PLAYER_REGEN_ENABLED: hold the readout for AH_MATCH_FADE seconds, fading it out, then hide.
       local now = (API.GetTime and API.GetTime()) or (GetTime and GetTime()) or 0
       addon._ahMatchHoldUntil = now + AH_MATCH_FADE
+      -- Smoothly ramp the % out over the hold window instead of snapping off at the end.
+      if ui and _G.GSETracker_SmoothFadeOut then
+        _G.GSETracker_SmoothFadeOut(ui._ahMatchReadout, AH_MATCH_FADE)
+        _G.GSETracker_SmoothFadeOut(ui._ahSbaReadout, AH_MATCH_FADE)
+      end
       if _G.C_Timer and _G.C_Timer.After then
         _G.C_Timer.After(AH_MATCH_FADE + 0.05, function()
           addon._ahMatchHoldUntil = nil
