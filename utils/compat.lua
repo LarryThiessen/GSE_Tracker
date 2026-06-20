@@ -80,11 +80,6 @@ function Compat:GetStatus()
   return self.runtimeInfo or self:CheckRuntime()
 end
 
-function Compat:IsCompatibilityMode()
-  local info = self:GetStatus()
-  return info and info.isFuture == true
-end
-
 function Compat:CheckRuntime()
   local info = self:GetRuntimeInfo()
   info.isFuture = self:IsFutureInterface(info.interface)
@@ -96,11 +91,70 @@ function Compat:CheckRuntime()
   -- (true on Retail; false on Classic where the C_* API is absent).
   ns.Caps = ns.Caps or {}
   ns.Caps.assistedHighlight = info.features.hasAssistedCombat
-  ns.Caps.meters = info.features.hasDamageMeter
+  -- The meters cluster always has at least the GCD readout (works on every flavor), so the
+  -- shared Meters font/style controls are available everywhere.
+  ns.Caps.meters = true
   ns.Caps.settingsPanel = info.features.hasSettingsCanvas
+  -- GCD is a Blizzard cooldown read (works on EVERY flavor). DPS/HPS can come from the retail
+  -- C_DamageMeter OR the Details! addon (Classic) -- both checked LIVE via the globals below,
+  -- since Details! may load after us (a cached flag here could be stale).
+  ns.Caps.gcd = true
   -- Global mirror for the meters engine files (DPS/HPS/GCD/Details), which don't capture
   -- the `ns` upvalue. Set before any meter readout runs (PLAYER_LOGIN is later).
+  -- _G.GSETracker_MetersCapable stays = C_DamageMeter (the retail Details session window +
+  -- the C_DamageMeter DPS/HPS path). GCD and the Details!-backed DPS/HPS use their own checks.
   _G.GSETracker_MetersCapable = info.features.hasDamageMeter
+  _G.GSETracker_GCDCapable = true
+
+  -- Details! Damage Meter is the PREFERRED meter source on every flavor (one code path, no double
+  -- work); Blizzard's C_DamageMeter is the fallback when Details! isn't installed. Two probes: a
+  -- DATA check (the DPS/HPS readouts) and a WINDOW check (the Details window), since they use
+  -- different Details! APIs and one can exist without the other.
+  if not _G.GSETracker_DetailsDataAvailable then
+    function _G.GSETracker_DetailsDataAvailable()
+      local D = _G.Details
+      return (D ~= nil) and (type(D.GetCurrentCombat) == "function" or type(D.GetCombat) == "function") and true or false
+    end
+  end
+  if not _G.GSETracker_DetailsWindowAvailable then
+    function _G.GSETracker_DetailsWindowAvailable()
+      local D = _G.Details
+      if type(D) ~= "table" or type(D.GetInstance) ~= "function" then return false end
+      -- Require a resolvable window instance (matches Details.lua's DetailsAddonAvailable), so the
+      -- custom-window gate and the Details!-window branch never disagree.
+      local ok, inst = pcall(D.GetInstance, D, 1)
+      return (ok and inst ~= nil) and true or false
+    end
+  end
+
+  -- LIVE: is a DPS/HPS data source available right now? Details! (any flavor) OR retail C_DamageMeter.
+  if not _G.GSETracker_HasDPSSource then
+    function _G.GSETracker_HasDPSSource()
+      if _G.GSETracker_DetailsDataAvailable() then return true end
+      return _G.GSETracker_MetersCapable and true or false
+    end
+    -- Read the local player's per-second damage (attr 1) or healing (attr 2) from Details!.
+    function _G.GSETracker_DetailsPerSecond(attr)
+      local D = _G.Details
+      if not D then return nil end
+      local getCombat = D.GetCurrentCombat or D.GetCombat
+      if type(getCombat) ~= "function" then return nil end
+      local okC, combat = pcall(getCombat, D)
+      if not okC or type(combat) ~= "table" or type(combat.GetActor) ~= "function" then return nil end
+      local name = _G.UnitName and _G.UnitName("player")
+      if not name then return nil end
+      local okA, actor = pcall(combat.GetActor, combat, attr, name)
+      if not okA or type(actor) ~= "table" then return nil end
+      local total = tonumber(actor.total) or 0
+      local t = 0
+      if type(combat.GetCombatTime) == "function" then
+        local okT, ct = pcall(combat.GetCombatTime, combat)
+        if okT then t = tonumber(ct) or 0 end
+      end
+      if t <= 0 then return nil end
+      return total / t
+    end
+  end
 
   if info.isFuture then
     WarnOnce("future_interface", string.format("running on interface %d while addon target is %d. Compatibility mode is active.", info.interface, info.target))

@@ -56,9 +56,13 @@ local function StorePressedIndicatorDragOffset(self)
   if not (fx and fy and ax and ay) then return end
   local fs = (frame.GetEffectiveScale and frame:GetEffectiveScale()) or 1
   local as = (anchor.GetEffectiveScale and anchor:GetEffectiveScale()) or 1
-  if not fs or fs == 0 then fs = 1 end
-  local offX = (fx * fs - ax * as) / fs
-  local offY = (fy * fs - ay * as) / fs
+  local ue = (UIParent and UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()) or 1
+  if not ue or ue == 0 then ue = 1 end
+  -- Store the offset in UIParent units (scale-independent) so the indicator keeps the same screen
+  -- position when the Overall scale later changes its own scale; ApplyElementPosition re-divides by
+  -- the indicator's current scale. (At scale 1, fs == ue, so this matches the previous behaviour.)
+  local offX = (fx * fs - ax * as) / ue
+  local offY = (fy * fs - ay * as) / ue
   if self.SetElementOffset then self:SetElementOffset("pressedIndicator", offX, offY) end
 end
 
@@ -107,14 +111,17 @@ local function ResolvePressedIndicatorRGB(self)
   if mode == "custom" then
     return self:GetPressedIndicatorCustomColor()
   elseif mode == "class" then
-    local UnitClass = _G.UnitClass
-    local _, classFile = (UnitClass and UnitClass("player"))
-    -- Classic quirk: RAID_CLASS_COLORS.SHAMAN is Paladin pink. Force the real blue when there's
-    -- no CUSTOM_CLASS_COLORS override (harmless on Retail).
-    if classFile == "SHAMAN" and not _G.CUSTOM_CLASS_COLORS then return 0.0, 0.44, 0.87 end
-    local colors = _G.CUSTOM_CLASS_COLORS or _G.RAID_CLASS_COLORS
-    local c = classFile and colors and colors[classFile]
-    if c then return c.r, c.g, c.b end
+    -- Use the shared resolver (correctly reads the 2nd return of UnitClass and handles the
+    -- Classic SHAMAN colour quirk). Falls back to no-tint (1,1,1) if the colour can't resolve.
+    if uiShared.GetPlayerClassColorRGB then
+      return uiShared.GetPlayerClassColorRGB(1, 1, 1)
+    end
+    if _G.UnitClass then
+      local _, classFile = _G.UnitClass("player")  -- NOTE: capture the 2nd return, don't truncate
+      local colors = _G.CUSTOM_CLASS_COLORS or _G.RAID_CLASS_COLORS
+      local c = classFile and colors and colors[classFile]
+      if c then return c.r, c.g, c.b end
+    end
   end
   return 1, 1, 1
 end

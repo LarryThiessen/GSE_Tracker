@@ -57,6 +57,15 @@ local function RefreshFromMeter()
         hpsText:SetText("")
         return
     end
+    -- Retail: Blizzard's real-time C_DamageMeter -- a live session tied to GAME combat, so the
+    -- number stays current right through damage lulls. Classic flavors have no functional
+    -- C_DamageMeter (the table can be a non-functional stub), so read HPS from the Details! addon
+    -- there instead. Gate on the capability flag, not bare existence.
+    if not _G.GSETracker_MetersCapable then
+        local hps = _G.GSETracker_DetailsPerSecond and _G.GSETracker_DetailsPerSecond(2)
+        if hps then hpsText:SetText(string.format("%.0f", hps)) end
+        return
+    end
     local sessions = C_DamageMeter.GetAvailableCombatSessions()
     if not sessions or #sessions == 0 then return end
     local sid = sessions[#sessions].sessionID
@@ -152,7 +161,5 @@ function HPS_ControllerEvent(event)
         end
     end
 end
-
-HPS_HandleEvent = HPS_ControllerEvent
 
 InitializeRefreshRate()

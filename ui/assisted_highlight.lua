@@ -54,23 +54,6 @@ local function ParentUnitsToCanonicalPixels(value, parent)
   return tonumber(value) or 0
 end
 
-local function GetClassColorRGB()
-  if uiShared.GetPlayerClassColorRGB then
-    return uiShared.GetPlayerClassColorRGB(C.CLASS_FALLBACK_R or 0.20, C.CLASS_FALLBACK_G or 0.60, C.CLASS_FALLBACK_B or 1.00)
-  end
-  return C.CLASS_FALLBACK_R or 0.20, C.CLASS_FALLBACK_G or 0.60, C.CLASS_FALLBACK_B or 1.00
-end
-
-local function GetResolvedBorderColor()
-  if addon.GetAssistedHighlightUseClassColor and addon:GetAssistedHighlightUseClassColor() then
-    return GetClassColorRGB()
-  end
-  if addon.GetAssistedHighlightColor then
-    return addon:GetAssistedHighlightColor()
-  end
-  return GetClassColorRGB()
-end
-
 local function GetAssistedHighlightLockState()
   if addon.GetAssistedHighlightLocked then
     return addon:GetAssistedHighlightLocked()
@@ -552,58 +535,6 @@ local function FindAssistedCombatSlot(self)
   return nil
 end
 
--- ── Glow hook (authoritative keybind signal) ──────────────────────────────────
--- Hook Blizzard's ActionButton_ShowOverlayGlow / ActionButton_HideOverlayGlow to
--- track which action button frames Blizzard is currently highlighting.
---
--- This is more reliable than slot-number ordering or frame-level sorting because:
---  • Blizzard calls ShowOverlayGlow on the EXACT button it wants the player to press.
---  • button.action gives the real action slot, regardless of bar name or position.
---  • No guesswork about frame names, prefix lists, or visual stacking order.
---
--- Provider._glowedButtonList : { {slot=N, button=F}, … } for each currently-glowing button.
--- Cleared on PLAYER_ENTERING_WORLD (bar layout reset) and ACTIONBAR_SLOT_CHANGED.
-
-local function SetupGlowHook(provider)
-  if provider._glowHookDone then return end
-  provider._glowHookDone = true
-
-  -- Track {slot, button} pairs rather than bare slot numbers.
-  -- Blizzard fires ShowOverlayGlow on EVERY button that shows the recommended spell,
-  -- including buttons on hidden/disabled bars.  Storing the button frame lets
-  -- GetState filter by visibility and pick the topmost visible button, rather than
-  -- selecting randomly from all glowed slots via pairs() with undefined order.
-  local function OnGlowShow(button)
-    local slot = button and tonumber(
-      button.action or (button.GetAttribute and button:GetAttribute("action")))
-    if not (slot and slot >= 1 and slot <= 120) then return end
-    provider._glowedButtonList = provider._glowedButtonList or {}
-    local list = provider._glowedButtonList
-    for _, entry in ipairs(list) do
-      if entry.button == button then return end  -- already tracked
-    end
-    list[#list + 1] = { slot = slot, button = button }
-    provider:MarkDirty()
-    MarkAssistedHighlightDirty("GlowShow")
-  end
-
-  local function OnGlowHide(button)
-    local list = provider._glowedButtonList
-    if not list then return end
-    for i = #list, 1, -1 do
-      if list[i].button == button then
-        table.remove(list, i)
-        break
-      end
-    end
-    provider:MarkDirty()
-    MarkAssistedHighlightDirty("GlowHide")
-  end
-
-  API.SafeHooksecurefunc("ActionButton_ShowOverlayGlow", OnGlowShow)
-  API.SafeHooksecurefunc("ActionButton_HideOverlayGlow", OnGlowHide)
-end
-
 -- ── Frame-priority slot lookup ─────────────────────────────────────────────────
 -- When the same spell exists on multiple bars (stacked / overlapping layout), the
 -- slot-number scan (1→120) is wrong: it returns the lowest slot regardless of which
@@ -681,19 +612,6 @@ local function GetButtonRegistry()
 
   _buttonRegistryValid = true
   return reg
-end
-
--- Find the action slot for spellID by iterating known button frames in visual
--- priority order (topmost bar first).  Returns slot, frame for the first match;
--- nil, nil if none found.
-local function FindSlotByFramePriority(spellID)
-  local reg = GetButtonRegistry()
-  for _, entry in ipairs(reg) do
-    if SpellMatchesActionSlot(entry.slot, spellID) then
-      return entry.slot, entry.frame
-    end
-  end
-  return nil, nil
 end
 
 -- Return the first registered button frame whose current .action == slot.
@@ -1955,6 +1873,8 @@ function Display:ApplySize(frame)
 
   local snappedW = PixelSnap(size, frame)
   local snappedH = PixelSnap(size, frame)
+  if snappedW < 1 then snappedW = 1 end  -- 0% Scale stores size 0; SetSize(0) is invalid
+  if snappedH < 1 then snappedH = 1 end
   if frame._assistedHighlightWidth == snappedW and frame._assistedHighlightHeight == snappedH then return end
   frame._assistedHighlightWidth = snappedW
   frame._assistedHighlightHeight = snappedH
@@ -2177,10 +2097,9 @@ function UI:EnsureAssistedHighlightEvents()
       or event == "PLAYER_SPECIALIZATION_CHANGED" then
       Provider._actionSlotCache = nil
       Provider._actionSlotCacheCount = nil
-      -- The Rotation Helper slot, frame-priority registry, and glow tracking all
-      -- reflect bar layout; invalidate them whenever the bar layout may have changed.
+      -- The Rotation Helper slot and frame-priority registry both reflect bar
+      -- layout; invalidate them whenever the bar layout may have changed.
       Provider._assistedCombatSlot = nil
-      Provider._glowedButtonList = nil
       InvalidateButtonRegistry()
     end
 

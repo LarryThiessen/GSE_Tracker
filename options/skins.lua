@@ -28,12 +28,6 @@ optionsModule.SKIN_AUTO = SKIN_AUTO
 optionsModule.SKIN_MODERN = SKIN_MODERN
 optionsModule.SKIN_NATIVE = SKIN_NATIVE
 
-optionsModule.VALID_SKINS = {
-  [SKIN_AUTO] = true,
-  [SKIN_MODERN] = true,
-  [SKIN_NATIVE] = true,
-}
-
 -- Each palette carries the full set of colour keys consumed by the widget
 -- factories in helpers.lua (kept name-for-name with the locals there), plus
 -- accent handling used by GetClassColor:
@@ -96,12 +90,11 @@ optionsModule.SkinPalettes = {
   },
 }
 
--- ── Skinner detection + Modern accent: COPIED from the GSE addon ───────────────
--- Values/logic ported from GSE_Utils/Appearance.lua (MODERN_CUSTOM_COLOR_DEFAULT,
--- GetInstalledSkinProviderName, GetEffectiveSkinMode). GSE is all-rights-reserved;
--- ported into GSE: Tracker (MIT) per the owner's authorization. No GSE code runs
--- at runtime and the GSE addon is NOT referenced (the only GSE link is the bridge).
-optionsModule.MODERN_ACCENT_DEFAULT = { 0.00, 0.44, 0.87 } -- GSE MODERN_CUSTOM_COLOR_DEFAULT
+-- ── Skinner detection: COPIED from the GSE addon ──────────────────────────────
+-- Logic ported from GSE_Utils/Appearance.lua (GetInstalledSkinProviderName,
+-- GetEffectiveSkinMode). GSE is all-rights-reserved; ported into GSE: Tracker
+-- (MIT) per the owner's authorization. No GSE code runs at runtime and the GSE
+-- addon is NOT referenced (the only GSE link is the bridge).
 
 -- True when an external UI skin provider GSE recognises is installed (ElvUI or
 -- EllesmereUI). Mirrors GSE.GetInstalledSkinProviderName -- detects the addons

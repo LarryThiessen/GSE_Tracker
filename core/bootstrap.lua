@@ -122,10 +122,20 @@ lifecycleEventFrame:SetScript("OnEvent", function(self, event, arg1)
     -- Re-read the action-button size shortly after login so a skinner that
     -- resizes the bars after us (load order) is still picked up as the base.
     if C_Timer and C_Timer.After then
+      -- The tracker text adopts the action bar's font (the player's skin under AUTO, or stock
+      -- ActionButton1's GENUINE native font under Force-Native). At login that source often isn't
+      -- finalized yet, so our first pass can grab the wrong font (e.g. the Sequence Name / ModKeys
+      -- showing a default font instead of the client's native one). Re-adopt on short deferred
+      -- passes once the bars are ready -- this is exactly what toggling the skin option does, just
+      -- automatic so the user never has to.
+      C_Timer.After(0.5, function()
+        if addon.ApplyFontFaces then addon:ApplyFontFaces() end
+      end)
       C_Timer.After(2, function()
         local ui = addon._ui
         if ui and ui.RefreshIconSize then ui.RefreshIconSize() end
         if addon.RebuildIcons then addon:RebuildIcons(true) end
+        if addon.ApplyFontFaces then addon:ApplyFontFaces() end
         -- Hook the skinner (ElvUI) AFTER it has initialised so any later media/skin
         -- change re-skins the tracker live -- "adopt the skinner's settings".
         if ui and ui.SetupSkinnerHooks then ui.SetupSkinnerHooks(addon) end

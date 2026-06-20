@@ -135,7 +135,7 @@ local positionXBox,    positionYBox
 local opacitySlider,   opacityBox
 local refreshRateSlider
 local resetBtn, lockCB
-local MarkerDrop, detailsCB, detailsCombatCB
+local MarkerDrop, detailsCB, detailsCombatCB, autoResetCB
 
 local function IsCombatLockActive()
     return UnitAffectingCombat("player")
@@ -639,7 +639,8 @@ MarkerDrop:Hide()
 -- front of Show DPS -- it is the single source for showGCD, so the addon's Player Marker
 -- colour row no longer carries a duplicate Show GCD checkbox.)
 local gcdCB = CreateFrame("CheckButton", nil, panel, "InterfaceOptionsCheckButtonTemplate")
-gcdCB:SetPoint("TOPLEFT", panel, "TOPLEFT", LEFT_MARGIN, -16)
+-- Row 2: the Details row is now ABOVE this one (rows swapped); -54 keeps the original row spacing.
+gcdCB:SetPoint("TOPLEFT", panel, "TOPLEFT", LEFT_MARGIN, -54)
 gcdCB.Text:SetText("Show GCD")
 
 local dpsCB = CreateFrame("CheckButton", nil, panel, "InterfaceOptionsCheckButtonTemplate")
@@ -655,17 +656,56 @@ local ahLightUsageCB = CreateFrame("CheckButton", nil, panel, "InterfaceOptionsC
 ahLightUsageCB:SetPoint("TOPLEFT", hpsCB, "TOPLEFT", 130, 0)
 ahLightUsageCB.Text:SetText("Show SBAssist %")
 
+-- Details row (ROW 1, on top, centred horizontally): Show Details | Auto Reset Details | Hide
+-- Details in Combat. Positioned at the left for now; re-centred once all three labels exist.
 detailsCB = CreateFrame("CheckButton", nil, panel, "InterfaceOptionsCheckButtonTemplate")
-detailsCB:SetPoint("TOPLEFT", gcdCB, "BOTTOMLEFT", 70, ROW_GAP - 2)
-detailsCB.Text:SetText("Show Details Window")
+detailsCB:SetPoint("TOPLEFT", panel, "TOPLEFT", LEFT_MARGIN, -16)
+detailsCB.Text:SetText("Show Details")
+
+autoResetCB = CreateFrame("CheckButton", nil, panel, "InterfaceOptionsCheckButtonTemplate")
+autoResetCB:SetPoint("LEFT", detailsCB.Text, "RIGHT", 24, 0)
+autoResetCB.Text:SetText("Auto Reset Details")
 
 detailsCombatCB = CreateFrame("CheckButton", nil, panel, "InterfaceOptionsCheckButtonTemplate")
-detailsCombatCB:SetPoint("LEFT", detailsCB.Text, "RIGHT", 24, 0)
-detailsCombatCB.Text:SetText("Hide Details Window in Combat")
+detailsCombatCB:SetPoint("LEFT", autoResetCB.Text, "RIGHT", 24, 0)
+detailsCombatCB.Text:SetText("Hide Details in Combat")
 
--- Refresh Rate
+-- Centre the Details row horizontally over the content (the sliders span LEFT_MARGIN .. +MAIN_SLIDER_WIDTH).
+-- Width = the 3 (checkbox + label) groups + the 2x 24px gaps between them (~132 of fixed chrome).
+do
+    local rowW = 132 + (detailsCB.Text:GetStringWidth() or 0)
+                     + (autoResetCB.Text:GetStringWidth() or 0)
+                     + (detailsCombatCB.Text:GetStringWidth() or 0)
+    local cx = math.floor((LEFT_MARGIN + MAIN_SLIDER_WIDTH * 0.5) - rowW * 0.5 + 0.5)
+    if cx < LEFT_MARGIN then cx = LEFT_MARGIN end
+    detailsCB:ClearAllPoints()
+    detailsCB:SetPoint("TOPLEFT", panel, "TOPLEFT", cx, -16)
+end
+
+-- Hover tooltips. Read-only OnEnter/OnLeave -> taint-safe on the embedded Settings canvas. The
+-- Classic DPS/HPS/Details paths run off the Details! Damage Meter addon, so call that out.
+local function AddMeterTooltip(cb, title, body)
+  if not cb then return end
+  cb:HookScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    GameTooltip:SetText(title, 1, 1, 1)
+    if body then GameTooltip:AddLine(body, 0.9, 0.9, 0.9, true) end
+    GameTooltip:Show()
+  end)
+  cb:HookScript("OnLeave", function() GameTooltip:Hide() end)
+end
+AddMeterTooltip(gcdCB, "Show GCD", "Your global cooldown timer. Works on every game version (read directly from Blizzard).")
+AddMeterTooltip(dpsCB, "Show DPS", "Your damage per second. Retail: Blizzard's real-time damage meter. Classic: the |cff33ff99Details! Damage Meter|r addon (if installed).")
+AddMeterTooltip(hpsCB, "Show HPS", "Your healing per second. Retail: Blizzard's real-time damage meter. Classic: the |cff33ff99Details! Damage Meter|r addon (if installed).")
+AddMeterTooltip(ahLightUsageCB, "Show SBAssist %", "How often your casts match the Assisted Highlight suggestion. Retail only.")
+AddMeterTooltip(detailsCB, "Show Details", "Show the damage-meter window. |cff33ff99Details!|r: re-opens its window even if you'd closed it. Blizzard's built-in (Retail, no Details!): shows it -- but the meter must be enabled in Settings > Gameplay Enhancements first (there's no API to switch it on).")
+AddMeterTooltip(autoResetCB, "Auto Reset Details", "Automatically reset the damage meter at the start of each combat, so it shows only the current fight. Enables auto-reset even if it was switched off in the meter's settings.")
+AddMeterTooltip(detailsCombatCB, "Hide Details in Combat", "Hide the Details window during combat, then show it again afterwards.")
+
+-- Refresh Rate. Anchored to gcdCB -- the GCD row is now the LOWER of the two checkbox rows (rows
+-- were swapped, Details on top), so the sliders sit just below it at the left margin.
 refreshRateSlider = CreateFrame("Slider", nil, panel, "OptionsSliderTemplate")
-refreshRateSlider:SetPoint("TOPLEFT", detailsCB, "BOTTOMLEFT", -70, -28)
+refreshRateSlider:SetPoint("TOPLEFT", gcdCB, "BOTTOMLEFT", 0, -28)
 refreshRateSlider:SetMinMaxValues(0.05, 0.15)
 refreshRateSlider:SetValueStep(0.01)
 refreshRateSlider:SetObeyStepOnDrag(true)
@@ -791,6 +831,10 @@ detailsCB:SetScript("OnClick", function(self)
     Meters_SetDetailsOptionChecked(self:GetChecked()); ApplyDetailsToggle(self:GetChecked())
 end)
 
+autoResetCB:SetScript("OnClick", function(self)
+    MetersSavedVars.autoResetDetails = self:GetChecked() == true
+end)
+
 detailsCombatCB:SetScript("OnClick", function(self)
     MetersSavedVars.hideDetailsInCombat = self:GetChecked() == true
     ApplyDetailsCombatToggle()
@@ -807,7 +851,7 @@ resetBtn:SetScript("OnClick", function()
 
     lockCB:SetChecked(true); gcdCB:SetChecked(true); dpsCB:SetChecked(true)
     hpsCB:SetChecked(true); ahLightUsageCB:SetChecked(true); detailsCB:SetChecked(true)
-    detailsCombatCB:SetChecked(false)
+    detailsCombatCB:SetChecked(false); autoResetCB:SetChecked(false)
 
     opacitySlider:SetValue(100); UpdateOpacityText(100); UpdateOpacityBox()
 
@@ -834,18 +878,35 @@ resetBtn:SetScript("OnClick", function()
     UpdateLockState(); UpdateLockLabel(); ApplyOpacity(); ApplyRefreshRate(); UpdateVisibility()
 end)
 
--- Classic: grey out + lock the retail-only readout controls (the Center Marker, rendered
--- separately, and the frame controls stay usable). Done once at build time -- NOT in OnShow,
--- which would mutate the embedded Settings canvas and risk taint.
-if not METERS_CAPABLE then
+-- Per-feature greying of the readout controls:
+--   GCD            -- Blizzard cooldown read; works on EVERY flavor -> never greyed.
+--   Refresh/Opacity sliders -- drive/affect the readouts (incl. GCD) -> never greyed.
+--   DPS/HPS        -- need C_DamageMeter (retail) OR the Details! addon -> greyed if neither.
+--   SBA% + Details -- retail-only (C_AssistedCombat / C_DamageMeter) -> greyed off mainline.
+-- Run ONCE at PLAYER_LOGIN, not at file load: Details! may load AFTER us (so HasDPSSource is
+-- only reliable post-login) and not in OnShow (repeated mutation of the embedded Settings canvas
+-- risks taint). A single OOC pass at login only DISABLES the unavailable controls.
+local function ApplyReadoutAvailability()
     local function dim(w)
         if not w then return end
         if w.SetEnabled then w:SetEnabled(false) elseif w.Disable then w:Disable() end
         if w.Text and w.Text.SetTextColor then w.Text:SetTextColor(0.5, 0.5, 0.5) end
     end
-    dim(gcdCB); dim(dpsCB); dim(hpsCB); dim(ahLightUsageCB)
-    dim(detailsCB); dim(detailsCombatCB); dim(refreshRateSlider)
+    -- DPS/HPS + the Details window all need a damage-meter source (retail C_DamageMeter OR the
+    -- Details! addon). SBA% is the only one that's strictly retail (C_AssistedCombat).
+    if not (_G.GSETracker_HasDPSSource and _G.GSETracker_HasDPSSource()) then
+        dim(dpsCB); dim(hpsCB); dim(detailsCB); dim(detailsCombatCB); dim(autoResetCB)
+    end
+    if not METERS_CAPABLE then
+        dim(ahLightUsageCB)
+    end
 end
+local capFrame = CreateFrame("Frame")
+capFrame:RegisterEvent("PLAYER_LOGIN")
+capFrame:SetScript("OnEvent", function(self)
+    self:UnregisterEvent("PLAYER_LOGIN")
+    ApplyReadoutAvailability()
+end)
 
 panel:SetScript("OnShow", function()
     SyncLegacyShowAHLight()
@@ -858,6 +919,7 @@ panel:SetScript("OnShow", function()
     ahLightUsageCB:SetChecked(MetersSavedVars.showAHLightUsage)
     detailsCB:SetChecked(MetersSavedVars.showDetails ~= false)
     detailsCombatCB:SetChecked(MetersSavedVars.hideDetailsInCombat == true)
+    autoResetCB:SetChecked(MetersSavedVars.autoResetDetails == true)
     UpdateLockLabel()
 
     opacitySlider:SetValue(MetersSavedVars.opacity or 100)

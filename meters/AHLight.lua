@@ -297,8 +297,6 @@ function AHLight_Refresh()
     end
 end
 
-AHLight_UpdateNow = AHLight_Refresh  -- alias
-
 function AHLight_ControllerRefresh(forceIcon)
     SyncLegacyShowAHLight()
     currentRefreshRate = GetRefreshRate()

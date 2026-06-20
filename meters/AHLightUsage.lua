@@ -1,6 +1,6 @@
 -- Modules/Meters/AHLightUsage.lua
 
-local FADE_DELAY = 10
+local FADE_DELAY = 3   -- seconds the SBAssist % lingers after combat (matches DPS/HPS' 3s hold)
 local AHLIGHT_MATCH_WINDOW = 0.35
 local DEFAULT_REFRESH_RATE = 0.10
 local MIN_REFRESH_RATE = 0.05
@@ -182,14 +182,6 @@ function AHLightUsage_Clear()
     ClearText()
 end
 
-function AHLightUsage_GetFrame()
-    return frame
-end
-
-function AHLightUsage_GetText()
-    return frame.ahLightUsageText
-end
-
 function AHLightUsage_SetPreview(enabled)
     local wasPreview = frame.isPreviewMode
     frame.isPreviewMode = enabled and true or false
@@ -351,7 +343,5 @@ function AHLightUsage_ControllerEvent(event, ...)
     end
     if UpdateAHLightUsagePolling then UpdateAHLightUsagePolling() end
 end
-
-AHLightUsage_HandleEvent = AHLightUsage_ControllerEvent
 
 UpdateAHLightUsagePolling()

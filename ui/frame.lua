@@ -116,16 +116,10 @@ local function GetActionTrackerRowRelativeBaselineOffsets(ui)
     }
   end
 
-  -- Sit just below the icon row, nudged up 2px to tuck the labels closer. On Classic flavors
-  -- the default action-button border art is a touch larger, crowding the modifier label, so
-  -- drop it 5px more there (Retail unchanged).
-  local mainline = (not _G.WOW_PROJECT_ID) or (_G.WOW_PROJECT_ID == (_G.WOW_PROJECT_MAINLINE or 1))
-  local modsExtraY = mainline and 0 or -5
-  local modsY = -(rowHalfY + (uiShared.GAP_ICONS_MODS or 6) + ((uiShared.MODS_H or 14) * 0.5)) + 2 + modsExtraY
-  -- Sequence name sits above the icon with the SAME gap the mods use below it
-  -- (mirror of modsY); keybind stacks 10px above the name (the original spacing).
-  -- Was hardcoded 17/27, which overlapped the icon's top.
+  -- Name sits above the icon row; ModKeys MIRROR it below, so both text CENTRES are the SAME
+  -- distance from the icon-row centre (symmetric). keybind stacks 10px above the name.
   local nameY = (rowHalfY + (uiShared.GAP_ICONS_MODS or 6) + ((uiShared.NAME_H or 24) * 0.5)) - 5
+  local modsY = -nameY
   local keybindY = nameY + 10
   return {
     sequenceText = { x = 0, y = nameY },
@@ -371,9 +365,11 @@ function UI:ApplyFontFaces()
   if uiShared.GetActionButtonFont then
     local hp, _, hf = uiShared.GetActionButtonFont("hotkey")
     if hp then
-      seqPath, seqFlags = hp, hf or ""
-      keybindPath, keybindFlags = hp, hf or ""
-      modPath, modFlags = hp, hf or ""
+      -- hf == nil (Force-Native default) -> keep the user's configured outline; hf == "" (a skin
+      -- whose font has no outline) -> honour that. Only nil falls through to `flags`.
+      seqPath, seqFlags = hp, hf or flags
+      keybindPath, keybindFlags = hp, hf or flags
+      modPath, modFlags = hp, hf or flags
     end
   end
 
@@ -386,6 +382,7 @@ function UI:ApplyFontFaces()
   end
 
   SafeSet(self.ui.nameText, seqPath, seqSize, seqFlags)
+  SafeSet(self.ui.nameText2, seqPath, seqSize, seqFlags)  -- the hoisted GSE label (split mode)
   SafeSet(self.ui.keybindText, keybindPath, keybindSize, keybindFlags)
   SafeSet(self.ui.modShift, modPath, modSize, modFlags)
   -- Per-icon keybind labels (the key shown on each recent-spell icon) also use the
@@ -574,10 +571,32 @@ end
 
 function UI:ApplyScale()
   if not self.ui then return end
-  self.ui:SetScale(self:GetDesiredScale())
+  self.ui:SetScale(self:GetDesiredScale())  -- GetDesiredScale folds in the master/overall scale
+  self:ApplyGlobalScale()                   -- the other root frames aren't children of self.ui
   self:_ResizeToContent()
   self:_AlignModsToIcons()
   self:UpdateActionTrackerMoveMarker()
+end
+
+-- Apply the master (overall) addon scale to the root frames that are NOT children of the Action
+-- Tracker frame. The Action Tracker itself already folds the master scale in via GetDesiredScale
+-- (see ApplyScale). Re-run on every ApplyDB; works on every WoW flavor.
+--   * Pressed Indicator -> SetScale + re-placed so it grows about its centre (no drift).
+--   * Meters cluster    -> Meter_ApplyScale (SetScale on the anchor + scale-compensated position).
+--   * Center Marker     -> folds the master scale into its RENDER SIZE (it uses SetIgnoreParentScale,
+--                          so SetScale would break its drag math); handled in ApplyMarkerStyleToFrame,
+--                          re-applied by the RefreshCenterMarker call later in ApplyDB.
+-- (Assisted Highlight is intentionally excluded: it auto-sizes to the target portrait and has its
+-- own anchor modes/Scale slider, so a blanket scale would overscale/drift it.)
+function UI:ApplyGlobalScale()
+  local g = (ns.Utils and ns.Utils.GetGlobalScale and ns.Utils:GetGlobalScale()) or 1
+  if self.ui and self.ui.pressedIndicator and self.ui.pressedIndicator.SetScale then
+    self.ui.pressedIndicator:SetScale(g < 0.05 and 0.05 or g)  -- SetScale(0) is invalid
+    -- Re-place it with the new scale so its saved offset stays put (grows about centre, no drift).
+    if self.ApplyElementPosition then self:ApplyElementPosition("pressedIndicator") end
+  end
+  -- Meters folds the master scale together with its own Meters Scale onto the MetersAnchor.
+  if _G.Meter_ApplyScale then _G.Meter_ApplyScale() end
 end
 
 local function GetCursorPositionInParentSpace(parent)
@@ -738,23 +757,6 @@ function UI:Lock(locked)
     self:ApplyEditModeIconPreview(true)
   end
   self:UpdateActionTrackerMoveMarker()
-end
-
-function UI:SetBorder(on)
-  EnsureDB()
-  self:SetBorderEnabled(on)
-  if self.ApplyBorderThickness then
-    self:ApplyBorderThickness()
-  end
-  if self.RequestUIRebuild then
-    self:RequestUIRebuild("settings")
-  elseif self.RebuildIcons then
-    self:RebuildIcons(true)
-  end
-end
-
-function UI:SetBackground(on)
-  return self:SetBorder(on)
 end
 
 local STRUCTURAL_REBUILD_REASONS = {
@@ -1052,6 +1054,19 @@ function UI:BuildMainFrame()
   ui.modShift:SetWidth(PS(uiShared.TEXT_W))
   ui.modAlt:SetWidth(PS(uiShared.ICON_SIZE + 10))
   ui.modCtrl:SetWidth(PS(uiShared.ICON_SIZE + 10))
+
+  -- Second name label: used ONLY when "Swap Name > ModKeys" is on AND both names are active --
+  -- then the GSE name is hoisted to the top (above the ModKeys row) while the Spell name stays in
+  -- the normal name slot (see UI:_UpdateTopNameLabel / RebuildNameDisplay). Anchored above the
+  -- ModKeys frame so it sits at the very top and stays centred; hidden otherwise.
+  ui.nameText2 = ui.content:CreateFontString(nil, "OVERLAY")
+  ui.nameText2:SetPoint("BOTTOM", ui.modifiersFrame, "TOP", 0, 3)
+  -- No fixed width: auto-size to the text (like the main name) so long names don't wrap; the
+  -- BOTTOM->modifiersFrame TOP anchor keeps it centred.
+  ui.nameText2:SetJustifyH("CENTER")
+  ui.nameText2:SetFont(STANDARD_TEXT_FONT, uiShared.NAME_FONT_SIZE, "OUTLINE")
+  ui.nameText2:SetText("")
+  ui.nameText2:Hide()
 
   if addon and addon.ApplyFontFaces then addon:ApplyFontFaces() end
 

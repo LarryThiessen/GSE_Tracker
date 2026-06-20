@@ -311,18 +311,6 @@ function UI:ClearModkeyStacks()
   if fading then StartDriver(self) end
 end
 
--- Entry point from the cast handler (tracker.lua). texture = the just-pushed icon.
-function UI:HandleModkeyStackCast(texture)
-  if self.GetModkeyStackEnabled and not self:GetModkeyStackEnabled() then return end
-  if not texture then return end
-  local mod = (self.GetHeldModifierString and self:GetHeldModifierString()) or ""
-  if mod == "" then
-    self:ClearModkeyStacks()
-  else
-    self:PushModkeyStackIcon(texture, mod)
-  end
-end
-
 -- ── Center proc icon ─────────────────────────────────────────────────────────
 -- AH-suggestion match: show the matched spell's icon CENTRE as a transient "proc"
 -- that grows in, glows, holds, and fades -- leaving the main row undisturbed. The
@@ -512,10 +500,15 @@ function UI:UpdateAHMatchReadout()
   local enabled = (self.GetAHMatchPercentEnabled and self:GetAHMatchPercentEnabled()) or false
   local casts = addon._ahCastCount or 0
   local matches = addon._ahMatchCount or 0
-  -- Follow the Action Tracker's visibility: when the tracker is hidden (per its Show When
-  -- mode / disabled), hide the readout too instead of leaving it always on screen.
-  local trackerVisible = (ui._lastVisible ~= false)
-  if not enabled or not trackerVisible then
+  -- Combat-only, then a short post-combat hold (mirrors the DPS/HPS readouts): show while in
+  -- combat, keep it up for AH_MATCH_FADE seconds after combat ends, then hide -- so the final %
+  -- stays readable for a beat. Decoupled from the tracker's Show When (the readout is parented to
+  -- UIParent for exactly this).
+  local now = (API.GetTime and API.GetTime()) or (GetTime and GetTime()) or 0
+  local inCombat = (API.UnitAffectingCombat and API.UnitAffectingCombat("player"))
+    or (UnitAffectingCombat and UnitAffectingCombat("player"))
+  local holdActive = addon._ahMatchHoldUntil and (now < addon._ahMatchHoldUntil)
+  if not enabled or not (inCombat or holdActive) then
     fs:Hide()
     if ui._ahSbaReadout then ui._ahSbaReadout:Hide() end
     return
@@ -537,4 +530,29 @@ function UI:UpdateAHMatchReadout()
       sbaFs:Hide()
     end
   end
+end
+
+-- Post-combat hold for the AH Match / SBA readout: keep it on screen briefly after combat ends
+-- (mirrors the DPS/HPS hold), then hide. Counters reset on combat ENTER (see events.lua), so the
+-- final values stay readable during the hold.
+local AH_MATCH_FADE = 2  -- seconds
+do
+  local matchEvents = _G.CreateFrame("Frame")
+  matchEvents:RegisterEvent("PLAYER_REGEN_DISABLED")
+  matchEvents:RegisterEvent("PLAYER_REGEN_ENABLED")
+  matchEvents:SetScript("OnEvent", function(_, ev)
+    if ev == "PLAYER_REGEN_DISABLED" then
+      addon._ahMatchHoldUntil = nil
+    else  -- PLAYER_REGEN_ENABLED: hold the readout for AH_MATCH_FADE seconds, then hide it.
+      local now = (API.GetTime and API.GetTime()) or (GetTime and GetTime()) or 0
+      addon._ahMatchHoldUntil = now + AH_MATCH_FADE
+      if _G.C_Timer and _G.C_Timer.After then
+        _G.C_Timer.After(AH_MATCH_FADE + 0.05, function()
+          addon._ahMatchHoldUntil = nil
+          if addon.UpdateAHMatchReadout then addon:UpdateAHMatchReadout() end
+        end)
+      end
+    end
+    if addon.UpdateAHMatchReadout then addon:UpdateAHMatchReadout() end
+  end)
 end

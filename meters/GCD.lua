@@ -185,8 +185,8 @@ end
 GCD_SetPreviewMode = GCD_SetPreview
 
 function GCD_UpdateNow()
-    -- Retail-only readout (gated off on Classic; greyed in options).
-    if not _G.GSETracker_MetersCapable then
+    -- GCD is a Blizzard cooldown read (spell 61304) -- available on every flavor, not just retail.
+    if not _G.GSETracker_GCDCapable then
         if frame then frame:Hide() end
         return
     end
@@ -240,7 +240,7 @@ local function ShouldPollGCD()
 end
 
 local function GCD_OnUpdate(self, elapsed)
-    if not _G.GSETracker_MetersCapable then return end
+    if not _G.GSETracker_GCDCapable then return end
     self.elapsedSinceUpdate = (self.elapsedSinceUpdate or 0) + (elapsed or 0)
 
     if self.elapsedSinceUpdate < (self.updateInterval or GetRefreshRate()) then

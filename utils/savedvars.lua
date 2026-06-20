@@ -632,7 +632,7 @@ function SV:MigrateToVersion2(db)
 
   local shape = tostring(db.pressedIndicatorShape or ROOT_DEFAULTS.display.pressedIndicator.shape)
   db.pressedIndicatorShape = IsValidPressedShape(shape) and shape or ROOT_DEFAULTS.display.pressedIndicator.shape
-  db.pressedIndicatorSize = Clamp(tonumber(db.pressedIndicatorSize) or ROOT_DEFAULTS.display.pressedIndicator.size, 4, 24)
+  db.pressedIndicatorSize = Clamp(tonumber(db.pressedIndicatorSize) or ROOT_DEFAULTS.display.pressedIndicator.size, C.PRESSED_INDICATOR_MIN_SIZE or 10, C.PRESSED_INDICATOR_MAX_SIZE or 50)
   db.performanceMode = not not db.performanceMode
   EnsureAncillaryTables(db)
 

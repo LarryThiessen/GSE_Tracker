@@ -53,12 +53,20 @@ function UI:GetStrata()
 end
 
 function UI:GetDesiredScale()
+  -- Fold the master (overall) addon scale into the Action Tracker's own Scale so every existing
+  -- self.ui:SetScale(GetDesiredScale()) call site picks it up automatically. Both factors can now
+  -- reach 0 (0% in the UI), so floor the product at a tiny value -- SetScale(0) is invalid.
+  local globalScale = (ns.Utils and ns.Utils.GetGlobalScale and ns.Utils:GetGlobalScale()) or 1
+  local v
   if ns.Utils and ns.Utils.GetScale then
-    return ns.Utils:GetScale()
+    v = ns.Utils:GetScale() * globalScale
+  else
+    ensureDatabase()
+    local display = GetRootDefaults().display or {}
+    v = clampValue(tonumber(display.scale) or 1, 0, 2.00) * globalScale
   end
-  ensureDatabase()
-  local display = GetRootDefaults().display or {}
-  return clampValue(tonumber(display.scale) or 1, 0.70, 1.80)
+  if not v or v < 0.05 then v = 0.05 end
+  return v
 end
 
 function UI:InitUI()

@@ -17,10 +17,6 @@ local orderedModules = {
   ns.Utils,
 }
 
-function ns:GetModule(name)
-  return rawget(self, name)
-end
-
 function ns:FinalizeAPI()
   for _, moduleTable in ipairs(orderedModules) do
     for key, value in pairs(moduleTable) do

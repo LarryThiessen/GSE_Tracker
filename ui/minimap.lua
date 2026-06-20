@@ -21,7 +21,6 @@ local BORDER_SIZE = 50
 local DEFAULT_ANGLE = 225
 local DRAG_BUTTON = "LeftButton"
 local TOOLTIP_TITLE_FALLBACK = (C.ADDON_DISPLAY_NAME or "|cFFFFFFFFGS|r|cFF00FFFFE:|r|cFFFFFF00 Tracker|r")
-local ICON_MASK = C.MASK_CIRCLE or "Interface\\CharacterFrame\\TempPortraitAlphaMask"
 local MINIMAP_SHAPES = {
   ROUND = { true, true, true, true },
   SQUARE = { false, false, false, false },

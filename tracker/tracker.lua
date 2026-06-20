@@ -190,14 +190,13 @@ function Tracker:HandleSpellcast(spellID, castGUID)
   self._lastCastGUID = castGUID or self._lastCastGUID
   self._lastTexture = texture
 
-  -- Spell-name display mode: show this spell's name where the sequence name normally
-  -- goes, via the same label/render path (class-coloured, no keybind). In sequence
-  -- mode this is skipped and the GSE bridge drives the name as before.
-  if addon.GetActionTrackerUseSpellName and addon:GetActionTrackerUseSpellName()
-    and addon.SetSequenceText then
+  -- Feed the spell name into its slot; RebuildNameDisplay combines it with the GSE sequence name
+  -- per the independent toggles (shown alone, or stacked under the sequence name when both are on).
+  if addon.RebuildNameDisplay then
     local spellName = API.GetSpellName and API.GetSpellName(spellID)
     if type(spellName) == "string" and spellName ~= "" then
-      addon:SetSequenceText(spellName, nil, nil, nil)
+      addon._lastSpellName = spellName
+      addon:RebuildNameDisplay()
     end
   end
 

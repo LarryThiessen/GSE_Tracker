@@ -43,8 +43,24 @@ local function ElementEnabled(elementName)
   return true
 end
 
+-- Example label(s) shown while unlocked/editing so the user can position + font them. They reflect
+-- the two name toggles + swap: split (swap + both) -> the main slot shows the Spell example (the GSE
+-- example goes to the top label, GetPreviewTopName); otherwise a combined example (GSE on top).
 local function GetPreviewSequenceText()
-  return "Sequence / Macro / Spell"
+  local showSeq = addon.GetActionTrackerShowSequenceName and addon:GetActionTrackerShowSequenceName()
+  local showSpell = addon.GetActionTrackerShowSpellName and addon:GetActionTrackerShowSpellName()
+  if showSeq and showSpell then return "Spell Name" end   -- both -> Spell is the inner/main name
+  if showSpell then return "Spell Name" end
+  if showSeq then return "GSE Sequence Name" end
+  return "Sequence / Spell"  -- name fully off: still show a generic sample to place
+end
+
+-- The hoisted GSE example (only when BOTH names are on, i.e. the split layout); "" otherwise.
+local function GetPreviewTopName()
+  local showSeq = addon.GetActionTrackerShowSequenceName and addon:GetActionTrackerShowSequenceName()
+  local showSpell = addon.GetActionTrackerShowSpellName and addon:GetActionTrackerShowSpellName()
+  if showSeq and showSpell then return "GSE Sequence Name" end
+  return ""
 end
 
 local function GetPreviewKeybindText()
@@ -136,6 +152,7 @@ local function ApplyRuntimeSequenceVisibility(self, show)
   ui._seqWasVisible = seqVisible
   if ui.nameText then
     ui.nameText:SetText(seqVisible and FmtLabel(seqText) or "")
+    if self._ApplyNameVOffset then self:_ApplyNameVOffset(seqVisible and seqText or "") end
     -- The placeholder example must be fully visible: a just-cleared sequence leaves
     -- ui._accentA = 0, which would otherwise render the example transparent. Use white at
     -- full alpha for the preview; live sequences keep their accent colour/alpha.
@@ -147,6 +164,12 @@ local function ApplyRuntimeSequenceVisibility(self, show)
       a = seqVisible and (ui._accentA or 1) or 0
     end
     ui.nameText:SetTextColor(r, g, b, a)
+    -- Hoisted GSE label (only shows in split mode); mirror this colour/alpha.
+    if self._UpdateTopNameLabel then
+      local topText = usingPreview and GetPreviewTopName() or self._gseSeqName
+      local doSplit = usingPreview or (self._NameSplitActive and self:_NameSplitActive())
+      self:_UpdateTopNameLabel(topText, doSplit, r, g, b, a)
+    end
   end
 
   local keyVisible = keyText ~= "" and ElementEnabled("keybindText")
@@ -173,7 +196,11 @@ function UI:RefreshEditingPreviewState()
   end
   if ui.nameText then
     ui.nameText:SetText(seqVisible and FmtLabel(GetPreviewSequenceText()) or "")
+    if self._ApplyNameVOffset then self:_ApplyNameVOffset(seqVisible and GetPreviewSequenceText() or "") end
     ui.nameText:SetTextColor(1, 1, 1, seqVisible and 1 or 0)
+    if self._UpdateTopNameLabel then
+      self:_UpdateTopNameLabel(GetPreviewTopName(), true, 1, 1, 1, seqVisible and 1 or 0)
+    end
   end
 
   if ui.keybindFrame then

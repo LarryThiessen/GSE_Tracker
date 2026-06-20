@@ -114,21 +114,23 @@ local function SetActiveSequence(seqKey)
       addon:ResetIcons()
     end
 
-    if addon.SetSequenceText and not (addon.GetActionTrackerUseSpellName and addon:GetActionTrackerUseSpellName()) then
-      addon:SetSequenceText(GetPrettyName(seqKey), nil, nil, seqKey)
-    end
+    -- Feed the GSE sequence name into its slot; RebuildNameDisplay combines it with the spell name
+    -- per the independent toggles (so it shows whenever "GSE Sequence Name" is enabled, alone or
+    -- stacked with the spell name).
+    addon._gseSeqName = GetPrettyName(seqKey)
+    if addon.RebuildNameDisplay then addon:RebuildNameDisplay() end
     if addon.RefreshPressedIndicator then
       addon:RefreshPressedIndicator(true)
     end
   else
     addon._lastGSEPressTime = API.GetTime()
 
-    if addon.SetSequenceText and addon.ui and addon.ui.nameText and addon._activeSeqKey == seqKey
-      and not (addon.GetActionTrackerUseSpellName and addon:GetActionTrackerUseSpellName()) then
+    if addon.ui and addon.ui.nameText and addon._activeSeqKey == seqKey then
       local cur = addon.ui.nameText:GetText()
       local alpha = addon.ui.nameText.GetAlpha and addon.ui.nameText:GetAlpha() or 1
       if not cur or cur == "" or alpha == 0 then
-        addon:SetSequenceText(GetPrettyName(seqKey), nil, nil, seqKey)
+        addon._gseSeqName = GetPrettyName(seqKey)
+        if addon.RebuildNameDisplay then addon:RebuildNameDisplay() end
       end
     end
     if addon.RefreshPressedIndicator then

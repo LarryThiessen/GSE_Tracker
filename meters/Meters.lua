@@ -36,12 +36,26 @@ end
 -- Retail-only: the meters READOUTS (DPS/HPS/GCD/SBAssist/Details) and the Assisted-Highlight
 -- marker mode need C_DamageMeter / C_AssistedCombat, absent on Classic. The plain Center
 -- Marker still works there. MetersOK() gates the readout paths; the marker path is left alone.
+-- Per-readout capability (so each can light up independently across flavors):
+--   GCD     -> Blizzard cooldown read; works everywhere.
+--   DPS/HPS -> retail C_DamageMeter OR the Details! addon (live-checked).
+--   SBA%    -> Assisted Highlight usage; retail-only (C_AssistedCombat).
+local function GCDOK()
+    return _G.GSETracker_GCDCapable and true or false
+end
+local function DPSHPSOK()
+    return (_G.GSETracker_HasDPSSource and _G.GSETracker_HasDPSSource()) and true or false
+end
+local function AHUsageOK()
+    return (ns.Caps and ns.Caps.assistedHighlight) and true or false
+end
+-- The cluster is "OK" (anchor/controllers run) when ANY readout is usable.
 local function MetersOK()
-    return (ns.Caps and ns.Caps.meters) and true or false
+    return GCDOK() or DPSHPSOK()
 end
 
 local function UsingAHLight()
-    return MetersOK() and GetMarker() == "AHLight"
+    return AHUsageOK() and GetMarker() == "AHLight"
 end
 
 local function SyncLegacyShowAHLight()
@@ -78,6 +92,7 @@ local function EnsureDefaults()
         if sv[k] == nil then sv[k] = true end
     end
     sv.opacity      = sv.opacity     or 100
+    sv.scale        = tonumber(sv.scale) or 1
     sv.fontSize     = sv.fontSize    or 18
     -- Keep fontStyle / fontType in sync
     local fname = sv.fontStyle or sv.fontType or "Friz Quadrata TT"
@@ -312,7 +327,7 @@ local function GetCenterGCDCooldownInfo()
 end
 
 local function UpdateCenterGCDSwipe()
-    if not MetersOK() then if ClearCenterGCDSwipe then ClearCenterGCDSwipe() end return end
+    if not GCDOK() then if ClearCenterGCDSwipe then ClearCenterGCDSwipe() end return end
     if not centerGCDSwipe then return end
     if not ShouldShowCenterGCDSwipe() then
         ClearCenterGCDSwipe()
@@ -437,7 +452,7 @@ end
 
 local function UpdateAHLightUsageFrame()
     if not AHLightUsageFrame then return end
-    if not MetersOK() then AHLightUsageFrame:Hide() return end
+    if not AHUsageOK() then AHLightUsageFrame:Hide() return end
     if (PlayerIsMounted() and not ShouldUseAHLightUsagePreview()) or MetersSavedVars.showAHLightUsage == false then
         ClearAHLightUsageDisplay()
         AHLightUsageFrame:Hide()
@@ -492,7 +507,7 @@ local function ApplyUnlockedPreviewDisplay()
     end
 
     if DPSFrame and DPSFrame.dpsText then
-        if MetersOK() and MetersSavedVars.showDPS ~= false then
+        if DPSHPSOK() and MetersSavedVars.showDPS ~= false then
             DPSFrame.dpsText:SetText("12345")
             DPSFrame:Show()
         else
@@ -502,7 +517,7 @@ local function ApplyUnlockedPreviewDisplay()
     end
 
     if HPSFrame and HPSFrame.hpsText then
-        if MetersOK() and MetersSavedVars.showHPS ~= false then
+        if DPSHPSOK() and MetersSavedVars.showHPS ~= false then
             HPSFrame.hpsText:SetText("6789")
             HPSFrame:Show()
         else
@@ -512,7 +527,7 @@ local function ApplyUnlockedPreviewDisplay()
     end
 
     if GCDFrame and GCDFrame.gcdText then
-        if MetersOK() and MetersSavedVars.showGCD ~= false then
+        if GCDOK() and MetersSavedVars.showGCD ~= false then
             SetGCDPreviewState(true)
             GCDFrame.gcdText:SetText("1.50s")
             GCDFrame:Show()
@@ -524,7 +539,7 @@ local function ApplyUnlockedPreviewDisplay()
     end
 
     if AHLightUsageFrame then
-        if MetersOK() and MetersSavedVars.showAHLightUsage ~= false then
+        if AHUsageOK() and MetersSavedVars.showAHLightUsage ~= false then
             if AHLightUsage_SetPreview then
                 AHLightUsage_SetPreview(true)
             elseif AHLightUsageFrame.ahLightUsageText then
@@ -565,32 +580,39 @@ UpdateAnchorInteractivity = function()
     ApplyEffectiveOpacity()
 end
 
-Meters_ShowPreview = ApplyUnlockedPreviewDisplay
-
 -- ─── Saved position ───────────────────────────────────────────────────────────
+-- SetPoint offsets live in the anchor's OWN (scaled) coordinate space, so a scaled anchor would
+-- MULTIPLY the offset and drift the whole cluster (e.g. the default y = -15 doubles at scale 2,
+-- pushing it down). Store x/y in UIParent units (scale-independent) and divide by the anchor's
+-- scale when applying, so the cluster keeps its screen position and grows about its own centre.
 local function ApplySavedPosition()
     local x = RoundToNearest(MetersSavedVars.x or 0)
     local y = RoundToNearest(MetersSavedVars.y or -15)
     MetersSavedVars.x = x
     MetersSavedVars.y = y
+    local s = (anchor.GetScale and anchor:GetScale()) or 1
+    if not s or s == 0 then s = 1 end
     anchor:ClearAllPoints()
-    anchor:SetPoint("CENTER", UIParent, "CENTER", x, y)
+    anchor:SetPoint("CENTER", UIParent, "CENTER", x / s, y / s)
 end
 
 local function SaveAnchorPosition()
     anchor:StopMovingOrSizing()
+    local s = (anchor.GetScale and anchor:GetScale()) or 1
+    if not s or s == 0 then s = 1 end
     local ax, ay = anchor:GetCenter()
     local px, py = UIParent:GetCenter()
     local x = MetersSavedVars.x or 0
     local y = MetersSavedVars.y or -15
     if ax and ay and px and py then
-        x = RoundToNearest(ax - px)
-        y = RoundToNearest(ay - py)
+        -- anchor:GetCenter() is in the anchor's own (scaled) space; * its scale -> UIParent units.
+        x = RoundToNearest(ax * s - px)
+        y = RoundToNearest(ay * s - py)
     end
     MetersSavedVars.x = x
     MetersSavedVars.y = y
     anchor:ClearAllPoints()
-    anchor:SetPoint("CENTER", UIParent, "CENTER", x, y)
+    anchor:SetPoint("CENTER", UIParent, "CENTER", x / s, y / s)
     if Meter_SyncPositionControls then Meter_SyncPositionControls() end
 end
 
@@ -879,10 +901,12 @@ function Meter_SetDisplay(showAHLight, showDPS, showHPS, showGCD, showAHLightUsa
         SyncMarkerState()
     end
 
-    showDPS          = showDPS          ~= nil and showDPS          or MetersSavedVars.showDPS
-    showHPS          = showHPS          ~= nil and showHPS          or MetersSavedVars.showHPS
-    showGCD          = showGCD          ~= nil and showGCD          or MetersSavedVars.showGCD
-    showAHLightUsage = showAHLightUsage ~= nil and showAHLightUsage or MetersSavedVars.showAHLightUsage
+    -- nil = "keep saved value"; an explicit false must survive (the `and/or` idiom would
+    -- silently turn false back into the saved value).
+    if showDPS          == nil then showDPS          = MetersSavedVars.showDPS end
+    if showHPS          == nil then showHPS          = MetersSavedVars.showHPS end
+    if showGCD          == nil then showGCD          = MetersSavedVars.showGCD end
+    if showAHLightUsage == nil then showAHLightUsage = MetersSavedVars.showAHLightUsage end
 
     MetersSavedVars.showDPS          = showDPS
     MetersSavedVars.showHPS          = showHPS
@@ -894,10 +918,10 @@ function Meter_SetDisplay(showAHLight, showDPS, showHPS, showGCD, showAHLightUsa
         return
     end
 
-    if DPSFrame then DPSFrame:SetShown(MetersOK() and showDPS) end
-    if HPSFrame then HPSFrame:SetShown(MetersOK() and showHPS) end
+    if DPSFrame then DPSFrame:SetShown(DPSHPSOK() and showDPS) end
+    if HPSFrame then HPSFrame:SetShown(DPSHPSOK() and showHPS) end
 
-    if GCDFrame and not MetersOK() then
+    if GCDFrame and not GCDOK() then
         SetGCDPreviewState(false)
         if GCDFrame.gcdText then GCDFrame.gcdText:SetText("") end
         GCDFrame:Hide()
@@ -949,6 +973,40 @@ function Meter_SetOpacity(opacity)
     MetersSavedVars.opacity = GetConfiguredOpacity()  -- validated inside
     ApplyEffectiveOpacity()
     if MarkerFrame then MarkerFrame:SetAlpha(1) end
+    -- The Center Marker isn't a child of the Meters anchor, so it won't inherit the opacity --
+    -- nudge it to re-apply (it folds the Meters opacity into its own alpha).
+    if _G.GSETracker_RefreshCenterMarker then _G.GSETracker_RefreshCenterMarker() end
+end
+
+-- ─── Scale ──────────────────────────────────────────────────────────────────
+-- The Meters Scale slider sizes the whole readout cluster (DPS/HPS/GCD/% text) by scaling the
+-- anchor every readout frame is reparented onto. The master/overall addon scale multiplies on
+-- top, so the on-screen size = MetersScale * OverallScale.
+local function ClampMetersScale(v)
+    -- 0..2.0 (= 0..200% in the UI; 1.0/100% is the normal default).
+    local s = tonumber(v) or 1
+    if s < 0 then s = 0 elseif s > 2.00 then s = 2.00 end
+    return s
+end
+
+function Meter_GetScale()
+    return ClampMetersScale(MetersSavedVars and MetersSavedVars.scale)
+end
+
+function Meter_ApplyScale()
+    if not anchor then return end
+    local g = (_G.GSETracker_GetGlobalScale and _G.GSETracker_GetGlobalScale()) or 1
+    g = tonumber(g) or 1
+    if g < 0 then g = 0 end
+    local eff = Meter_GetScale() * g
+    if eff < 0.05 then eff = 0.05 end  -- SetScale(0) is invalid; floor at a near-invisible value
+    anchor:SetScale(eff)
+    ApplySavedPosition()  -- re-place with the new scale so the cluster stays centred on its spot
+end
+
+function Meter_SetScale(v)
+    if MetersSavedVars then MetersSavedVars.scale = ClampMetersScale(v) end
+    Meter_ApplyScale()
 end
 
 function Meter_ApplyFont(fontName, size)
@@ -995,8 +1053,7 @@ function Meter_SetPosition(x, y)
     y = RoundToNearest(y or -15)
     MetersSavedVars.x = x
     MetersSavedVars.y = y
-    anchor:ClearAllPoints()
-    anchor:SetPoint("CENTER", UIParent, "CENTER", x, y)
+    ApplySavedPosition()  -- scale-compensated placement
     ApplyEffectiveOpacity()
     Meter_UpdateVisibility()
 end
@@ -1005,8 +1062,7 @@ function Meter_ResetPosition()
     if InCombatLock() then return end
     MetersSavedVars.x = 0
     MetersSavedVars.y = -15
-    anchor:ClearAllPoints()
-    anchor:SetPoint("CENTER", UIParent, "CENTER", 0, -15)
+    ApplySavedPosition()  -- scale-compensated placement
     ApplyEffectiveOpacity()
     Meter_InvalidateLayout()
     SetupFrames()
@@ -1019,30 +1075,6 @@ function Meter_ResetPosition()
     )
     Meter_UpdateVisibility()
     if Meter_SyncPositionControls then Meter_SyncPositionControls() end
-end
-
-local function Meters_FullReset()
-    local sv = MetersSavedVars
-    sv.locked            = true
-    sv.showDPS           = true
-    sv.showHPS           = true
-    sv.showGCD           = true
-    sv.showAHLightUsage  = true
-    sv.opacity           = 100
-    sv.fontSize          = 18
-    sv.refreshRate       = 0.10
-    sv.showWhen          = "Always"
-    SetCurrentFontName("Friz Quadrata TT")
-    SetMarker("AHLight")
-    if Marker_SetMode then Marker_SetMode("AHLight") end
-    Meter_ResetPosition()
-    Meter_ApplyFont(GetCurrentFontName(), sv.fontSize)
-    Meter_ApplyRefreshRate(sv.refreshRate)
-    Meter_SetDisplay(UsingAHLight(), sv.showDPS, sv.showHPS, sv.showGCD, sv.showAHLightUsage)
-    Meter_SetLocked(sv.locked)
-    Meter_SetOpacity(sv.opacity)
-    Meter_UpdateVisibility()
-    print("|cff00ccffMeters|r: Reset to defaults.")
 end
 
 -- ─── Drag ────────────────────────────────────────────────────────────────────
@@ -1252,6 +1284,7 @@ local function FullInit()
     SyncMarkerState()
     Meter_ApplyFont(GetCurrentFontName(), MetersSavedVars.fontSize or 18)
     Meter_ApplyRefreshRate(MetersSavedVars.refreshRate)
+    Meter_ApplyScale()  -- MetersScale * OverallScale onto the anchor
     SetupFrames()
     Meter_SetDisplay(
         UsingAHLight(),

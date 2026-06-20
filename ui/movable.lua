@@ -136,7 +136,6 @@ local function ApplyCenteredOffsets(frame, parent, x, y)
   return nx, ny
 end
 
-uiShared.NormalizeCenteredOffset = NormalizeCenteredOffset
 uiShared.ClampCenteredOffsetsToScreen = ClampCenteredOffsetsToScreen
 uiShared.GetCenteredOffsets = GetCenteredOffsets
 uiShared.ApplyCenteredOffsets = ApplyCenteredOffsets

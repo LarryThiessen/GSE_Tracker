@@ -138,32 +138,6 @@ function optionsModule.GetElementXY(name)
   return (cfg and cfg.x) or defaults.x or 0, (cfg and cfg.y) or defaults.y or 0, (cfg and cfg.enabled)
 end
 
-function optionsModule.RefreshLiveActionTrackerForOptions()
-  return
-end
-
-function optionsModule.ResetSettingsWindowGeometry(frame)
-  if not frame then return end
-  frame:StopMovingOrSizing()
-  local minW, minH = optionsModule.MIN_W, optionsModule.MIN_H
-  if optionsModule.ComputeMinimumWindowSize and frame._gsetrackerSectionsByTab then
-    minW, minH = optionsModule.ComputeMinimumWindowSize(frame._gsetrackerSectionsByTab, frame.GetSelectedTopTab and frame:GetSelectedTopTab() or nil)
-  end
-  local maxW = ((UIParent and UIParent.GetWidth and UIParent:GetWidth()) or optionsModule.DEFAULT_W) - 40
-  local maxH = ((UIParent and UIParent.GetHeight and UIParent:GetHeight()) or optionsModule.DEFAULT_H) - 40
-  local w = math.max(tonumber(frame:GetWidth()) or optionsModule.DEFAULT_W, minW)
-  local h = math.max(tonumber(frame:GetHeight()) or optionsModule.DEFAULT_H, minH)
-  if maxW > 0 then
-    w = math.min(w, maxW)
-  end
-  if maxH > 0 then
-    h = math.min(h, maxH)
-  end
-  frame:SetSize(w, h)
-  frame:ClearAllPoints()
-  frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
-end
-
 function optionsModule.StyleWindowBorder(frame)
   if not (frame and frame.SetBackdropBorderColor) then return end
   frame:SetBackdropBorderColor(BORDER_LIGHT[1], BORDER_LIGHT[2], BORDER_LIGHT[3], 1)
@@ -214,18 +188,6 @@ function optionsModule.CreateLabel(parent, text)
   fs:SetJustifyH("LEFT")
   fs:SetTextColor(TEXT_PRIMARY[1], TEXT_PRIMARY[2], TEXT_PRIMARY[3], 0.9)
   return fs
-end
-
-function optionsModule.ApplyMidnightBackdrop(frame, edgeSize, bgAlpha)
-  if not frame then return end
-  frame:SetBackdrop({
-    bgFile = WHITE8X8,
-    edgeFile = WHITE8X8,
-    edgeSize = edgeSize or 1,
-    insets = { left = 0, right = 0, top = 0, bottom = 0 },
-  })
-  frame:SetBackdropColor(BG_DARK[1], BG_DARK[2], BG_DARK[3], bgAlpha or 0.98)
-  frame:SetBackdropBorderColor(BORDER_DEFAULT[1], BORDER_DEFAULT[2], BORDER_DEFAULT[3], 1)
 end
 
 local function HideTexture(tex)
@@ -803,9 +765,6 @@ function optionsModule.StyleCloseButton(button)
 
     local x = button:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     x:SetPoint("CENTER", button, "CENTER", 0, 0)
-    x:SetText("×")
-    x:SetShadowOffset(1, -1)
-    x:SetShadowColor(0, 0, 0, 0.85)
     x:SetText("x")
     x:SetFont(STANDARD_TEXT_FONT, 18, "")
     x:SetShadowOffset(0, 0)
@@ -1611,17 +1570,6 @@ function optionsModule.SafeAPI.CreateFrame(frameType, name, parent, template)
   end
 end
 
-function optionsModule.CreateDropdownLabel(dd)
-  local label = dd:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-  label:SetPoint("LEFT", dd, "LEFT", 12, 0)
-  label:SetPoint("RIGHT", dd, "RIGHT", -28, 0)
-  label:SetJustifyH("LEFT")
-  label:SetWordWrap(false)
-  label:SetTextColor(0.92, 0.92, 0.98)
-  dd._gseText = label
-  return label
-end
-
 function optionsModule.CreateDropdown(parent, name, width)
   local effectiveWidth = math.max(width or optionsModule.CONTROL_TOTAL_W, 140)
   local holder = API.CreateFrame("Frame", nil, parent)
@@ -2226,29 +2174,6 @@ function optionsModule.AddRow(container, labelText, controlFrame, rowHeight, opt
   return row
 end
 
-function optionsModule.AddDualSliderRow(container, leftTitle, leftControl, rightTitle, rightControl, rowHeight)
-  local row = API.CreateFrame("Frame", nil, container)
-  row:SetHeight(rowHeight or ((math.max(leftControl.rowHeight or 0, rightControl.rowHeight or 0) > 0) and ((math.max(leftControl.rowHeight or 0, rightControl.rowHeight or 0)) + 10) or 52))
-
-  row.leftLabel = optionsModule.CreateLabel(row, leftTitle)
-  row.rightLabel = optionsModule.CreateLabel(row, rightTitle)
-  row.leftControl = leftControl
-  row.rightControl = rightControl
-
-  leftControl:SetParent(row)
-  rightControl:SetParent(row)
-
-  row:SetScript("OnSizeChanged", function(self, w)
-    local leftX, fieldWidth = GetFieldMetrics(w, 1, 2)
-    local rightX = select(1, GetFieldMetrics(w, 2, 2))
-    LayoutField(self, self.leftLabel, self.leftControl, leftX, fieldWidth)
-    LayoutField(self, self.rightLabel, self.rightControl, rightX, fieldWidth)
-  end)
-
-  table.insert(container.rows, row)
-  return row
-end
-
 function optionsModule.AddInlineCheckRow(container, title, control, rowHeight)
   local row = API.CreateFrame("Frame", nil, container)
   row:SetHeight(rowHeight or optionsModule.ROW_H)
@@ -2266,32 +2191,6 @@ function optionsModule.AddInlineCheckRow(container, title, control, rowHeight)
   table.insert(container.rows, row)
   return row
 end
-
-function optionsModule.AddDualCheckRow(container, leftTitle, leftControl, rightTitle, rightControl, rowHeight)
-  local row = API.CreateFrame("Frame", nil, container)
-  row:SetHeight(rowHeight or optionsModule.ROW_H)
-  leftControl.alignLabelOffsetY = 0
-  rightControl.alignLabelOffsetY = 0
-
-  row.leftLabel = optionsModule.CreateLabel(row, leftTitle)
-  row.rightLabel = optionsModule.CreateLabel(row, rightTitle)
-  row.leftControl = leftControl
-  row.rightControl = rightControl
-
-  leftControl:SetParent(row)
-  rightControl:SetParent(row)
-
-  row:SetScript("OnSizeChanged", function(self, w)
-    local leftX, fieldWidth = GetFieldMetrics(w, 1, 2)
-    local rightX = select(1, GetFieldMetrics(w, 2, 2))
-    LayoutField(self, self.leftLabel, self.leftControl, leftX, fieldWidth)
-    LayoutField(self, self.rightLabel, self.rightControl, rightX, fieldWidth)
-  end)
-
-  table.insert(container.rows, row)
-  return row
-end
-
 
 function optionsModule.AddColorCheckRow(container, leftTitle, buttonControl, checkTitle, checkControl, rowHeight)
   local row = API.CreateFrame("Frame", nil, container)
@@ -2330,43 +2229,6 @@ function optionsModule.AddColorCheckRow(container, leftTitle, buttonControl, che
     self.checkLabel:ClearAllPoints()
     self.checkLabel:SetPoint("LEFT", self, "LEFT", labelLeft + (self.checkControl.alignLabelOffsetX or 0), self.checkControl.alignLabelOffsetY or 0)
     self.checkLabel:SetWidth(math.max(labelRight - labelLeft, 72))
-  end)
-
-  table.insert(container.rows, row)
-  return row
-end
-
-function optionsModule.AddTripleCheckRow(container, firstTitle, firstControl, secondTitle, secondControl, thirdTitle, thirdControl, rowHeight)
-  local row = API.CreateFrame("Frame", nil, container)
-  row:SetHeight(rowHeight or optionsModule.ROW_H)
-
-  firstControl.alignLabelOffsetY = 0
-  secondControl.alignLabelOffsetY = 0
-  thirdControl.alignLabelOffsetY = 0
-
-  row.firstLabel = optionsModule.CreateLabel(row, firstTitle)
-  row.secondLabel = optionsModule.CreateLabel(row, secondTitle)
-  row.thirdLabel = optionsModule.CreateLabel(row, thirdTitle)
-  row.firstControl = firstControl
-  row.secondControl = secondControl
-  row.thirdControl = thirdControl
-
-  firstControl:SetParent(row)
-  secondControl:SetParent(row)
-  thirdControl:SetParent(row)
-
-  row:SetScript("OnSizeChanged", function(self, w)
-    local columnCount = 3
-    local columnGap = FIELD_COLUMN_GAP + (self.alignColumnGapAdjust or 0)
-    local controls = { self.firstControl, self.secondControl, self.thirdControl }
-    local labels = { self.firstLabel, self.secondLabel, self.thirdLabel }
-
-    for index = 1, columnCount do
-      local control = controls[index]
-      local label = labels[index]
-      local fieldLeft, fieldWidth = GetFieldMetrics(w, index, columnCount, columnGap)
-      LayoutField(self, label, control, fieldLeft, fieldWidth)
-    end
   end)
 
   table.insert(container.rows, row)

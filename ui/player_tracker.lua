@@ -51,6 +51,24 @@ local function GetResolvedMarkerColor()
   return C.COLOR_RED_R or 1, C.COLOR_RED_G or 0.20, C.COLOR_RED_B or 0.20
 end
 
+-- Master opacity from the Meters slider (MetersSavedVars.opacity, 0-100). The Center Marker is
+-- parented to UIParent (so it can ignore the Meters scale), which means it does NOT inherit the
+-- Meters anchor's alpha -- so fold the Meters opacity into the marker's own alpha here.
+local function GetMetersOpacity()
+  local sv = _G.MetersSavedVars
+  local o = sv and tonumber(sv.opacity)
+  if not o then return 1 end
+  o = o / 100
+  if o < 0 then return 0 elseif o > 1 then return 1 end
+  return o
+end
+
+-- Lets the Meters engine nudge the Center Marker when the shared Opacity changes (the marker is
+-- not a child of the Meters anchor, so it needs an explicit refresh to re-apply the alpha).
+function _G.GSETracker_RefreshCenterMarker()
+  if addon.RefreshCombatMarker then addon:RefreshCombatMarker() end
+end
+
 local function ParentUnitsFromCanonical(value, parent)
   if uiShared.CanonicalPixelsToParentUnits then
     return uiShared.CanonicalPixelsToParentUnits(value, parent)
@@ -236,9 +254,16 @@ local function ResolveDynamicMarkerTexture(symbol)
     return "Interface\\Icons\\INV_Misc_QuestionMark", 0, 1, 0, 1
   elseif symbol == "Specialization" then
     local icon
+    -- Retail / modern clients: GetSpecialization() index -> GetSpecializationInfo (icon = 4th).
     if GetSpecialization and GetSpecializationInfo then
       local idx = GetSpecialization()
       if idx then local _, _, _, i = GetSpecializationInfo(idx); icon = i end
+    end
+    -- MoP Classic: the modern spec API returns nil there; it uses the older talent-tree API
+    -- (GetPrimaryTalentTree() -> GetTalentTabInfo, icon = 4th return).
+    if not icon and GetPrimaryTalentTree and GetTalentTabInfo then
+      local tree = GetPrimaryTalentTree()
+      if tree then local _, _, _, i = GetTalentTabInfo(tree); icon = i end
     end
     if icon then return icon, 0.07, 0.93, 0.07, 0.93 end
     return "Interface\\Icons\\INV_Misc_QuestionMark", 0, 1, 0, 1
@@ -383,6 +408,14 @@ local function ApplyMarkerStyleToFrame(frame)
   end
 
   size = Clamp(tonumber(size) or 40, C.COMBAT_MARKER_MIN_SIZE or 16, C.COMBAT_MARKER_MAX_SIZE or 128)
+  -- Fold the Overall (master) addon scale into the RENDERED size so the marker grows about its
+  -- centre together with the rest of the UI. The marker uses SetIgnoreParentScale (its drag math
+  -- assumes effective scale 1), so scaling the SIZE -- not SetScale -- keeps dragging correct and
+  -- avoids drift. The Center Marker Scale slider still shows the raw (unmultiplied) value.
+  local gScale = (_G.GSETracker_GetGlobalScale and _G.GSETracker_GetGlobalScale()) or 1
+  gScale = tonumber(gScale) or 1
+  if gScale ~= 1 then size = size * gScale end
+  if size < 1 then size = 1 end  -- SetSize(0)/DrawSymbol with 0 is invalid; floor near-invisible
   thickness = Clamp(tonumber(thickness) or 4, C.COMBAT_MARKER_MIN_THICKNESS or 1, C.COMBAT_MARKER_MAX_THICKNESS or 12)
   borderSize = Clamp(tonumber(borderSize) or 2, C.COMBAT_MARKER_MIN_BORDER_SIZE or 0, C.COMBAT_MARKER_MAX_BORDER_SIZE or 8)
   alpha = Clamp(tonumber(alpha) or 0.85, 0.05, 1.00)
@@ -405,8 +438,9 @@ local function ApplyMarkerStyleToFrame(frame)
     UI:DrawSymbolOnFrame(frame, symbol, size, thickness, borderSize, r, g, b, alpha)
   end
 
-  -- Blink: cheap whole-frame alpha applied every call. Non-PI mode stays solid at 1.
-  frame:SetAlpha(piMode and pulse or 1)
+  -- Blink: cheap whole-frame alpha applied every call. Non-PI mode stays solid at 1. Both are
+  -- scaled by the shared Meters opacity so the Center Marker fades with the rest of the cluster.
+  frame:SetAlpha((piMode and pulse or 1) * GetMetersOpacity())
 end
 
 local function ApplyMarkerPointToFrame(frame, parent, point, x, y)
@@ -514,13 +548,6 @@ function UI:ApplyCombatMarkerPosition(frame, parent, point, x, y)
     point, x, y = GetCenteredAnchorConfig()
   end
   ApplyMarkerPointToFrame(frame, parent or GetMarkerParent(), point, x, y)
-end
-
-function UI:LayoutCombatMarkerPreview()
-  self:RefreshCombatMarker(true)
-end
-
-function UI:HideCombatMarkerPreview()
 end
 
 function UI:BeginCombatMarkerDrag(frame)
@@ -706,52 +733,8 @@ function UI:RefreshCombatMarker(force)
   self:RefreshCombatMarkerDragMouseState()
 end
 
-function UI:ApplyCenterMarkerStrata(frame)
-  return self:ApplyCombatMarkerStrata(frame)
-end
-
 function UI:EnsureCenterMarker()
   return self:EnsureCombatMarker()
-end
-
-function UI:ApplyCenterMarkerStyle(frame)
-  return self:ApplyCombatMarkerStyle(frame)
-end
-
-function UI:ApplyCenterMarkerPosition(frame, parent, point, x, y)
-  return self:ApplyCombatMarkerPosition(frame, parent, point, x, y)
-end
-
-function UI:LayoutCenterMarkerPreview()
-  return self:LayoutCombatMarkerPreview()
-end
-
-function UI:HideCenterMarkerPreview()
-  return self:HideCombatMarkerPreview()
-end
-
-function UI:BeginCenterMarkerDrag(frame)
-  return self:BeginCombatMarkerDrag(frame)
-end
-
-function UI:EndCenterMarkerDrag(commit)
-  return self:EndCombatMarkerDrag(commit)
-end
-
-function UI:CanDragCenterMarker()
-  return self:CanDragCombatMarker()
-end
-
-function UI:RefreshCenterMarkerDragMouseState()
-  return self:RefreshCombatMarkerDragMouseState()
-end
-
-function UI:SyncActiveCenterMarkerDragPosition()
-  return self:SyncActiveCombatMarkerDragPosition()
-end
-
-function UI:ShouldShowCenterMarker(forceOverride)
-  return self:ShouldShowCombatMarker(forceOverride)
 end
 
 function UI:RefreshCenterMarker(force)

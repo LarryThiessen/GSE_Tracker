@@ -5,11 +5,10 @@ local Tracker = ns.Tracker or {}
 local API = (ns.Utils and ns.Utils.API) or {}
 local uiShared = addon._ui or {}
 local pixelSnap = uiShared.PixelSnap
-local copyArrayInto = uiShared.CopyArrayInto or uiShared.CopyArray
+local copyArrayInto = uiShared.CopyArrayInto
 local clearArray = uiShared.ClearArray or uiShared.ClearTable
 local iconRowWidth = uiShared.IconRowWidth
 local ICON_SIZE = uiShared.ICON_SIZE
-local OLDEST_FADE_DUR = uiShared.OLDEST_FADE_DUR
 local SCROLL_DUR = uiShared.SCROLL_DUR
 local C = (ns.Utils and ns.Utils.Constants) or addon.Constants or {}
 local FLOW_FADE_IN_DUR = 0.10
@@ -69,27 +68,6 @@ local function GetSequenceColor(seqKey)
   end
   return GetClassColor()
 end
-
-local function EnsureOldestFade(icon)
-  if icon._oldestFade then return end
-  local ag = icon:CreateAnimationGroup()
-  ag:SetToFinalAlpha(true)
-  local a = ag:CreateAnimation("Alpha")
-  a:SetFromAlpha(1)
-  a:SetToAlpha(0)
-  a:SetDuration(OLDEST_FADE_DUR)
-  a:SetOrder(1)
-  icon._oldestFade = ag
-end
-
-local function PlayOldestFade(icon)
-  if not icon then return end
-  EnsureOldestFade(icon)
-  icon._oldestFade:Stop()
-  icon:SetAlpha(1)
-  icon._oldestFade:Play()
-end
-uiShared.PlayOldestFade = PlayOldestFade
 
 local function EnsureFlowFadeIn(icon)
   if icon._flowFadeInAG then return end
@@ -194,7 +172,6 @@ local function StopManualSlideDriver(ui)
 end
 local function ReleaseIconFrame(icon)
   if not icon then return end
-  if icon._oldestFade then icon._oldestFade:Stop() end
   if icon._flowFadeInAG then icon._flowFadeInAG:Stop() end
   icon._animStartX = nil
   icon._animTargetX = nil
@@ -678,25 +655,6 @@ local function SetIconBaseX(ui, icon, newBaseX, animate)
   return true
 end
 
-local function AnimateIconsToSlots(ui)
-  if not ui.icons then return end
-  RebuildBaseSlots(ui)
-  local pending = 0
-  for slot = 1, #ui.icons do
-    local icon = ui.icons[slot]
-    local baseX = ui._iconBaseX[slot] or 0
-    if SetIconBaseX(ui, icon, baseX, true) then pending = pending + 1 end
-  end
-  if pending > 0 then
-    ui._slidePending = pending
-    StartManualSlideDriver(ui)
-  else
-    SyncIconLayout(ui)
-    QueuePostSlideResync(ui)
-  end
-end
-uiShared.AnimateIconsToSlots = AnimateIconsToSlots
-
 function UI:RevealPendingSequenceText()
   local ui = self.ui
   if not ui then return end
@@ -731,6 +689,83 @@ function UI:SetKeybindText(text)
   self:_ResizeToContent()
 end
 
+-- A two-line (stacked) name centres on the one-line anchor, which drops the bottom line toward the
+-- icons. Raise the block by half a line when it's two lines so the BOTTOM line keeps the normal
+-- one-line gap above the icons; single line sits at the usual centre.
+function UI:_ApplyNameVOffset(rawText)
+  local ui = self.ui
+  if not (ui and ui.nameText and ui.sequenceTextFrame) then return end
+  local twoLine = type(rawText) == "string" and rawText:find("\n", 1, true) ~= nil
+  local up = twoLine and math.floor(((uiShared.NAME_FONT_SIZE or 16) * 0.5) + 0.5) or 0
+  ui.nameText:ClearAllPoints()
+  ui.nameText:SetPoint("CENTER", ui.sequenceTextFrame, "CENTER", 0, up)
+end
+
+-- Lay out the name label(s) from the independent "GSE Sequence Name" / "Spell Name" toggles.
+--   * SWAP on + BOTH names -> SPLIT: GSE hoisted to the top label (nameText2, above the ModKeys
+--     row) while the Spell name stays in the main name slot (below the icons).
+--   * otherwise -> a single combined label (GSE on top when both are on; one line each); the top
+--     label is hidden.
+-- GSE name (addon._gseSeqName) is fed by the GSE bridge; spell name (addon._lastSpellName) by the
+-- tracker -- each calls this after updating its own slot.
+function UI:RebuildNameDisplay()
+  local showSeq = self.GetActionTrackerShowSequenceName and self:GetActionTrackerShowSequenceName()
+  local showSpell = self.GetActionTrackerShowSpellName and self:GetActionTrackerShowSpellName()
+  local gse = (showSeq and self._gseSeqName) or ""
+  local spell = (showSpell and self._lastSpellName) or ""
+  local split = self:_NameSplitActive()
+  if split then
+    self:SetSequenceText(spell, nil, nil, self._activeSeqKey)  -- main slot = Spell (below icons)
+  else
+    local parts = {}
+    if gse ~= "" then parts[#parts + 1] = gse end
+    if spell ~= "" then parts[#parts + 1] = spell end
+    self:SetSequenceText(table.concat(parts, "\n"), nil, nil, self._activeSeqKey)
+  end
+  self:_UpdateTopNameLabel(self._gseSeqName, split)
+end
+
+-- True when the layout SPLITS into two separate labels: BOTH name toggles on AND both names are
+-- currently present. GSE always becomes the OUTER (top) label; Spell stays the inner/main name.
+-- (Swap only decides WHERE the top label anchors -- above ModKeys when swapped, else above the
+-- inner name -- handled in _UpdateTopNameLabel.)
+function UI:_NameSplitActive()
+  local showSeq = self.GetActionTrackerShowSequenceName and self:GetActionTrackerShowSequenceName()
+  local showSpell = self.GetActionTrackerShowSpellName and self:GetActionTrackerShowSpellName()
+  return showSeq and showSpell
+    and (self._gseSeqName or "") ~= "" and (self._lastSpellName or "") ~= "" and true or false
+end
+
+-- Render the hoisted top GSE label (nameText2): visible ONLY when doSplit (the layout is actually
+-- splitting) and the main name is showing; mirrors the main name's colour/alpha. `gseText` is the
+-- text (the unlocked example preview passes its sample); r/g/b/a override the colour (else copied).
+function UI:_UpdateTopNameLabel(gseText, doSplit, r, g, b, a)
+  local ui = self.ui
+  if not (ui and ui.nameText2) then return end
+  gseText = gseText or self._gseSeqName or ""
+  local nr, ng, nb, na
+  if ui.nameText and ui.nameText.GetTextColor then nr, ng, nb, na = ui.nameText:GetTextColor() end
+  local mainText = (ui.nameText and ui.nameText:GetText()) or ""
+  local mainShown = mainText ~= "" and ((na == nil) or (na > 0))
+  if doSplit and gseText ~= "" and mainShown then
+    -- Anchor the top (GSE) label centred above the nearest upper element: ModKeys when swapped
+    -- (names are on opposite sides of the icons), else directly above the inner (Spell) name.
+    local swapped = self.GetActionTrackerSwapNameModkeys and self:GetActionTrackerSwapNameModkeys()
+    ui.nameText2:ClearAllPoints()
+    if swapped and ui.modifiersFrame then
+      ui.nameText2:SetPoint("BOTTOM", ui.modifiersFrame, "TOP", 0, 3)
+    else
+      ui.nameText2:SetPoint("BOTTOM", ui.nameText, "TOP", 0, 3)
+    end
+    ui.nameText2:SetText((uiShared.FormatLabelForLayout and uiShared.FormatLabelForLayout(gseText)) or gseText)
+    ui.nameText2:SetTextColor(r or nr or 1, g or ng or 1, b or nb or 1, a or na or 1)
+    ui.nameText2:Show()
+  else
+    ui.nameText2:SetText("")
+    ui.nameText2:Hide()
+  end
+end
+
 function UI:SetSequenceText(displayName, _, _, seqKey)
   local ui = self.ui
   if not ui then return end
@@ -756,6 +791,7 @@ function UI:SetSequenceText(displayName, _, _, seqKey)
     ui.nameText:SetText("")
     ui.nameText:SetTextColor(1, 1, 1, 0)
     if ui.sequenceTextFrame then ui.sequenceTextFrame:Hide() end
+    if ui.nameText2 then ui.nameText2:SetText(""); ui.nameText2:Hide() end
     ui._seqWasVisible = false
     self:SetKeybindText("")
     self:_ResizeToContent()
@@ -790,6 +826,7 @@ function UI:SetSequenceText(displayName, _, _, seqKey)
   ui._lastSeqKey = seqKey
   ui._accentR, ui._accentG, ui._accentB, ui._accentA = r, g, b, 1
   ui.nameText:SetText((uiShared.FormatLabelForLayout and uiShared.FormatLabelForLayout(txt)) or txt)
+  self:_ApplyNameVOffset(txt)
   if liveKeybindText ~= nil then
     self:SetKeybindText(liveKeybindText)
   end

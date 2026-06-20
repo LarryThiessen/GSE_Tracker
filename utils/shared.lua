@@ -34,7 +34,6 @@ local MIN_W = 180
 local MAX_W = 480
 
 local SCROLL_DUR = 0.55
-local OLDEST_FADE_DUR = 0.50
 
 local MOD_ALT_X_NUDGE = 2
 local MOD_SHIFT_X_NUDGE = 2
@@ -485,8 +484,18 @@ end
 -- Returns path, size, flags -- or nil when Force-Native is on or the region can't be
 -- read, in which case callers keep the user's configured font.
 function uiShared.GetActionButtonFont(kind)
-  if uiShared.IsResolvedNativeSkin and uiShared.IsResolvedNativeSkin() then return nil end
-  local btn = uiShared.GetActiveActionButton and uiShared.GetActiveActionButton() or _G.ActionButton1
+  local btn
+  if addon.GetSkin and addon:GetSkin() == "NATIVE" then
+    -- Force-Native: the GENUINE Blizzard DEFAULT font (the client's standard UI font). Return it
+    -- directly rather than reading ActionButton1 -- a skinner that restyles the STOCK buttons in
+    -- place (ABE, ElvUI "skin Blizzard", Masque...) would otherwise leak its own font into
+    -- "native", so Force-Native would look adopted. Size/outline stay caller-controlled (nil flags
+    -- = keep the user's configured outline). This is the per-client default on every flavor.
+    return _G.STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF", nil, nil
+  else
+    if uiShared.IsResolvedNativeSkin and uiShared.IsResolvedNativeSkin() then return nil end
+    btn = (uiShared.GetActiveActionButton and uiShared.GetActiveActionButton()) or _G.ActionButton1
+  end
   if not btn then return nil end
   local name = (btn.GetName and btn:GetName()) or "ActionButton1"
   local region
@@ -590,10 +599,6 @@ local function CopyArrayInto(dst, src, maxN)
   return dst
 end
 
-local function CopyArray(src, maxN, dst)
-  return CopyArrayInto(dst, src, maxN)
-end
-
 uiShared.PAD_X = PAD_X
 uiShared.PAD_TOP = PAD_TOP
 uiShared.PAD_BOTTOM = PAD_BOTTOM
@@ -611,7 +616,6 @@ uiShared.MAX_W = MAX_W
 -- Width of a stacked (vertical-layout) glyph-column label, beside the icon column.
 uiShared.VERTICAL_LABEL_W = 24
 uiShared.SCROLL_DUR = SCROLL_DUR
-uiShared.OLDEST_FADE_DUR = OLDEST_FADE_DUR
 uiShared.MOD_ALT_X_NUDGE = MOD_ALT_X_NUDGE
 uiShared.MOD_SHIFT_X_NUDGE = MOD_SHIFT_X_NUDGE
 uiShared.MOD_CTRL_X_NUDGE = MOD_CTRL_X_NUDGE
@@ -630,7 +634,6 @@ uiShared.SetPointIfChanged = SetPointIfChanged
 uiShared.ClearTable = ClearTable
 uiShared.ClearArray = ClearArray
 uiShared.CopyArrayInto = CopyArrayInto
-uiShared.CopyArray = CopyArray
 
 function Utils:IsPerformanceModeEnabled()
   if Utils.GetPerformanceModeEnabled then

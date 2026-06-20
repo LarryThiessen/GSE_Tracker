@@ -70,6 +70,13 @@ function DebugModule:RegisterSlashCommands()
     self:HandleSlashCommand(msg)
   end
 
+  -- Convenience reload alias (restored). Note: /reload and /reloadui are Blizzard built-ins;
+  -- /rl is not, so addons provide it. Last addon to register /rl wins if several do.
+  SLASH_GSETRACKERRELOAD1 = "/rl"
+  SlashCmdList.GSETRACKERRELOAD = function()
+    if _G.ReloadUI then _G.ReloadUI() end
+  end
+
   self._slashRegistered = true
 end
 

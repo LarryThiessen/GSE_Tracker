@@ -221,10 +221,6 @@ local function ApplyModeVisuals()
 end
 
 -- ─── Public API ───────────────────────────────────────────
-function Marker_GetMode()
-    return GetSavedMode()
-end
-
 function Marker_SetMode(mode)
     mode = NormalizeMode(mode)
 
@@ -286,38 +282,12 @@ function Marker_Refresh()
     ApplyModeVisuals()
 end
 
-function Marker_UpdateNow()
-    Marker_Refresh()
-end
-
 function Marker_Clear()
     frame.icon:SetTexture(nil)
     frame:Hide()
 end
 
-function Marker_SetOpacity(percent)
-    if percent ~= nil then
-        MetersSavedVars.opacity = tonumber(percent) or MetersSavedVars.opacity
-    end
-
-    ApplyOpacity()
-end
-
-function Marker_SetSize(size)
-    size = tonumber(size)
-    if size and size > 0 then
-        frame:SetSize(size, size)
-        return
-    end
-
-    ApplySize()
-end
-
 -- ─── Backwards Compatibility ──────────────────────────────
-function Marker_SetCenterIndicator(mode)
-    Marker_SetMode(mode)
-end
-
 if Meter_SetCenterIndicator == nil then
     function Meter_SetCenterIndicator(mode)
         Marker_SetMode(mode)

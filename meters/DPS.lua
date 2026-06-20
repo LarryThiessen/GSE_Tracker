@@ -48,6 +48,15 @@ local function RefreshFromMeter()
         dpsText:SetText("")
         return
     end
+    -- Retail: Blizzard's real-time C_DamageMeter -- a live session tied to GAME combat, so the
+    -- number stays current right through damage lulls. Classic flavors have no functional
+    -- C_DamageMeter (the table can be a non-functional stub), so read DPS from the Details! addon
+    -- there instead. Gate on the capability flag, not bare existence.
+    if not _G.GSETracker_MetersCapable then
+        local dps = _G.GSETracker_DetailsPerSecond and _G.GSETracker_DetailsPerSecond(1)
+        if dps then dpsText:SetText(string.format("%.0f", dps)) end
+        return
+    end
     local sessions = C_DamageMeter.GetAvailableCombatSessions()
     if not sessions or #sessions == 0 then return end
     local sid = sessions[#sessions].sessionID
@@ -143,5 +152,3 @@ function DPS_ControllerEvent(event)
         end
     end
 end
-
-DPS_HandleEvent = DPS_ControllerEvent

@@ -180,12 +180,16 @@ local function RebuildMarkerOptionLists()
   clear(PRESSED_SHAPE_OPTIONS)
   for _, o in ipairs(IMAGE_OPTIONS) do PRESSED_SHAPE_OPTIONS[#PRESSED_SHAPE_OPTIONS + 1] = o end
   PRESSED_SHAPE_OPTIONS[#PRESSED_SHAPE_OPTIONS + 1] = { value = "None", text = "None" }
-  -- Center Marker: special modes + image symbols + None. The "Assisted Highlight" mode
-  -- (value "AHLight") mirrors the AH suggestion, which is retail-only -- drop it on Classic.
+  -- Center Marker: special modes + image symbols + None. Drop the ones that can't work on this
+  -- client: "AHLight" (mirrors the AH suggestion -- retail only) and "Specialization" (needs the
+  -- spec system, Mists+ -- absent on Classic Era / TBC). "Class" + images + None work everywhere.
   clear(CENTER_MARKER_OPTIONS)
   local ahOK = ns.Caps and ns.Caps.assistedHighlight
+  local specOK = _G.GetNumSpecializations and (_G.GetNumSpecializations() or 0) > 0
   for _, o in ipairs(MYMARKER_OPTIONS) do
-    if not (o.value == "AHLight" and not ahOK) then
+    local drop = (o.value == "AHLight" and not ahOK)
+              or (o.value == "Specialization" and not specOK)
+    if not drop then
       CENTER_MARKER_OPTIONS[#CENTER_MARKER_OPTIONS + 1] = o
     end
   end
@@ -220,9 +224,10 @@ local function SCROLL_OPTIONS()
   if layout == "VERTICAL" then return SCROLL_V_OPTIONS end
   return SCROLL_H_OPTIONS
 end
--- True when GSE (the macro compiler) is present, so labels can say "GSE Sequence
--- Name" vs the generic "Macro Name" when it isn't. Checked at row-build time (the
--- settings panel is built lazily, by which point GSE has loaded if installed).
+-- True when GSE (the macro compiler) is present. When it isn't, there are no GSE sequence
+-- names, so the "GSE Sequence Name" option is greyed out and the tracker falls back to Spell
+-- Names. Checked at row-build time (the settings panel is built lazily, by which point GSE has
+-- loaded if installed).
 local function IsGSEAvailable()
   if _G.GSE ~= nil then return true end
   if C_AddOns and C_AddOns.IsAddOnLoaded then
@@ -232,11 +237,10 @@ local function IsGSEAvailable()
   return false
 end
 
--- The primary name source is GSE's sequence name when GSE is installed, otherwise the
--- plain macro name. These helpers keep the namesource checkbox and the font row label
--- in sync with that.
+-- The primary name source is always GSE's sequence name (greyed + unused when GSE isn't
+-- installed). These helpers keep the namesource checkbox and the font row label in sync.
 local function PrimaryNameLabel()
-  return IsGSEAvailable() and "GSE Sequence Name" or "Macro Name"
+  return "GSE Sequence Name"
 end
 local function PrimaryNameFontLabel()
   return PrimaryNameLabel() .. "/Spell Name"
@@ -357,6 +361,14 @@ local function AttachTooltip(frame, title, body)
   frame:HookScript("OnLeave", function() GameTooltip:Hide() end)
 end
 
+-- Uniform vertical rhythm: every row leaves the SAME gap (ROW_PAD) below its content, so the
+-- spacing reads evenly across all tabs regardless of control type. Each renderer returns its
+-- content height + ROW_PAD. (Headers keep their own larger spacing as section dividers.)
+local ROW_PAD  = 8    -- gap below every row
+local RH_CHECK = 26   -- checkbox / toggle / swatch+label row content
+local RH_COLOR = 20   -- bare colour-swatch row content
+local RH_LINE  = 44   -- dropdown / slider / dropdown+slider row (label or title + control)
+
 local function MakeHeader(pane, y, desc)
   -- Consistent breathing room ABOVE every section header so gold titles aren't crammed
   -- against the row above (checkbox rows leave no trailing space). Skipped for the very
@@ -393,7 +405,7 @@ local function MakeCheck(pane, y, desc)
     if lbl.SetTextColor then lbl:SetTextColor(0.5, 0.5, 0.5) end
     AttachTooltip(cb, desc.label, "Not available on this WoW version.")
   end
-  return 28
+  return RH_CHECK + ROW_PAD
 end
 
 -- Two or three checkboxes side by side on one row (the third is rendered only when
@@ -403,14 +415,24 @@ end
 local function MakeDualCheck(pane, y, desc)
   local ROW_X, COL_GAP = 36, 24
   local lastLbl = nil
+  local firstCB, rowRight = nil, ROW_X  -- for optional centering of the whole row
+  -- desc.cols = { x1, x2, ... } pins each checkbox at a FIXED pane x (a stacked grid that lines up
+  -- across rows), instead of chaining each after the previous label.
+  local idx = 0
   local function one(getName, setName, label, tip, disableName)
+    idx = idx + 1
     local get, set = ResolveGet(getName), ResolveSet(setName)
     local cb = CreateFrame("CheckButton", nil, pane, "UICheckButtonTemplate")
     cb:SetSize(26, 26)
-    if lastLbl then
+    if desc.cols and desc.cols[idx] then
+      cb:SetPoint("TOPLEFT", pane, "TOPLEFT", desc.cols[idx], y)
+      if not firstCB then firstCB = cb end
+    elseif lastLbl then
       cb:SetPoint("LEFT", lastLbl, "RIGHT", COL_GAP, 0)
+      rowRight = rowRight + COL_GAP
     else
       cb:SetPoint("TOPLEFT", pane, "TOPLEFT", ROW_X, y)
+      firstCB = cb
     end
     cb:SetChecked(get() and true or false)
     cb:SetScript("OnClick", function(self) set(self:GetChecked() and true or false) end)
@@ -420,6 +442,7 @@ local function MakeDualCheck(pane, y, desc)
     StyleCheckLabel(lbl)
     AttachTooltip(cb, label, tip)
     lastLbl = lbl
+    rowRight = rowRight + 26 + 4 + (lbl:GetStringWidth() or 0)  -- checkbox + gap + label width
     -- Optional: grey this checkbox out (disabled + dimmed) when another setting makes it
     -- have no effect. Re-evaluated on every panel refresh, so it tracks the dependency live.
     if disableName then
@@ -436,7 +459,10 @@ local function MakeDualCheck(pane, y, desc)
   one(desc.get, desc.set, desc.label, desc.tooltip, desc.disable)
   one(desc.get2, desc.set2, desc.label2, desc.tooltip2, desc.disable2)
   if desc.get3 then one(desc.get3, desc.set3, desc.label3, desc.tooltip3, desc.disable3) end
-  return 28
+  -- Optionally centre the whole row in the pane. Only the first checkbox is pane-anchored (the rest
+  -- chain off it), so shifting just that one slides the entire row.
+  if desc.center and not desc.cols and firstCB then CenterPaneRow(pane, { firstCB }, ROW_X, rowRight) end
+  return RH_CHECK + ROW_PAD
 end
 
 -- Two checkboxes + a dropdown, all on one row (the Match %, Match Audible, sound).
@@ -483,7 +509,37 @@ local function MakeMatchRow(pane, y, desc)
     end
     AttachTooltip(dd, desc.label2, "Not available on this WoW version.")
   end
-  return 30
+  return RH_CHECK + ROW_PAD
+end
+
+-- OptionsSliderTemplate's groove isn't applied on some clients (e.g. TBC "Anniversary"): the thumb
+-- shows but the bar is missing, and that slider itself has no working SetBackdrop. So build a
+-- dedicated backdrop frame BEHIND the slider with the STOCK Blizzard slider textures -- the groove
+-- (UI-SliderBar-Background) AND the rounded end-caps (UI-SliderBar-Border). A "BackdropTemplate"
+-- frame works on every flavor (the option panels already use it), giving the genuine native look.
+local function AddSliderTrack(s)
+  if not s or s._gseTrack then return end
+  s._gseTrack = true
+  local track = CreateFrame("Frame", nil, s:GetParent(), "BackdropTemplate")
+  track:SetAllPoints(s)
+  track:SetFrameLevel(math.max(0, (s:GetFrameLevel() or 1) - 1))  -- sits behind the thumb
+  if track.SetBackdrop then
+    track:SetBackdrop({
+      bgFile   = "Interface\\Buttons\\UI-SliderBar-Background",
+      edgeFile = "Interface\\Buttons\\UI-SliderBar-Border",
+      tile = true, tileSize = 8, edgeSize = 8,
+      insets = { left = 3, right = 3, top = 6, bottom = 6 },
+    })
+  else
+    -- Fallback (no BackdropTemplate): groove texture only, no end-caps.
+    local bar = track:CreateTexture(nil, "BACKGROUND")
+    bar:SetTexture("Interface\\Buttons\\UI-SliderBar-Background")
+    if bar.SetHorizTile then bar:SetHorizTile(true) end
+    bar:SetHeight(8)
+    bar:SetPoint("LEFT", track, "LEFT", 0, 0)
+    bar:SetPoint("RIGHT", track, "RIGHT", 0, 0)
+  end
+  s._gseTrack = track
 end
 
 local function MakeSlider(pane, y, desc)
@@ -493,6 +549,7 @@ local function MakeSlider(pane, y, desc)
   local s = CreateFrame("Slider", name, pane, "OptionsSliderTemplate")
   s:SetPoint("TOPLEFT", pane, "TOPLEFT", 20, y - 16)
   s:SetWidth(sliderW)
+  AddSliderTrack(s)
   s:SetMinMaxValues(desc.min, desc.max)
   s:SetValueStep(desc.step)
   s:SetObeyStepOnDrag(true)
@@ -503,6 +560,7 @@ local function MakeSlider(pane, y, desc)
   local val = pane:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
   val:SetPoint("LEFT", s, "RIGHT", 10, 0)
   local function fmt(v)
+    if desc.percent then return tostring(math.floor((v or 0) + 0.5)) .. "%" end
     if desc.float then return string.format("%.2f", v or 0) end
     return tostring(math.floor((v or 0) + 0.5))
   end
@@ -515,10 +573,26 @@ local function MakeSlider(pane, y, desc)
     if userInput then set(v) end
   end)
   AttachTooltip(s, desc.label, desc.tooltip)
+  -- Optional: grey the slider out (disabled + dimmed) while another setting controls its value
+  -- automatically (e.g. AH Scale while the Target Portrait auto-sizes the highlight). Re-evaluated
+  -- on every panel refresh so it tracks the dependency live.
+  if desc.disableGet then
+    local disableGet = ResolveGet(desc.disableGet)
+    activeRefreshers[#activeRefreshers + 1] = function()
+      local off = disableGet() and true or false
+      if off then
+        if s.Disable then s:Disable() end
+        s:SetAlpha(0.4); val:SetAlpha(0.4); if title then title:SetAlpha(0.4) end
+      else
+        if s.Enable then s:Enable() end
+        s:SetAlpha(1); val:SetAlpha(1); if title then title:SetAlpha(1) end
+      end
+    end
+  end
   if desc.center then
     CenterPaneRow(pane, { s }, 20, 20 + sliderW + 10 + (val:GetStringWidth() or 0))
   end
-  return 50
+  return RH_LINE + ROW_PAD
 end
 
 local function MakeDropdown(pane, y, desc)
@@ -537,7 +611,7 @@ local function MakeDropdown(pane, y, desc)
     if lbl.SetTextColor then lbl:SetTextColor(0.5, 0.5, 0.5) end
     AttachTooltip(dd, desc.label, "Not available on this WoW version.")
   end
-  return 46
+  return RH_LINE + ROW_PAD
 end
 
 -- A dropdown with a checkbox after it on the SAME row (e.g. Center Marker + Show GCD).
@@ -563,7 +637,7 @@ local function MakeDropdownCheck(pane, y, desc)
   clbl:SetText(desc.checkLabel or "")
   StyleCheckLabel(clbl)
   AttachTooltip(cb, desc.checkLabel, desc.tooltip2)
-  return 46
+  return RH_LINE + ROW_PAD
 end
 
 -- Two dropdowns side by side on one row (e.g. Layout + Scroll Direction). The
@@ -592,7 +666,7 @@ local function MakeDualDropdown(pane, y, desc)
   dd2:SetPoint("TOPLEFT", pane, "TOPLEFT", 288, y - 18)
   AttachTooltip(dd2, desc.label2, desc.tooltip2)
   if desc.center then CenterPaneRow(pane, { dd1, dd2, lbl1, lbl2 }, 16, 288 + 200) end
-  return 46
+  return RH_LINE + ROW_PAD
 end
 
 local function MakeDropdownSlider(pane, y, desc)
@@ -616,6 +690,7 @@ local function MakeDropdownSlider(pane, y, desc)
   local s = CreateFrame("Slider", name, pane, "OptionsSliderTemplate")
   s:SetPoint("TOPLEFT", pane, "TOPLEFT", 290, y - 16)
   s:SetWidth(150)
+  AddSliderTrack(s)
   s:SetMinMaxValues(desc.smin, desc.smax)
   s:SetValueStep(desc.sstep)
   s:SetObeyStepOnDrag(true)
@@ -654,7 +729,7 @@ local function MakeDropdownSlider(pane, y, desc)
     if val.SetTextColor then val:SetTextColor(0.5, 0.5, 0.5) end
     AttachTooltip(dd, desc.label, "Not available on this WoW version.")
   end
-  return 50
+  return RH_LINE + ROW_PAD
 end
 
 local function MakeEnableShow(pane, y, desc)
@@ -695,7 +770,7 @@ local function MakeEnableShow(pane, y, desc)
     AttachTooltip(cb, desc.label, why)
     AttachTooltip(dd, desc.label, why)
   end
-  return 40
+  return RH_CHECK + ROW_PAD
 end
 
 local function MakeColor(pane, y, desc)
@@ -725,7 +800,7 @@ local function MakeColor(pane, y, desc)
     end
   end)
   AttachTooltip(btn, desc.label, desc.tooltip)
-  return 28
+  return RH_COLOR + ROW_PAD
 end
 
 -- Tri-state colour-source row: two mutually-exclusive checkboxes (Class Color / Custom
@@ -823,7 +898,7 @@ local function MakeTriColor(pane, y, desc)
   StyleCheckLabel(lblCustom)
 
   refresh()
-  return 30
+  return RH_CHECK + ROW_PAD
 end
 
 -- A mutually-exclusive colour-source choice on one row: two checkboxes that act
@@ -916,7 +991,7 @@ local function MakeCheckColor(pane, y, desc)
     CenterPaneRow(pane, { cbClass, cbCustom, btn }, 16, 360 + 20)
   end
   refresh()
-  return 30
+  return RH_CHECK + ROW_PAD
 end
 
 -- Two mutually-exclusive checkboxes (radio: get/set is a boolean -- unchecked-first /
@@ -956,19 +1031,33 @@ local function MakeNameSourceRow(pane, y, desc)
   -- the groups are spaced consistently regardless of label width. Row shifted right 20.
   local ROW_X, COL_GAP = 36, 24
 
+  -- desc.cols = { x1, x2 } pins each checkbox at a FIXED pane x (a stacked grid that lines up across
+  -- rows), instead of chaining the 2nd after the 1st label.
   cbA = CreateFrame("CheckButton", nil, pane, "UICheckButtonTemplate")
   cbA:SetSize(26, 26)
-  cbA:SetPoint("TOPLEFT", pane, "TOPLEFT", ROW_X, y)
+  cbA:SetPoint("TOPLEFT", pane, "TOPLEFT", (desc.cols and desc.cols[1]) or ROW_X, y)
   local lA = pane:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
   lA:SetPoint("LEFT", cbA, "RIGHT", 4, 0)
   lA:SetText(desc.label)
   StyleCheckLabel(lA)
   AttachTooltip(cbA, desc.label, desc.tooltip)
   cbA:SetScript("OnClick", function() pick(false) end)
+  -- Optionally grey out the FIRST source (e.g. "GSE Sequence Name" when GSE isn't installed):
+  -- disable the box and dim its label; the effective getter already falls back to the 2nd source.
+  local naGet = desc.unavailableA and ResolveGet(desc.unavailableA) or nil
+  if naGet and naGet() then
+    if cbA.SetEnabled then cbA:SetEnabled(false) else cbA:Disable() end
+    cbA:EnableMouse(false)
+    lA:SetTextColor(0.5, 0.5, 0.5)
+  end
 
   cbB = CreateFrame("CheckButton", nil, pane, "UICheckButtonTemplate")
   cbB:SetSize(26, 26)
-  cbB:SetPoint("LEFT", lA, "RIGHT", COL_GAP, 0)
+  if desc.cols and desc.cols[2] then
+    cbB:SetPoint("TOPLEFT", pane, "TOPLEFT", desc.cols[2], y)
+  else
+    cbB:SetPoint("LEFT", lA, "RIGHT", COL_GAP, 0)
+  end
   local lB = pane:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
   lB:SetPoint("LEFT", cbB, "RIGHT", 4, 0)
   lB:SetText(desc.label2 or "")
@@ -977,12 +1066,18 @@ local function MakeNameSourceRow(pane, y, desc)
   cbB:SetScript("OnClick", function() pick(true) end)
   refresh()
 
-  local frames, lastX, lastLbl = { cbA, cbB }, 190, lB
+  -- Real row width for centering: ROW_X + each (checkbox + gap + label) + COL_GAP between groups.
+  local rowRight = ROW_X + 26 + 4 + (lA:GetStringWidth() or 0)
+                 + COL_GAP + 26 + 4 + (lB:GetStringWidth() or 0)
   if desc.get3 then
     local g3, s3 = ResolveGet(desc.get3), ResolveSet(desc.set3)
     local cb3 = CreateFrame("CheckButton", nil, pane, "UICheckButtonTemplate")
     cb3:SetSize(26, 26)
-    cb3:SetPoint("LEFT", lB, "RIGHT", COL_GAP, 0)
+    if desc.cols and desc.cols[3] then
+      cb3:SetPoint("TOPLEFT", pane, "TOPLEFT", desc.cols[3], y)
+    else
+      cb3:SetPoint("LEFT", lB, "RIGHT", COL_GAP, 0)
+    end
     cb3:SetChecked(g3() and true or false)
     cb3:SetScript("OnClick", function(self) s3(self:GetChecked() and true or false) end)
     local l3 = pane:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
@@ -990,12 +1085,12 @@ local function MakeNameSourceRow(pane, y, desc)
     l3:SetText(desc.label3 or "")
     StyleCheckLabel(l3)
     AttachTooltip(cb3, desc.label3, desc.tooltip3)
-    frames[#frames + 1] = cb3; lastX = 340; lastLbl = l3
+    rowRight = rowRight + COL_GAP + 26 + 4 + (l3:GetStringWidth() or 0)
   end
-  if desc.center then
-    CenterPaneRow(pane, frames, 16, lastX + 26 + 4 + ((lastLbl and lastLbl:GetStringWidth()) or 0))
-  end
-  return 28
+  -- Only the lead checkbox is pane-anchored (the rest chain off it), so shifting just cbA slides
+  -- the whole row.
+  if desc.center and not desc.cols and cbA then CenterPaneRow(pane, { cbA }, ROW_X, rowRight) end
+  return RH_CHECK + ROW_PAD
 end
 
 local function MakeSocial(pane, y)
@@ -1011,6 +1106,7 @@ local function CreateSliderAt(pane, x, y, width, labelText, get, set, minV, maxV
   local s = CreateFrame("Slider", name, pane, "OptionsSliderTemplate")
   s:SetPoint("TOPLEFT", pane, "TOPLEFT", x, y - 16)
   s:SetWidth(width)
+  AddSliderTrack(s)
   s:SetMinMaxValues(minV, maxV)
   s:SetValueStep(step)
   s:SetObeyStepOnDrag(true)
@@ -1066,7 +1162,7 @@ local function MakeDualSlider(pane, y, desc)
     end
   end
   if desc.center then CenterPaneRow(pane, { s1, s2 }, 20, 300 + 150 + 8 + ((v2 and v2:GetStringWidth()) or 0)) end
-  return 50
+  return RH_LINE + ROW_PAD
 end
 
 -- Border row: [check] Border  [check] Class Color  [swatch] Border Color.
@@ -1117,7 +1213,7 @@ local function MakeBorderRow(pane, y, desc)
       })
     end
   end)
-  return 30
+  return RH_CHECK + ROW_PAD
 end
 
 local RENDERERS = {
@@ -1196,14 +1292,7 @@ local function GeneralRows()
       end,
       tooltip = "Lock or unlock every GSE: Tracker frame at once (Meters, Player Marker, Assisted Highlight, Action Tracker). Unlock to drag them into place." },
     { type = "check", label = "Performance Mode", get = "GetPerformanceModeEnabled", set = "SetPerformanceModeEnabledCanonical",
-      tooltip = "Reduce how often the tracker updates to lower CPU use. Slightly less responsive; helps on low-end systems or in big group content." },
-    { type = "check", label = "Show Minimap Button",
-      get = function() return not (addon.GetMinimapHidden and addon:GetMinimapHidden()) end,
-      set = function(v) if addon.SetMinimapHidden then addon:SetMinimapHidden(not v) end end,
-      tooltip = "Show or hide the GSE: Tracker minimap button." },
-    { type = "check", label = "Hide Login Message",
-      get = "GetHideLoginMessage", set = "SetHideLoginMessage",
-      tooltip = "Stop showing the GSE: Tracker welcome window each time you log in." },
+      tooltip = "Disable the Action Tracker's icon slide/fade animations — icons snap instantly into place. Lowers CPU on low-end systems; does NOT change how often the tracker updates." },
     { type = "header", text = "Enable" },
     { type = "enableshow", label = "Meters", showHeader = "Visibility", tooltip = "Enable the Meters cluster. On Classic only the Center Marker is available (DPS/HPS/GCD/Details need retail APIs).",
       get = function() return _G.MetersSavedVars and _G.MetersSavedVars.enabled ~= false end,
@@ -1247,6 +1336,23 @@ local function GeneralRows()
         if _G.RefreshDetails then _G.RefreshDetails() end
       end,
       tooltip = "Force Blizzard's native button art (border, icon crop and FONT style). Unchecked: automatically adopt your skin addon (ElvUI, EllesmereUI, ...) if one is installed." },
+    -- Master scale for the whole addon, pinned to the bottom (0-200%, 100% = normal). Multiplies on
+    -- top of each element's own size/scale (Action Tracker, Meters, Center Marker, Pressed Indicator).
+    { type = "spacer", h = 12 },
+    { type = "slider", label = "General Scale",
+      get = function() return math.floor(((addon.GetGlobalScale and addon:GetGlobalScale()) or 1) * 100 + 0.5) end,
+      set = function(v) if addon.SetGlobalScale then addon:SetGlobalScale((tonumber(v) or 100) / 100) end end,
+      min = 0, max = 200, step = 5, percent = true, width = 280, center = true,
+      tooltip = "Scale the whole GSE: Tracker UI at once — Action Tracker, Meters, Center Marker and Pressed Indicator. 100% is normal size; each element's own scale still applies on top. (The Assisted Highlight has its own Scale and auto-fits the target portrait, so it isn't affected.)" },
+    -- Show Minimap Button + Hide Login Message: pinned to the very bottom of the General tab, centred.
+    { type = "spacer", h = 12 },
+    { type = "dualcheck", center = true,
+      label = "Show Minimap Button",
+      get = function() return not (addon.GetMinimapHidden and addon:GetMinimapHidden()) end,
+      set = function(v) if addon.SetMinimapHidden then addon:SetMinimapHidden(not v) end end,
+      tooltip = "Show or hide the GSE: Tracker minimap button.",
+      label2 = "Hide Login Message", get2 = "GetHideLoginMessage", set2 = "SetHideLoginMessage",
+      tooltip2 = "Stop showing the GSE: Tracker welcome window each time you log in." },
     -- (Social icons are no longer an in-flow row -- they live in a persistent footer
     -- pinned to the bottom of the whole settings frame; see BuildPanel.)
   }
@@ -1255,7 +1361,6 @@ end
 local function ActionTrackerRows()
   return {
     { type = "header", text = "Action Tracker" },
-    { type = "header", text = "Display" },
     -- 2x2 grid: dropdown (left) + slider (right) per row.
     { type = "dropdownslider",
       label = "Layout", get = "GetActionTrackerLayout", set = "SetActionTrackerLayout", options = LAYOUT_OPTIONS,
@@ -1271,28 +1376,39 @@ local function ActionTrackerRows()
       smin = 0, smax = 5, sstep = 1 },
     -- Border options removed: the icon border now always adopts the player's
     -- action-bar frame art (Blizzard default or skinner), like the rest of the UI.
-    { type = "namesource",
-      label = PrimaryNameLabel(), get = "GetActionTrackerUseSpellName", set = "SetActionTrackerUseSpellName",
-      tooltip = "Use the GSE sequence's name as the tracker title. Click again to hide the name entirely.",
-      label2 = "Spell Name",
-      tooltip2 = "Use the most recently cast spell's name as the tracker title. Click again to hide the name entirely.",
-      tooltip3 = "Show the L/R side prefix on modifier keys (e.g. 'LShift+RCtrl' vs 'Shift+Ctrl').",
-      -- Both boxes can be unchecked -> the name element is disabled (no name text shown).
-      enabledGet = function()
-        if not addon.GetElementLayout then return true end
-        local cfg = addon:GetElementLayout("sequenceText")
-        if not cfg or cfg.enabled == nil then return true end
-        return cfg.enabled and true or false
-      end,
-      enabledSet = function(v)
-        if addon.SetElementEnabled then addon:SetElementEnabled("sequenceText", v and true or false) end
+    -- Name source row: GSE Sequence Name | Spell Name -- now INDEPENDENT (check both to stack them;
+    -- uncheck both for no name). Fixed columns so they stack with the Swap/Modkey row below.
+    { type = "dualcheck", cols = { 90, 320 },
+      label = "GSE Sequence Name", get = "GetActionTrackerShowSequenceName",
+      set = function(v)
+        if addon.SetActionTrackerShowSequenceName then addon:SetActionTrackerShowSequenceName(v) end
+        if addon.SetElementEnabled then addon:SetElementEnabled("sequenceText", true) end  -- gate open; empty text hides
+        if addon.RebuildNameDisplay then addon:RebuildNameDisplay() end
         if addon.ApplyVisibility then addon:ApplyVisibility() end
       end,
-      label3 = "Modkey Side", get3 = "GetActionTrackerModkeySide", set3 = "SetActionTrackerModkeySide" },
-    { type = "spacer", h = 12 },  -- top padding above the Scale slider
-    { type = "slider", label = "Scale", get = "GetScale", set = "SetScaleValue", min = 0.70, max = 1.80, step = 0.01, float = true, center = true,
-      tooltip = "Overall size of the Action Tracker." },
-    { type = "dropdownslider", label = "GSE Sequence / Macro / Spell", get = "GetSeqFontName", set = "SetSeqFontName", options = FontOptions,
+      tooltip = "Show the GSE sequence's name as the tracker title. Can be combined with Spell Name (the two stack).",
+      -- No GSE installed -> no sequence names: grey this box out (the tracker uses Spell Name).
+      disable = function() return not IsGSEAvailable() end,
+      label2 = "Spell Name", get2 = "GetActionTrackerShowSpellName",
+      set2 = function(v)
+        if addon.SetActionTrackerShowSpellName then addon:SetActionTrackerShowSpellName(v) end
+        if addon.SetElementEnabled then addon:SetElementEnabled("sequenceText", true) end
+        if addon.RebuildNameDisplay then addon:RebuildNameDisplay() end
+        if addon.ApplyVisibility then addon:ApplyVisibility() end
+      end,
+      tooltip2 = "Show the most recently cast spell's name. Can be combined with GSE Sequence Name (the two stack)." },
+    -- Below the Name row: swap Name/ModKeys positions + the Modkey Side L/R toggle. Same fixed
+    -- columns as the Name row above so the checkboxes stack.
+    { type = "dualcheck", cols = { 90, 320 },
+      label = "Swap Name > ModKeys", get = "GetActionTrackerSwapNameModkeys",
+      set = function(v)
+        if addon.SetActionTrackerSwapNameModkeys then addon:SetActionTrackerSwapNameModkeys(v) end
+        if addon.ApplyAllElementPositions then addon:ApplyAllElementPositions() end
+      end,
+      tooltip = "Swap the vertical positions of the Name (sequence/spell) and the modifier-key letters above the icons. Off = Name on top (default); On = ModKeys on top.",
+      label2 = "Modkey Side [L/R]", get2 = "GetActionTrackerModkeySide", set2 = "SetActionTrackerModkeySide",
+      tooltip2 = "Show the L/R side prefix on modifier keys (e.g. 'LShift+RCtrl' vs 'Shift+Ctrl')." },
+    { type = "dropdownslider", label = "GSE Sequence / Spell", get = "GetSeqFontName", set = "SetSeqFontName", options = FontOptions,
       tooltip = "Font for the sequence/spell name shown above the icons.",
       sliderLabel = "Size", sliderGet = "GetSeqFontSize", sliderSet = "SetSeqFontSize", smin = 6, smax = 24, sstep = 1, tooltip2 = "Name text size." },
     { type = "dropdownslider", label = "Modifiers", get = "GetModFontName", set = "SetModFontName", options = FontOptions,
@@ -1305,6 +1421,12 @@ local function ActionTrackerRows()
         if addon.SetActionTrackerFontOutline then addon:SetActionTrackerFontOutline(v) end
         if addon.ApplyFontFaces then addon:ApplyFontFaces() end
       end },
+    { type = "spacer", h = 12 },  -- top padding above the bottom Scale slider
+    { type = "slider", label = "Action Tracker Scale",
+      get = function() return math.floor(((addon.GetScale and addon:GetScale()) or 1) * 100 + 0.5) end,
+      set = function(v) if addon.SetScaleValue then addon:SetScaleValue((tonumber(v) or 100) / 100) end end,
+      min = 0, max = 200, step = 5, percent = true, width = 280, center = true,
+      tooltip = "Overall size of the Action Tracker. 100% is normal size." },
   }
 end
 
@@ -1366,22 +1488,38 @@ local function CenterMarkerRows()
   }
 end
 
+-- Bottom of the Meters tab (below the embedded readout panel): the Font controls, then the Meters
+-- Scale slider pinned LAST. The Center Marker section sits at the TOP of the tab (see the TABS
+-- entry). Kept compact -- the Meters tab is a fixed-height embedded page (no scroll).
+local function MetersBottomRows()
+  return {
+    { type = "dropdownslider",
+      label = "Font", get = MetersFontFaceGet, set = MetersFontFaceSet, options = FontOptions,
+      tooltip = "Font for the Meters readout text (DPS/HPS/GCD/%).",
+      sliderLabel = "Font Size", sliderGet = MetersFontSizeGet, sliderSet = MetersFontSizeSet, smin = 6, smax = 24, sstep = 1,
+      tooltip2 = "Meters text size.",
+      unavailable = function() return not (ns.Caps and ns.Caps.meters) end },
+    { type = "dropdown", label = "Outline", get = MetersFontOutlineGet, set = MetersFontOutlineSet, options = OUTLINE_OPTIONS,
+      tooltip = "Outline style for the Meters readout text.",
+      unavailable = function() return not (ns.Caps and ns.Caps.meters) end },
+    { type = "spacer", h = 12 },
+    { type = "slider", label = "Meters Scale",
+      get = function() return math.floor(((_G.Meter_GetScale and _G.Meter_GetScale()) or 1) * 100 + 0.5) end,
+      set = function(v) if _G.Meter_SetScale then _G.Meter_SetScale((tonumber(v) or 100) / 100) end end,
+      min = 0, max = 200, step = 5, percent = true, width = 280, center = true,
+      tooltip = "Scale the Meters readout cluster (DPS/HPS/GCD/% text). 100% is normal size; the General Scale multiplies on top." },
+  }
+end
+
 local function AssistedHighlightRows()
   return {
     { type = "header", text = "Assisted Highlight" },
-    { type = "dropdown", label = "Anchor", get = "GetAssistedHighlightAnchorTarget", set = "SetAssistedHighlightAnchorTarget", options = ANCHOR_OPTIONS,
-      tooltip = "Where the highlight sits: fixed on screen, following the mouse cursor, or over the target's portrait (only shown with an attackable target)." },
-    { type = "spacer", h = 12 },  -- top padding above the Scale/Alpha row
-    { type = "dualslider",
-      label = "Scale", get = "GetAssistedHighlightSize", set = "SetAssistedHighlightSize", min = 28, max = 96, step = 1,
-      tooltip = "Size of the Assisted Highlight icon. (Auto-sized to fit when anchored to the Target Portrait.)",
-      tooltip2 = "Transparency of the highlight icon.",
-      -- Target Portrait mode auto-sizes the highlight to the portrait, so Scale is
-      -- driven by the addon -- grey it out to show it has no effect there.
-      disableGet = function()
-        return addon.GetAssistedHighlightAnchorTarget and addon:GetAssistedHighlightAnchorTarget() == "Target Nameplate"
-      end,
-      label2 = "Alpha", get2 = "GetAssistedHighlightAlpha", set2 = "SetAssistedHighlightAlpha", min2 = 0.05, max2 = 1.00, step2 = 0.05, float2 = true },
+    -- Anchor dropdown + Alpha slider share one row.
+    { type = "dropdownslider", label = "Anchor", get = "GetAssistedHighlightAnchorTarget", set = "SetAssistedHighlightAnchorTarget", options = ANCHOR_OPTIONS,
+      tooltip = "Where the highlight sits: fixed on screen, following the mouse cursor, or over the target's portrait (only shown with an attackable target).",
+      sliderLabel = "Alpha", sliderGet = "GetAssistedHighlightAlpha", sliderSet = "SetAssistedHighlightAlpha",
+      smin = 0.05, smax = 1.00, sstep = 0.05, sfloat = true,
+      tooltip2 = "Transparency of the highlight icon." },
     { type = "header", text = "Display" },
     { type = "dualcheck",
       label = "Range Check", get = "GetAssistedHighlightRangeCheckerEnabled", set = "SetAssistedHighlightRangeCheckerEnabled",
@@ -1404,13 +1542,24 @@ local function AssistedHighlightRows()
       sliderLabel = "Size", sliderGet = "GetAssistedHighlightFontSize", sliderSet = "SetAssistedHighlightFontSize", smin = 6, smax = 24, sstep = 1, tooltip2 = "Keybind text size." },
     { type = "dropdown", label = "Location", get = "GetAssistedHighlightKeybindAnchor", set = "SetAssistedHighlightKeybindAnchor", options = KEYBIND_ANCHOR_OPTIONS,
       tooltip = "Which corner of the highlight the keybind text sits in." },
+    { type = "spacer", h = 12 },  -- top padding above the bottom Scale slider
+    -- 0-200% of the 52px default (100% = normal). Soft-clamps to the size limits underneath.
+    { type = "slider", label = "Assisted Highlight Scale",
+      get = function() return math.floor((((addon.GetAssistedHighlightSize and addon:GetAssistedHighlightSize()) or 52) / 52) * 100 + 0.5) end,
+      set = function(v) if addon.SetAssistedHighlightSize then addon:SetAssistedHighlightSize((tonumber(v) or 100) / 100 * 52) end end,
+      min = 0, max = 200, step = 5, percent = true, width = 280, center = true,
+      tooltip = "Size of the Assisted Highlight icon (100% = normal). Auto-sized to fit when anchored to the Target Portrait.",
+      -- Target Portrait mode auto-sizes the highlight to the portrait, so Scale has no effect
+      -- there -- grey it out.
+      disableGet = function()
+        return addon.GetAssistedHighlightAnchorTarget and addon:GetAssistedHighlightAnchorTarget() == "Target Nameplate"
+      end },
   }
 end
 
 local function QoLRows()
   return {
     { type = "header", text = "Quality of Life" },
-    { type = "header", text = "Game" },
     { type = "check", label = "Mute Fizzle Sounds", get = "GetMuteFizzles", set = "SetMuteFizzles",
       tooltip = "Mute the 'fizzle' sound a spell makes when it fails to cast (out of range, not enough resource, etc.)." },
     { type = "check", label = "Hide Error Messages", get = "GetHideErrors", set = "SetHideErrors",
@@ -1424,7 +1573,7 @@ local function QoLRows()
       tooltip = "Track how often your casts match the Assisted Highlight suggestion (drives the AH Match % readout)." },
     { type = "matchrow",
       unavailable = function() return not (ns.Caps and ns.Caps.assistedHighlight) end,
-      label = "Match %", get = "GetAHMatchPercentEnabled", set = "SetAHMatchPercentEnabled",
+      label = "AH/SBA Match %", get = "GetAHMatchPercentEnabled", set = "SetAHMatchPercentEnabled",
       tooltip = "Show the AH Match percentage readout under the Action Tracker.",
       tooltip2 = "Play a sound each time your cast matches the suggestion. 'None' disables the audible match.",
       label2 = "Match Audible",
@@ -1479,27 +1628,18 @@ local TABS = {
   { key = "General", text = "General", rows = GeneralRows },
   { key = "Meters", text = "Meters", embed = "MetersOptionsPanel", centerContent = true,
     -- Size the embedded Meters panel to its visible content (Show GCD/DPS row + Details
-    -- rows + Refresh/Opacity) so the Player Marker rows sit a NORMAL row-gap below it -- not
-    -- a big empty gap. Trimmed to ~the content's bottom so the spacing matches other rows.
-    embedHeight = 144,
+    -- rows + Refresh/Opacity sliders, ~135px) so the bottom Font/Scale rows sit a NORMAL row-gap
+    -- below it -- not a big empty gap. The hidden Font Style/Size/Reset controls below the sliders
+    -- don't count toward the height. Trimmed to ~the content's bottom so the spacing is even.
+    embedHeight = 135,
+    -- Top of the tab: title + the Center Marker section (above the embedded readout panel).
     rows = function()
-      return {
-        { type = "header", text = "Meters" },
-        -- Font controls pulled up to the top as addon-style controls; the Meters panel's
-        -- own font dropdowns are hidden in MetersOptions. Font (dropdown) + Font Size (slider).
-        { type = "dropdownslider",
-          label = "Font", get = MetersFontFaceGet, set = MetersFontFaceSet, options = FontOptions,
-          tooltip = "Font for the Meters readout text (DPS/HPS/GCD/%).",
-          sliderLabel = "Font Size", sliderGet = MetersFontSizeGet, sliderSet = MetersFontSizeSet, smin = 6, smax = 24, sstep = 1,
-          tooltip2 = "Meters text size.",
-          unavailable = function() return not (ns.Caps and ns.Caps.meters) end },
-        { type = "dropdown", label = "Outline", get = MetersFontOutlineGet, set = MetersFontOutlineSet, options = OUTLINE_OPTIONS,
-          tooltip = "Outline style for the Meters readout text.",
-          unavailable = function() return not (ns.Caps and ns.Caps.meters) end },
-      }
+      local r = { { type = "header", text = "Meters" } }
+      for _, row in ipairs(CenterMarkerRows()) do r[#r + 1] = row end
+      return r
     end,
-    -- Player Marker controls pinned to the BOTTOM of the Meters tab (moved from its own tab).
-    bottomRows = CenterMarkerRows },
+    -- Font controls + the Meters Scale slider pinned to the BOTTOM, below the embedded panel.
+    bottomRows = MetersBottomRows },
   { key = "AssistedHighlight", text = "Assisted Highlight", rows = AssistedHighlightRows, enableGet = "IsAssistedHighlightMirrorEnabled", centerContent = true, cap = "assistedHighlight" },
   { key = "ActionTracker", text = "Action Tracker", rows = ActionTrackerRows, enableGet = "IsEnabled", centerContent = true },
   { key = "QoL", text = "Quality of Life", rows = QoLRows, centerContent = true },
@@ -1639,12 +1779,17 @@ local function BuildPanel()
       -- With embedHeight the panel is sized to its content and the bottom rows flow right
       -- below it (no gap); otherwise the panel fills the page and the rows pin to the bottom.
       local bottomOffset = (bPane and not t.embedHeight) and (bPaneH + 12) or 0
-      local mp = EmbedGlobalPanel(page, t.embed, topOffset, bottomOffset, t.embedHeight)
+      -- Tuck the embed up under the row content: Populate leaves ~12px of bottom margin in the row
+      -- pane, which would otherwise stack with the embed's own top inset into an oversized gap.
+      -- Subtracting it keeps the gap ABOVE the embed even with the gap BELOW it.
+      local embedTopOffset = math.max(0, topOffset - 12)
+      local mp = EmbedGlobalPanel(page, t.embed, embedTopOffset, bottomOffset, t.embedHeight)
       if bPane then
         bPane:ClearAllPoints()
         if t.embedHeight and mp then
-          bPane:SetPoint("TOPLEFT", mp, "BOTTOMLEFT", 0, -12)
-          bPane:SetPoint("TOPRIGHT", mp, "BOTTOMRIGHT", 0, -12)
+          -- -8 keeps the gap below the embed even with the ~row gaps above/below it.
+          bPane:SetPoint("TOPLEFT", mp, "BOTTOMLEFT", 0, -8)
+          bPane:SetPoint("TOPRIGHT", mp, "BOTTOMRIGHT", 0, -8)
         else
           bPane:SetPoint("BOTTOMLEFT", page, "BOTTOMLEFT", 0, 8)
           bPane:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", -8, 8)

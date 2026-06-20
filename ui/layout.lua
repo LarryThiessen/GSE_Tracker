@@ -332,6 +332,24 @@ function UI:ApplyElementPosition(elementName)
   local relativePoint = defaults.relativePoint or point
   local x = (cfg and cfg.x) or defaults.x or 0
   local y = (cfg and cfg.y) or defaults.y or 0
+  -- Swap Name <-> ModKeys: when enabled, each of the pair adopts the OTHER's anchor + offset, so the
+  -- two text rows trade vertical places. (Their "enabled"/visibility stays their own -- only the
+  -- position is swapped.)
+  if (elementName == "sequenceText" or elementName == "modifiersText")
+    and addon.GetActionTrackerSwapNameModkeys and addon:GetActionTrackerSwapNameModkeys() then
+    local other = (elementName == "sequenceText") and "modifiersText" or "sequenceText"
+    local ocfg, odef = self:GetElementLayout(other)
+    odef = odef or ELEMENT_DEFAULTS[other]
+    if odef then
+      point = odef.point or point
+      relativePoint = odef.relativePoint or relativePoint
+      x = (ocfg and ocfg.x) or odef.x or 0
+      y = (ocfg and ocfg.y) or odef.y or 0
+    end
+    -- Position = baseline anchor (set per element relative to the icon row) + offset, so also adopt
+    -- the OTHER element's baseline anchor; otherwise the two wouldn't actually trade rows.
+    anchor = self:GetElementAnchorTarget(other) or anchor
+  end
   local visible = (cfg and cfg.enabled)
   if visible == nil then visible = defaults.enabled and true or false end
 
@@ -341,7 +359,17 @@ function UI:ApplyElementPosition(elementName)
     return
   end
   local function PS(v) return pixelSnap(v, ui) end
-  SetElementPointIfNeeded(element, point, anchor, relativePoint, PS(x), PS(y))
+  local ox, oy = x, y
+  if elementName == "pressedIndicator" then
+    -- The pressed indicator carries the Overall (master) addon scale on itself. Its anchor offset
+    -- is stored in UIParent units but SetPoint interprets the offset in the indicator's OWN scaled
+    -- space, so divide by that scale: the saved screen position stays fixed and the indicator grows
+    -- about its centre instead of drifting as the Overall scale changes.
+    local sc = (element.GetScale and element:GetScale()) or 1
+    if not sc or sc == 0 then sc = 1 end
+    ox, oy = x / sc, y / sc
+  end
+  SetElementPointIfNeeded(element, point, anchor, relativePoint, PS(ox), PS(oy))
   -- The pressed indicator lives on UIParent (independent of the tracker frame) and
   -- its show/hide is owned entirely by RefreshPressedIndicator (input-gated). Don't
   -- let the layout pass force it visible just because the element is "enabled".

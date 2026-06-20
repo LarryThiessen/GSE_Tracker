@@ -237,6 +237,9 @@ end
 -- Name source for the tracker's title label: false (default) = the GSE sequence name
 -- as before; true = the most recently cast spell's name (shown the same way).
 function Utils:GetActionTrackerUseSpellName()
+  -- No GSE installed -> there are no sequence names, so always fall back to Spell Name
+  -- (this also drives the greyed-out "GSE Sequence Name" option to read as unchecked).
+  if _G.GSE == nil then return true end
   local _, _, display = GetRuntimeDB()
   return display.useSpellName == true
 end
@@ -244,6 +247,36 @@ end
 function Utils:SetActionTrackerUseSpellName(enabled)
   local db, _, display = GetRuntimeDB()
   display.useSpellName = not not enabled
+  PersistRuntimeChange(db)
+end
+
+-- The name label can now show the GSE sequence name and/or the spell name INDEPENDENTLY (both
+-- on = stacked). These two flags replace the old single useSpellName toggle; they migrate from it
+-- on first read (GSE name = NOT useSpellName, Spell name = useSpellName). Both off = name hidden.
+function Utils:GetActionTrackerShowSequenceName()
+  if _G.GSE == nil then return false end  -- no GSE -> no sequence names
+  local _, _, display = GetRuntimeDB()
+  if display.showSequenceName ~= nil then return display.showSequenceName and true or false end
+  return not (display.useSpellName == true)
+end
+
+function Utils:SetActionTrackerShowSequenceName(enabled)
+  local db, _, display = GetRuntimeDB()
+  display.showSequenceName = not not enabled
+  PersistRuntimeChange(db)
+end
+
+function Utils:GetActionTrackerShowSpellName()
+  local _, _, display = GetRuntimeDB()
+  if display.showSpellName ~= nil then return display.showSpellName and true or false end
+  -- No GSE installed -> sequence names don't exist, so default to showing the spell name.
+  if _G.GSE == nil then return true end
+  return display.useSpellName == true
+end
+
+function Utils:SetActionTrackerShowSpellName(enabled)
+  local db, _, display = GetRuntimeDB()
+  display.showSpellName = not not enabled
   PersistRuntimeChange(db)
 end
 
@@ -269,14 +302,6 @@ function Utils:GetActionTrackerKeybindAnchor()
   local v = tostring(display.keybindAnchor or "TOPRIGHT")
   if not VALID_ACTIONBAR_KEYBIND_ANCHORS[v] then v = "TOPRIGHT" end
   return v
-end
-
-function Utils:SetActionTrackerKeybindAnchor(value)
-  local db, _, display = GetRuntimeDB()
-  local v = tostring(value or "TOPRIGHT")
-  if not VALID_ACTIONBAR_KEYBIND_ANCHORS[v] then v = "TOPRIGHT" end
-  display.keybindAnchor = v
-  PersistRuntimeChange(db)
 end
 
 function Utils:GetActionTrackerBorderColor()
@@ -310,11 +335,6 @@ end
 function Utils:GetActionTrackerPoint()
   local point = EnsurePointTable()
   return point[1], point[2], point[3], point[4], point[5]
-end
-
-function Utils:GetActionTrackerAnchor()
-  local point, relName, relPoint, x, y = self:GetActionTrackerPoint()
-  return point, (_G[relName] or UIParent), relPoint, x, y
 end
 
 function Utils:SetActionTrackerPoint(point, relName, relPoint, x, y)
@@ -515,19 +535,6 @@ function Utils:SetCombatMarkerEnabled(enabled)
   local db = GetRuntimeDB()
   local combatMarker = EnsureTable(db, "combatMarker")
   combatMarker.enabled = not not enabled
-  PersistRuntimeChange(db)
-end
-
-function Utils:GetCombatMarkerPreviewEnabled()
-  local db = GetRuntimeDB()
-  local combatMarker = EnsureTable(db, "combatMarker")
-  return combatMarker.preview and true or false
-end
-
-function Utils:SetCombatMarkerPreviewEnabled(enabled)
-  local db = GetRuntimeDB()
-  local combatMarker = EnsureTable(db, "combatMarker")
-  combatMarker.preview = not not enabled
   PersistRuntimeChange(db)
 end
 
@@ -816,118 +823,6 @@ function Utils:SetCombatMarkerBorderSize(value)
   PersistRuntimeChange(db)
 end
 
-function Utils:IsCenterMarkerEnabled()
-  return self:IsCombatMarkerEnabled()
-end
-
-function Utils:SetCenterMarkerEnabled(enabled)
-  self:SetCombatMarkerEnabled(enabled)
-end
-
-function Utils:GetCenterMarkerPreviewEnabled()
-  return self:GetCombatMarkerPreviewEnabled()
-end
-
-function Utils:SetCenterMarkerPreviewEnabled(enabled)
-  self:SetCombatMarkerPreviewEnabled(enabled)
-end
-
-function Utils:GetCenterMarkerSymbol()
-  return self:GetCombatMarkerSymbol()
-end
-
-function Utils:SetCenterMarkerSymbol(value)
-  self:SetCombatMarkerSymbol(value)
-end
-
-function Utils:GetCenterMarkerSize()
-  return self:GetCombatMarkerSize()
-end
-
-function Utils:SetCenterMarkerSize(value)
-  self:SetCombatMarkerSize(value)
-end
-
-function Utils:GetCenterMarkerAlpha()
-  return self:GetCombatMarkerAlpha()
-end
-
-function Utils:SetCenterMarkerAlpha(value)
-  self:SetCombatMarkerAlpha(value)
-end
-
-function Utils:GetCenterMarkerUseClassColor()
-  return self:GetCombatMarkerUseClassColor()
-end
-
-function Utils:SetCenterMarkerUseClassColor(enabled)
-  self:SetCombatMarkerUseClassColor(enabled)
-end
-
-function Utils:GetCenterMarkerColor()
-  return self:GetCombatMarkerColor()
-end
-
-function Utils:SetCenterMarkerColor(r, g, b)
-  self:SetCombatMarkerColor(r, g, b)
-end
-
-function Utils:GetCenterMarkerPoint()
-  return self:GetCombatMarkerPoint()
-end
-
-function Utils:SetCenterMarkerPoint(point, relName, relPoint, x, y)
-  self:SetCombatMarkerPoint(point, relName, relPoint, x, y)
-end
-
-function Utils:GetCenterMarkerAnchorPoint()
-  return self:GetCombatMarkerAnchorPoint()
-end
-
-function Utils:SetCenterMarkerAnchorPoint(anchorPoint)
-  self:SetCombatMarkerAnchorPoint(anchorPoint)
-end
-
-function Utils:GetCenterMarkerOffset()
-  return self:GetCombatMarkerOffset()
-end
-
-function Utils:SetCenterMarkerOffset(x, y)
-  self:SetCombatMarkerOffset(x, y)
-end
-
-function Utils:GetCenterMarkerLocked()
-  return self:GetCombatMarkerLocked()
-end
-
-function Utils:SetCenterMarkerLocked(enabled)
-  self:SetCombatMarkerLocked(enabled)
-end
-
-function Utils:GetCenterMarkerShowWhen()
-  return self:GetCombatMarkerShowWhen()
-end
-
-function Utils:SetCenterMarkerShowWhen(value)
-  self:SetCombatMarkerShowWhen(value)
-end
-
-function Utils:GetCenterMarkerThickness()
-  return self:GetCombatMarkerThickness()
-end
-
-function Utils:SetCenterMarkerThickness(value)
-  self:SetCombatMarkerThickness(value)
-end
-
-function Utils:GetCenterMarkerBorderSize()
-  return self:GetCombatMarkerBorderSize()
-end
-
-function Utils:SetCenterMarkerBorderSize(value)
-  self:SetCombatMarkerBorderSize(value)
-end
-
 function Utils:GetShowWhen()
   local _, general = GetRuntimeDB()
   return tostring(general.showWhen or GetGeneralDefaults().showWhen or (C.MODE_ALWAYS or "Always"))
@@ -960,14 +855,36 @@ end
 
 
 function Utils:GetScale()
+  -- 0..2.0 (= 0..200% in the UI; 1.0/100% is the normal default).
   local _, _, display = GetRuntimeDB()
-  return clampValue(tonumber(display.scale) or (tonumber(GetDisplayDefaults().scale) or 1), 0.70, 1.80)
+  return clampValue(tonumber(display.scale) or (tonumber(GetDisplayDefaults().scale) or 1), 0, 2.00)
 end
 
 function Utils:SetScaleValue(value)
   local db, _, display = GetRuntimeDB()
-  display.scale = clampValue(tonumber(value) or (tonumber(GetDisplayDefaults().scale) or 1), 0.70, 1.80)
+  display.scale = clampValue(tonumber(value) or (tonumber(GetDisplayDefaults().scale) or 1), 0, 2.00)
   PersistRuntimeChange(db)
+end
+
+-- Overall (master) addon scale: a single multiplier applied on TOP of every element's own
+-- size/scale -- Action Tracker, Center Marker, Assisted Highlight, Pressed Indicator and the
+-- Meters cluster. Stored separately from the Action Tracker's own Scale (display.scale).
+function Utils:GetGlobalScale()
+  -- 0..2.0 (= 0..200% in the UI; 1.0/100% is the normal default).
+  local _, _, display = GetRuntimeDB()
+  return clampValue(tonumber(display.globalScale) or 1, 0, 2.00)
+end
+
+function Utils:SetGlobalScale(value)
+  local db, _, display = GetRuntimeDB()
+  display.globalScale = clampValue(tonumber(value) or 1, 0, 2.00)
+  PersistRuntimeChange(db)
+end
+
+-- Global read wrapper so other modules (e.g. the Meters engine, a separate file) can fold the
+-- master scale into their own scaling without reaching into the addon namespace.
+_G.GSETracker_GetGlobalScale = function()
+  return (Utils and Utils.GetGlobalScale and Utils:GetGlobalScale()) or 1
 end
 
 
@@ -1276,13 +1193,14 @@ end
 function Utils:GetAssistedHighlightSize()
   local db = GetRuntimeDB()
   local assisted = EnsureTable(db, "assistedHighlight")
-  return clampValue(tonumber(assisted.size) or (tonumber(GetAssistedHighlightDefaults().size) or 52), 28, 96)
+  -- 0..104 px (= 0..200% of the 52px default in the UI; 52/100% is the normal default).
+  return clampValue(tonumber(assisted.size) or (tonumber(GetAssistedHighlightDefaults().size) or 52), 0, 104)
 end
 
 function Utils:SetAssistedHighlightSize(value)
   local db = GetRuntimeDB()
   local assisted = EnsureTable(db, "assistedHighlight")
-  assisted.size = clampValue(tonumber(value) or (tonumber(GetAssistedHighlightDefaults().size) or 52), 28, 96)
+  assisted.size = clampValue(tonumber(value) or (tonumber(GetAssistedHighlightDefaults().size) or 52), 0, 104)
   PersistRuntimeChange(db)
 end
 
@@ -1479,6 +1397,19 @@ end
 function Utils:SetProcGlowEnabled(enabled)
   local db = GetRuntimeDB()
   db.procGlowEnabled = not not enabled
+  PersistRuntimeChange(db)
+end
+
+-- Action Tracker: swap the vertical positions of the Name (sequence/spell) and the ModKeys
+-- (modifier letters) text rows. Default OFF (Name above ModKeys). ON = ModKeys above Name.
+function Utils:GetActionTrackerSwapNameModkeys()
+  local db = GetRuntimeDB()
+  return db.swapNameModkeys and true or false
+end
+
+function Utils:SetActionTrackerSwapNameModkeys(enabled)
+  local db = GetRuntimeDB()
+  db.swapNameModkeys = not not enabled
   PersistRuntimeChange(db)
 end
 
