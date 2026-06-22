@@ -881,7 +881,11 @@ end
 -- of combat, show the chosen number of icons (sample textures) so the row can be
 -- positioned. Requires the tracker to be enabled.
 function UI:IsEditModePreviewActive()
-  if self.IsLocked and self:IsLocked() then return false end
+  -- Blizzard Edit Mode (addon._editingOptions) counts as "editing": show the example icons even when
+  -- the frames are Locked, so the Action Tracker is visible/positionable. Outside Edit Mode, the
+  -- unlocked preview still requires the frames to be unlocked.
+  local editing = addon and addon._editingOptions
+  if not editing and self.IsLocked and self:IsLocked() then return false end
   if self.IsEnabled and not self:IsEnabled() then return false end
 
   local ui = self.ui

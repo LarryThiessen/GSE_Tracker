@@ -47,6 +47,11 @@ frame.ahLightUsageText:SetJustifyH("CENTER")
 frame.ahLightUsageText:SetJustifyV("MIDDLE")
 frame.ahLightUsageText:SetText("")
 
+-- The SBAssist % readout moved out to the standalone SLG-SBA Monitor addon. Bulletproof kill switch:
+-- whatever path tries to Show this frame (live update OR the unlocked preview "24% (11/47)"), snap it
+-- back hidden. Cheaper and more reliable than chasing every show site + the showAHLightUsage flag.
+frame:HookScript("OnShow", function(self) self:Hide() end)
+
 frame.isPreviewMode = false
 frame.elapsedSinceUpdate = 0
 frame.updateInterval = GetRefreshRate()
@@ -233,6 +238,9 @@ function AHLightUsage_Refresh()
 end
 
 function AHLightUsage_ShouldShow()
+    -- The SBAssist % readout was moved out of GSE_Tracker into the standalone SLG-SBA Monitor addon.
+    -- This frame stays created (so the rest of the meter plumbing is unaffected) but never displays.
+    do return false end
     if not IsEnabled() then
         return false
     end

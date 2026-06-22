@@ -517,19 +517,9 @@ function UI:UpdateAHMatchReadout()
   fs:SetText(string.format("AH Match: %d%% (%d/%d)", math.floor(pct + 0.5), matches, casts))
   fs:Show()
 
-  -- SBA sub-line: only when the Single-Button Assistant was used this combat.
-  local sbaFs = EnsureSbaReadout(self)
-  if sbaFs then
-    local sbaUsed = (addon._ahSbaCastCount or 0) > 0
-    if sbaUsed then
-      local sbaMatches = addon._ahSbaMatchCount or 0
-      local pctOfMatches = (matches > 0) and (sbaMatches / matches * 100) or 0
-      sbaFs:SetText(string.format("SBA Matches: %d (%d%%)", sbaMatches, math.floor(pctOfMatches + 0.5)))
-      sbaFs:Show()
-    else
-      sbaFs:Hide()
-    end
-  end
+  -- SBA sub-line removed: only the AH Match %% is shown here. The SBA % readout lives in the standalone
+  -- SLG-SBA Monitor addon now. Keep the sub-line frame hidden if it was ever created.
+  if ui._ahSbaReadout then ui._ahSbaReadout:Hide() end
 end
 
 -- Post-combat hold for the AH Match / SBA readout: keep it on screen briefly after combat ends

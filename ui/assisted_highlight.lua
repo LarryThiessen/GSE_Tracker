@@ -109,6 +109,24 @@ local function ResolveTargetPortraitFrame()
       or nil
 end
 
+-- Public: does the player's UI actually HAVE a target-frame portrait region at all? Unlike
+-- ResolveTargetPortraitFrame this does NOT require a current target -- it only checks that a portrait
+-- region EXISTS (some UIs / unit-frame addons remove the Blizzard target frame, leaving nothing to
+-- anchor to). Used to grey out the "Target Portrait" anchor option when it can't work. Cross-version
+-- safe: it only inspects whichever of the known regions happens to exist on this flavor.
+function addon:HasTargetPortrait()
+  local function exists(region)
+    return (region and region ~= UIParent and region.GetObjectType
+      and not (region.IsForbidden and region:IsForbidden())) and true or false
+  end
+  local tf = _G.TargetFrame
+  local main = tf and tf.TargetFrameContent and tf.TargetFrameContent.TargetFrameContentMain
+  if exists(_G.TargetFramePortrait) then return true end
+  if tf and exists(tf.portrait) then return true end
+  if main and exists(main.Portrait) then return true end
+  return false
+end
+
 local function ResolveTargetPortraitArtFrame(portrait)
   local function usable(frame)
     if IsRenderableAnchorFrame(frame) and ((not frame.IsShown) or frame:IsShown()) then

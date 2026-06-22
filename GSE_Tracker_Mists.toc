@@ -58,6 +58,7 @@ ui\icons.lua
 ui\modkey_stack.lua
 ui\assisted_highlight.lua
 ui\player_tracker.lua
+ui\editmode.lua
 ui\minimap.lua
 
 # Options: configuration only
@@ -75,6 +76,8 @@ tracker\gse_bridge.lua
 # so the meters cluster is gated off (ns.Caps.meters) and its option is greyed out.
 meters\MetersStore.lua
 meters\Details.lua
+meters\MeterSkin.lua
+meters\MeterSkinEditMode.lua
 meters\AHLight.lua
 meters\Marker.lua
 meters\GCD.lua

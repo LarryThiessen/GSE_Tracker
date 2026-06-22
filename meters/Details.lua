@@ -14,7 +14,7 @@
 --
 -- Public API kept for callers (MetersOptions, settings_panel, shared):
 --   Details_Show / Details_Hide / Details_ApplyCombatVisibility / RefreshDetails
--- Saved state used: MetersSavedVars.showDetails, .hideDetailsInCombat, .Details.wasShown
+-- Saved state used: MetersSavedVars.Details.wasShown (the Show/Hide-in-combat/Auto-reset toggles were removed)
 
 local addonName, ns = ...
 
@@ -23,8 +23,8 @@ MetersSavedVars = MetersSavedVars or {}
 local _hiddenForCombat = false  -- true while WE hid the window for "Hide in Combat"
 
 local function InCombat()    return UnitAffectingCombat and UnitAffectingCombat("player") end
-local function WantShown()   return MetersSavedVars.showDetails ~= false end
-local function HideInCombat() return MetersSavedVars.hideDetailsInCombat == true end
+local function WantShown()   return true end   -- "Show Details" toggle removed: always available
+local function HideInCombat() return false end -- "Hide Details in Combat" toggle removed
 local function MarkWasShown(v)
     MetersSavedVars.Details = MetersSavedVars.Details or {}
     MetersSavedVars.Details.wasShown = v and true or false
@@ -82,19 +82,83 @@ local function BlizzIsShown()
     return f ~= nil and (f:GetAlpha() or 0) > 0
 end
 
--- ── Backend selection: Details! first, then Blizzard ────────────────────────────
+-- ── Meter source mode ────────────────────────────────────────────────────────────
+-- The user picks WHICH meter shows the breakdown (Skinner panel, Edit Mode): the Details! addon,
+-- our own GSE: Tracker Skinner window (Retail), or Blizzard's stock meter. Stored in
+-- MetersSavedVars.meterMode = "details" | "skinner" | "blizzard". When unset we migrate to the old
+-- auto-priority (Details! > Skinner > Blizzard), and we always clamp to what's actually available
+-- (e.g. "details" with the addon missing, or "skinner" off Retail, falls back).
+local function SkinnerAvailable()      return _G.GSETrackerDetails_Show ~= nil end
+local function DetailsAddonAvailable() return _G.Details ~= nil end
+function GSETracker_GetMeterMode()
+    local m = MetersSavedVars and MetersSavedVars.meterMode
+    if m ~= "details" and m ~= "skinner" and m ~= "blizzard" then
+        if DetailsAddonAvailable() then m = "details"
+        elseif SkinnerAvailable()  then m = "skinner"
+        else m = "blizzard" end
+    end
+    if m == "details" and not DetailsAddonAvailable() then m = SkinnerAvailable() and "skinner" or "blizzard" end
+    if m == "skinner" and not SkinnerAvailable() then m = "blizzard" end
+    return m
+end
+
+-- ── Backend selection: routed by the chosen meterMode (falls back to the old priority if the chosen
+-- backend isn't available). GSETrackerDetails (Retail-only) self-manages its own combat visibility,
+-- so for that backend we just route Show/Hide to it.
+local function GSETrackerDetailsActive()
+    return SkinnerAvailable() and GSETracker_GetMeterMode() == "skinner"
+end
 local function WindowSetShown(show)
+    local mode = GSETracker_GetMeterMode()
+    if mode == "skinner" and SkinnerAvailable() then
+        if show then _G.GSETrackerDetails_Show() else _G.GSETrackerDetails_Hide(false) end
+        return true
+    elseif mode == "details" and DetailsInstance() then
+        return DetailsSetShown(show)
+    elseif mode == "blizzard" then
+        return BlizzSetShown(show)
+    end
+    -- chosen backend unavailable -> old priority
     if DetailsSetShown(show) then return true end
+    if SkinnerAvailable() then
+        if show then _G.GSETrackerDetails_Show() else _G.GSETrackerDetails_Hide(false) end
+        return true
+    end
     return BlizzSetShown(show)
 end
 local function WindowIsShown()
+    local mode = GSETracker_GetMeterMode()
+    if mode == "skinner" and SkinnerAvailable() and _G.GSETrackerDetailsFrame then
+        return _G.GSETrackerDetailsFrame:IsShown() and true or false
+    elseif mode == "details" and DetailsInstance() then
+        return DetailsIsShown()
+    elseif mode == "blizzard" and BlizzMeter() then
+        return BlizzIsShown()
+    end
     if DetailsInstance() then return DetailsIsShown() end
+    if SkinnerAvailable() and _G.GSETrackerDetailsFrame then return _G.GSETrackerDetailsFrame:IsShown() and true or false end
     if BlizzMeter() then return BlizzIsShown() end
     return false
 end
 
+-- Switch meter source. Hides whichever BREAKDOWN WINDOW is no longer the choice (so we never leave the
+-- Details! window and our Skinner window both up) and shows the newly-chosen one. The Blizzard stock
+-- meter is the BASE meter (also what you click to open the Skinner breakdown), so we never force it
+-- hidden here -- only "blizzard" mode owns its visibility via the Show Details toggle. Rejects
+-- "details" when the addon isn't loaded.
+function GSETracker_SetMeterMode(mode)
+    if mode ~= "details" and mode ~= "skinner" and mode ~= "blizzard" then return end
+    if mode == "details" and not DetailsAddonAvailable() then return end
+    MetersSavedVars = MetersSavedVars or {}
+    MetersSavedVars.meterMode = mode
+    if mode ~= "skinner" and _G.GSETrackerDetails_Hide then pcall(_G.GSETrackerDetails_Hide, false) end
+    if mode ~= "details" then DetailsSetShown(false) end
+    if mode == "details" then DetailsSetShown(true) end   -- show Details! immediately on switch
+end
+
 -- ── Public API ──────────────────────────────────────────────────────────────────
 function Details_Show()
+    if GSETrackerDetailsActive() then MarkWasShown(true); _G.GSETrackerDetails_Show(); return end  -- self-handles in-combat
     _hiddenForCombat = false
     MarkWasShown(true)
     if HideInCombat() and InCombat() then
@@ -105,12 +169,14 @@ function Details_Show()
 end
 
 function Details_Hide()
+    if GSETrackerDetailsActive() then MarkWasShown(false); _G.GSETrackerDetails_Hide(false); return end
     _hiddenForCombat = false
     MarkWasShown(false)
     WindowSetShown(false)
 end
 
 function Details_ApplyCombatVisibility()
+    if GSETrackerDetailsActive() then return end  -- GSETrackerDetails' own event frame manages its combat visibility
     if InCombat() then
         -- Hide during combat only if WE'll be the one to bring it back (don't fight the user's
         -- manual state otherwise).
@@ -146,13 +212,11 @@ function Meters_ResetMeter()
     return did
 end
 
--- ── Combat events (hide/show around combat + optional auto-reset) ─────────────────
+-- ── Combat events (show/restore around combat) ───────────────────────────────────
+-- ("Auto Reset Details" option removed -- no auto-reset on combat start.)
 local ev = CreateFrame("Frame")
 ev:RegisterEvent("PLAYER_REGEN_DISABLED")
 ev:RegisterEvent("PLAYER_REGEN_ENABLED")
-ev:SetScript("OnEvent", function(_, e)
-    if e == "PLAYER_REGEN_DISABLED" and MetersSavedVars.autoResetDetails and Meters_ResetMeter then
-        Meters_ResetMeter()
-    end
+ev:SetScript("OnEvent", function()
     Details_ApplyCombatVisibility()
 end)

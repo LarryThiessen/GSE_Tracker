@@ -58,6 +58,7 @@ ui\icons.lua
 ui\modkey_stack.lua
 ui\assisted_highlight.lua
 ui\player_tracker.lua
+ui\editmode.lua
 ui\minimap.lua
 
 # Options: configuration only
@@ -76,6 +77,9 @@ tracker\gse_bridge.lua
 # meters settings save in the same file and follow the Account Wide / per-char toggle.
 meters\MetersStore.lua
 meters\Details.lua
+meters\GSETrackerDetails.lua
+meters\MeterSkin.lua
+meters\MeterSkinEditMode.lua
 meters\AHLight.lua
 meters\Marker.lua
 meters\GCD.lua

@@ -135,6 +135,9 @@ local function ApplyMetersFont(face)
   elseif _G.Meter_ApplyFont then
     _G.Meter_ApplyFont(face or MetersFontFaceGet(), sv and sv.fontSize)
   end
+  -- Keep the DamageMeter Skinner in step with font/skin changes (Retail, no Details!).
+  if _G.GSETracker_MeterSkin_Refresh then _G.GSETracker_MeterSkin_Refresh() end
+  if _G.GSETrackerDetails_ApplyBorder then _G.GSETrackerDetails_ApplyBorder() end
 end
 local function MetersFontFaceSet(v)
   local sv = _G.MetersSavedVars
@@ -206,7 +209,9 @@ local ANCHOR_OPTIONS = {
   { value = "Screen", text = "Screen" }, { value = "Mouse Cursor", text = "Mouse Cursor" },
   -- Value kept as "Target Nameplate" for saved-data compatibility; the option now
   -- anchors the highlight over the target's (round) portrait, hence the label.
-  { value = "Target Nameplate", text = "Target Portrait" },
+  -- Greyed out when the player's UI has no target-frame portrait to anchor to.
+  { value = "Target Nameplate", text = "Target Portrait",
+    disable = function() return not (addon.HasTargetPortrait and addon:HasTargetPortrait()) end },
 }
 local SKIN_OPTIONS = { { value = "NATIVE", text = "Native" }, { value = "MODERN", text = "Modern" } }
 local LAYOUT_OPTIONS = { { value = "HORIZONTAL", text = "Horizontal" }, { value = "VERTICAL", text = "Vertical" } }
@@ -297,6 +302,41 @@ local function SoundOptions()
   return list
 end
 
+-- Same list WITHOUT the "None" entry -- used where a separate checkbox controls enable/disable (the AH
+-- Match Audible row), so the dropdown only picks WHICH sound.
+local function SoundOptionsNoNone()
+  local list = SoundOptions()
+  for i = #list, 1, -1 do
+    if list[i].value == "None" then table.remove(list, i) end
+  end
+  return list
+end
+
+-- Curated <=1 second sounds for the Match Audible cue (a per-cast tick wants to be SHORT). WoW has no API
+-- to read a sound file's length, so this is a hand-picked kit-only subset of brief UI blips -- the longer
+-- BLIZZ_SHORT_SOUNDS entries (Ready Check / BNet Toast / PvP Queue Pop / Auto Quest) and the
+-- arbitrary-length LibSharedMedia sounds are intentionally excluded.
+local SHORT_1S_SOUNDS = {
+  { text = "Checkbox Click", key = "IG_MAINMENU_OPTION_CHECKBOX_ON" },
+  { text = "Chat Scroll",    key = "U_CHAT_SCROLL_BUTTON" },
+  { text = "Map Ping",       key = "MAP_PING" },
+  { text = "Whisper",        key = "TELL_MESSAGE" },
+  { text = "Player Invite",  key = "IG_PLAYER_INVITE" },
+  { text = "Auction Open",   key = "AUCTION_WINDOW_OPEN" },
+  { text = "Quest Chime",    key = "IG_QUEST_LIST_COMPLETE" },
+}
+local function SoundOptionsShort()
+  local list = {}
+  local SK = _G.SOUNDKIT
+  if SK then
+    for _, e in ipairs(SHORT_1S_SOUNDS) do
+      local id = SK[e.key]
+      if id then list[#list + 1] = { value = "kit:" .. id, text = e.text } end
+    end
+  end
+  return list
+end
+
 -- ── Native widget builders (return height consumed) ────────────────────────
 local uid = 0
 local function UName(p) uid = uid + 1; return "GSETrackerCanvas" .. p .. uid end
@@ -310,9 +350,14 @@ local function CreateWowDropdown(parent, width, opts, get, set)
     -- Direction options depend on the current Layout).
     local list = (type(opts) == "function") and opts() or opts
     for _, o in ipairs(list or {}) do
-      rootDescription:CreateRadio(o.text,
+      local radio = rootDescription:CreateRadio(o.text,
         function() return get() == o.value end,
         function() set(o.value); return MenuResponse and MenuResponse.Close end)
+      -- A per-option disable() (re-evaluated each time the menu opens) greys the entry out and
+      -- blocks selection -- e.g. "Target Portrait" when the UI has no target-frame portrait.
+      if radio and radio.SetEnabled and o.disable and o.disable() then
+        radio:SetEnabled(false)
+      end
     end
   end)
   return dd
@@ -364,10 +409,11 @@ end
 -- Uniform vertical rhythm: every row leaves the SAME gap (ROW_PAD) below its content, so the
 -- spacing reads evenly across all tabs regardless of control type. Each renderer returns its
 -- content height + ROW_PAD. (Headers keep their own larger spacing as section dividers.)
-local ROW_PAD  = 8    -- gap below every row
-local RH_CHECK = 26   -- checkbox / toggle / swatch+label row content
-local RH_COLOR = 20   -- bare colour-swatch row content
-local RH_LINE  = 44   -- dropdown / slider / dropdown+slider row (label or title + control)
+local ROW_PAD   = 8    -- gap below every row
+local RH_CHECK  = 26   -- checkbox / toggle / swatch+label row content
+local RH_COLOR  = 20   -- bare colour-swatch row content
+local RH_LINE   = 44   -- dropdown / dropdown+slider row (label above a dropdown control)
+local RH_SLIDER = 32   -- standalone slider row (title + slider sits at y-16, ends ~y-32)
 
 local function MakeHeader(pane, y, desc)
   -- Consistent breathing room ABOVE every section header so gold titles aren't crammed
@@ -592,7 +638,7 @@ local function MakeSlider(pane, y, desc)
   if desc.center then
     CenterPaneRow(pane, { s }, 20, 20 + sliderW + 10 + (val:GetStringWidth() or 0))
   end
-  return RH_LINE + ROW_PAD
+  return RH_SLIDER + ROW_PAD
 end
 
 local function MakeDropdown(pane, y, desc)
@@ -1274,6 +1320,265 @@ local function GreyOutPane(pane)
   walk(pane)
 end
 
+-- ═════════════════════════════════════════════════════════════════════════════
+-- Native Edit Mode row renderer
+-- Rebuilds option descriptors into the EXACT layout of Blizzard's EditModeSystemSettingsDialog
+-- (dumped via GSEBlizzardDefault -- see the native-editmode-dialog-spec memory): one setting per
+-- row, label on the LEFT (GameFontHighlightMedium size 14, white), control on the RIGHT, each row
+-- 32px tall on a 34px pitch, 20px side margins. Composite descriptors are EXPANDED into multiple
+-- native rows (a dropdown+slider row becomes two rows; a dual-checkbox row becomes two checkbox
+-- rows). Reuses the same get/set resolution and native widgets as the compact renderer so behaviour
+-- is identical -- only the presentation matches Blizzard.
+-- ═════════════════════════════════════════════════════════════════════════════
+local NATIVE_MARGIN   = 20   -- container side margin (native: 20)
+local NATIVE_ROW_H    = 32   -- row height (native: 32)
+local NATIVE_PITCH    = 34   -- vertical distance between rows (native: 34)
+local NATIVE_LABEL_W  = 150  -- label column width
+local NATIVE_CTRL_X   = 160  -- control left edge (label.RIGHT + ~5, matching native spacing)
+local NATIVE_CTRL_W   = 200  -- control column width (native control container: 200)
+
+local function NRow(pane, y)
+  local row = CreateFrame("Frame", nil, pane)
+  row:SetHeight(NATIVE_ROW_H)
+  row:SetPoint("TOPLEFT",  pane, "TOPLEFT",  NATIVE_MARGIN, y)
+  row:SetPoint("TOPRIGHT", pane, "TOPRIGHT", -NATIVE_MARGIN, y)
+  return row
+end
+
+-- Left-hand setting label (native: GameFontHighlightMedium 14, white, left-justified).
+local function NLabel(row, text)
+  local fs = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightMedium")
+  fs:SetPoint("LEFT", row, "LEFT", 0, 0)
+  fs:SetWidth(NATIVE_LABEL_W); fs:SetJustifyH("LEFT")
+  fs:SetText(text or ""); fs:SetTextColor(1, 1, 1)
+  return fs
+end
+
+-- Dropdown in the right control column.
+local function NDropdown(row, opts, get, set, tip, tipTitle)
+  local dd = CreateWowDropdown(row, NATIVE_CTRL_W, opts, get, set)
+  dd:SetPoint("LEFT", row, "LEFT", NATIVE_CTRL_X, 0)
+  AttachTooltip(dd, tipTitle, tip)
+  return dd
+end
+
+-- Slider in the right control column. Uses Blizzard's native MinimalSliderWithSteppersTemplate -- the
+-- exact "< [====O====] >" stepper slider the HUD Edit Mode dialogs use, with the value (gold) shown on
+-- the right. API confirmed from Baganator/LibEditMode: Init(value, min, max, numSteps, formatters) +
+-- RegisterCallback(...Event.OnValueChanged).
+local function NSlider(row, get, set, minV, maxV, step, percent, float, tip, tipTitle, fullWidth)
+  minV, maxV, step = minV or 0, maxV or 1, step or 1
+  local s = CreateFrame("Slider", nil, row, "MinimalSliderWithSteppersTemplate")
+  s:SetPoint("LEFT",  row, "LEFT",  fullWidth and 0 or NATIVE_CTRL_X, 0)
+  -- The value (gold) renders to the RIGHT of the slider frame, so inset the frame's right edge ~30px
+  -- so the number lands with the same right padding as the dropdowns (which end at the row's right).
+  s:SetPoint("RIGHT", row, "RIGHT", -30, 0)
+  s:SetHeight(20)
+  local function fmt(v)
+    v = float and (v or 0) or math.floor((v or 0) + 0.5)
+    if percent then return tostring(v) .. "%" end
+    return float and string.format("%.2f", v) or tostring(v)
+  end
+  local steps = math.max(1, math.floor((maxV - minV) / step + 0.5))
+  local formatters
+  if MinimalSliderWithSteppersMixin and CreateMinimalSliderFormatter then
+    formatters = {
+      [MinimalSliderWithSteppersMixin.Label.Right] =
+        CreateMinimalSliderFormatter(MinimalSliderWithSteppersMixin.Label.Right, function(v) return fmt(v) end),
+    }
+  end
+  local cur = tonumber(get()) or minV
+  s:Init(cur, minV, maxV, steps, formatters)
+  -- Register AFTER Init so the initial value doesn't fire our setter.
+  s:RegisterCallback(MinimalSliderWithSteppersMixin.Event.OnValueChanged, function(_, v)
+    set(float and v or math.floor((v or 0) + 0.5))
+  end)
+  AttachTooltip(s, tipTitle, tip)
+  return s
+end
+
+-- Checkbox row: native 28px UICheckButton on the left, label to its right.
+local function NCheck(row, label, get, set, disableGet, tip)
+  local cb = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
+  cb:SetSize(28, 28)
+  cb:SetPoint("LEFT", row, "LEFT", 0, 0)
+  cb:SetChecked(get() and true or false)
+  cb:SetScript("OnClick", function(self) set(self:GetChecked() and true or false) end)
+  local l = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightMedium")
+  l:SetPoint("LEFT", cb, "RIGHT", 5, 0); l:SetText(label or ""); l:SetTextColor(1, 1, 1)
+  if disableGet and disableGet() then
+    if cb.SetEnabled then cb:SetEnabled(false) else cb:Disable() end
+    cb:EnableMouse(false); l:SetTextColor(0.5, 0.5, 0.5)
+  end
+  AttachTooltip(cb, label, tip)
+  return cb, l
+end
+
+-- Render a descriptor list as native one-per-row rows. Returns nothing; sizes the pane to content.
+local function PopulateNative(pane, rows)
+  local y = -12
+  local function adv(h) y = y - (h or NATIVE_PITCH) end
+  for _, r in ipairs(rows) do
+    local t = r.type
+    if t == "header" then
+      -- Skip section headers: the window title bar already names the element, and Blizzard's native
+      -- Edit Mode dialogs have no gold section-header text. (No row, no vertical advance.)
+    elseif t == "spacer" then
+      adv(r.h or 12)
+    elseif t == "dropdown" then
+      local row = NRow(pane, y); NLabel(row, r.label)
+      NDropdown(row, r.options, ResolveGet(r.get), ResolveSet(r.set), r.tooltip, r.label)
+      adv()
+    elseif t == "slider" then
+      if r.stacked then
+        -- "Scale" sliders: label STACKED + CENTERED over a full-width slider.
+        local rowL = NRow(pane, y)
+        local lbl = rowL:CreateFontString(nil, "ARTWORK", "GameFontHighlightMedium")
+        -- Centered over the slider track. The slider is inset 30px on the right (for its value), so its
+        -- track centre sits 15px left of the row centre -- offset the label to match.
+        lbl:SetPoint("CENTER", rowL, "CENTER", -15, 0)
+        lbl:SetText(r.label or ""); lbl:SetTextColor(1, 1, 1)
+        adv()
+        local rowS = NRow(pane, y)
+        NSlider(rowS, ResolveGet(r.get), ResolveSet(r.set), r.min, r.max, r.step, r.percent, r.float, r.tooltip, r.label, true)
+        adv()
+      else
+        -- Inline slider: label left, slider right (like the dropdown-slider rows).
+        local row = NRow(pane, y); NLabel(row, r.label)
+        NSlider(row, ResolveGet(r.get), ResolveSet(r.set), r.min, r.max, r.step, r.percent, r.float, r.tooltip, r.label)
+        adv()
+      end
+    elseif t == "tricolor" then
+      -- Lead toggle (e.g. "Press Detection") on its own row, then Class/Custom + colour swatch on the next.
+      if r.leadLabel then
+        local rowL = NRow(pane, y)
+        NCheck(rowL, r.leadLabel, ResolveGet(r.leadGet), ResolveSet(r.leadSet), nil, r.tooltipLead)
+        adv()
+      end
+      local row = NRow(pane, y)
+      local modeGet, modeSet   = ResolveGet(r.get), ResolveSet(r.set)
+      local colorGet, colorSet = ResolveGet(r.colorGet), ResolveSet(r.colorSet)
+      local cbClass, cbCustom
+      local function refresh()
+        local m = modeGet()
+        if cbClass  then cbClass:SetChecked(m == "class") end
+        if cbCustom then cbCustom:SetChecked(m == "custom") end
+      end
+      cbClass = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
+      cbClass:SetSize(28, 28); cbClass:SetPoint("LEFT", row, "LEFT", 0, 0)
+      cbClass:SetScript("OnClick", function() modeSet(modeGet() == "class" and "none" or "class"); refresh() end)
+      local lC = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightMedium")
+      lC:SetPoint("LEFT", cbClass, "RIGHT", 5, 0); lC:SetText(r.label or "Class Color"); lC:SetTextColor(1, 1, 1)
+      AttachTooltip(cbClass, r.label, r.tooltip)
+      cbCustom = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
+      cbCustom:SetSize(28, 28); cbCustom:SetPoint("LEFT", lC, "RIGHT", 16, 0)
+      cbCustom:SetScript("OnClick", function() modeSet(modeGet() == "custom" and "none" or "custom"); refresh() end)
+      local lU = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightMedium")
+      lU:SetPoint("LEFT", cbCustom, "RIGHT", 5, 0); lU:SetText(r.label2 or "Custom"); lU:SetTextColor(1, 1, 1)
+      AttachTooltip(cbCustom, r.label2, r.tooltip2)
+      local btn = CreateFrame("Button", nil, row)
+      btn:SetSize(20, 20); btn:SetPoint("LEFT", lU, "RIGHT", 6, 0)
+      local bd = btn:CreateTexture(nil, "BACKGROUND"); bd:SetPoint("TOPLEFT", -1, 1); bd:SetPoint("BOTTOMRIGHT", 1, -1); bd:SetColorTexture(0, 0, 0, 1)
+      local sw = btn:CreateTexture(nil, "ARTWORK"); sw:SetAllPoints(btn)
+      local function paint() local cr, cg, cb = colorGet(); sw:SetColorTexture(cr or 1, cg or 1, cb or 1) end
+      paint()
+      btn:SetScript("OnClick", function()
+        local cr, cg, cb = colorGet(); cr, cg, cb = cr or 1, cg or 1, cb or 1
+        if ColorPickerFrame.SetupColorPickerAndShow then
+          ColorPickerFrame:SetupColorPickerAndShow({
+            swatchFunc = function() local nr, ng, nb = ColorPickerFrame:GetColorRGB(); colorSet(nr, ng, nb); paint() end,
+            cancelFunc = function() colorSet(cr, cg, cb); paint() end,
+            hasOpacity = false, r = cr, g = cg, b = cb,
+          })
+        end
+      end)
+      refresh()
+      adv()
+    elseif t == "dropdownslider" then
+      local row = NRow(pane, y); NLabel(row, r.label)
+      NDropdown(row, r.options, ResolveGet(r.get), ResolveSet(r.set), r.tooltip, r.label)
+      adv()
+      local row2 = NRow(pane, y); NLabel(row2, r.sliderLabel)
+      NSlider(row2, ResolveGet(r.sliderGet), ResolveSet(r.sliderSet), r.smin, r.smax, r.sstep, r.percent, r.sfloat, r.tooltip2, r.sliderLabel)
+      adv()
+    elseif t == "dropdowncheck" then
+      local row = NRow(pane, y); NLabel(row, r.label)
+      NDropdown(row, r.options, ResolveGet(r.get), ResolveSet(r.set), r.tooltip, r.label)
+      adv()
+      local row2 = NRow(pane, y)
+      NCheck(row2, r.checkLabel, ResolveGet(r.checkGet), ResolveSet(r.checkSet), nil, r.tooltip2)
+      adv()
+    elseif t == "dualcheck" then
+      local row = NRow(pane, y)
+      NCheck(row, r.label, ResolveGet(r.get), ResolveSet(r.set), r.disable and ResolveGet(r.disable) or nil, r.tooltip)
+      adv()
+      local row2 = NRow(pane, y)
+      NCheck(row2, r.label2, ResolveGet(r.get2), ResolveSet(r.set2), r.disable2 and ResolveGet(r.disable2) or nil, r.tooltip2)
+      adv()
+      if r.label3 and r.get3 then  -- optional third checkbox (e.g. AH "Show GCD Swipe")
+        local row3 = NRow(pane, y)
+        NCheck(row3, r.label3, ResolveGet(r.get3), ResolveSet(r.set3), r.disable3 and ResolveGet(r.disable3) or nil, r.tooltip3)
+        adv()
+      end
+    elseif t == "matchrow" then
+      -- Row 1: [check] AH Match % (4/99). Row 2: [check] AH Match Audible + sound dropdown.
+      -- Both rows are greyed out (live) when "Rotation Matching System" is OFF.
+      local row1 = NRow(pane, y)
+      local cb1, lbl1 = NCheck(row1, r.label, ResolveGet(r.get), ResolveSet(r.set), nil, r.tooltip)
+      adv()
+      local row2 = NRow(pane, y)
+      local cb2, lbl2 = NCheck(row2, r.label2, ResolveGet(r.audGet), ResolveSet(r.audSet), nil, r.tooltip2)
+      local dd = NDropdown(row2, r.ddoptions, ResolveGet(r.ddget), ResolveSet(r.ddset), r.tooltip2, r.label2)
+      adv()
+      -- Shift BOTH checkbox+label groups right 10px (move the checkboxes; their labels are anchored off
+      -- them so they follow). The dropdown is anchored to the row, so it stays put.
+      if cb1 then cb1:ClearAllPoints(); cb1:SetPoint("LEFT", row1, "LEFT", 10, 0) end
+      if cb2 then cb2:ClearAllPoints(); cb2:SetPoint("LEFT", row2, "LEFT", 10, 0) end
+      -- Live enable/disable based on Rotation Matching System (the master switch for match tracking).
+      local function setOn(w, on, lbl)
+        if not w then return end
+        if w.SetEnabled then w:SetEnabled(on) end
+        if w.EnableMouse then w:EnableMouse(on) end
+        if lbl then local c = on and 1 or 0.5; lbl:SetTextColor(c, c, c) end
+      end
+      activeRefreshers[#activeRefreshers + 1] = function()
+        local on = (addon.GetProcGlowEnabled and addon:GetProcGlowEnabled()) and true or false
+        setOn(cb1, on, lbl1)
+        setOn(cb2, on, lbl2)
+        -- The sound dropdown also needs Match Audible itself enabled.
+        local ddOn = on and (addon.GetAHMatchAudibleEnabled and addon:GetAHMatchAudibleEnabled()) and true or false
+        setOn(dd, ddOn)
+      end
+    elseif t == "namesource" then
+      -- Two mutually-exclusive sources rendered as two checkbox rows (kept simple in native layout).
+      local row = NRow(pane, y)
+      NCheck(row, r.label, ResolveGet(r.get), ResolveSet(r.set), r.unavailableA and ResolveGet(r.unavailableA) or nil, r.tooltip)
+      adv()
+      local row2 = NRow(pane, y)
+      NCheck(row2, r.label2, function() return ResolveGet(r.get)() and true or false end, function(v) ResolveSet(r.set)(v) end, nil, r.tooltip2)
+      adv()
+    elseif t == "check" then
+      local row = NRow(pane, y)
+      NCheck(row, r.label, ResolveGet(r.get), ResolveSet(r.set), r.disable and ResolveGet(r.disable) or nil, r.tooltip)
+      adv()
+    elseif t == "enableshow" then
+      local row = NRow(pane, y)
+      NCheck(row, r.label, ResolveGet(r.get), ResolveSet(r.set), r.unavailable and ResolveGet(r.unavailable) or nil, r.tooltip)
+      adv()
+      if r.showOptions then
+        local row2 = NRow(pane, y); NLabel(row2, r.showHeader or "Visibility")
+        NDropdown(row2, r.showOptions, ResolveGet(r.showGet), ResolveSet(r.showSet))
+        adv()
+      end
+    else
+      -- Unknown/unsupported-in-native type: skip with a small gap (covered as the rollout expands).
+      adv(8)
+    end
+  end
+  pane:SetHeight(math.max(-y, 1))  -- end right at the last row (~2px); the window adds a uniform bottom pad
+  RunRefreshers()
+end
+
 -- ── Tab content ─────────────────────────────────────────────────────────────
 local function GeneralRows()
   return {
@@ -1334,6 +1639,9 @@ local function GeneralRows()
         -- them live too so the switch is immediate (no /reload).
         if _G.Meter_ApplyFont then _G.Meter_ApplyFont() end
         if _G.RefreshDetails then _G.RefreshDetails() end
+        -- DamageMeter Skinner follows the same Native/adopt switch (Retail, no Details!).
+        if _G.GSETracker_MeterSkin_Refresh then _G.GSETracker_MeterSkin_Refresh() end
+        if _G.GSETrackerDetails_ApplyBorder then _G.GSETrackerDetails_ApplyBorder() end
       end,
       tooltip = "Force Blizzard's native button art (border, icon crop and FONT style). Unchecked: automatically adopt your skin addon (ElvUI, EllesmereUI, ...) if one is installed." },
     -- Master scale for the whole addon, pinned to the bottom (0-200%, 100% = normal). Multiplies on
@@ -1408,7 +1716,8 @@ local function ActionTrackerRows()
       tooltip = "Swap the vertical positions of the Name (sequence/spell) and the modifier-key letters above the icons. Off = Name on top (default); On = ModKeys on top.",
       label2 = "Modkey Side [L/R]", get2 = "GetActionTrackerModkeySide", set2 = "SetActionTrackerModkeySide",
       tooltip2 = "Show the L/R side prefix on modifier keys (e.g. 'LShift+RCtrl' vs 'Shift+Ctrl')." },
-    { type = "dropdownslider", label = "GSE Sequence / Spell", get = "GetSeqFontName", set = "SetSeqFontName", options = FontOptions,
+    { type = "spacer", h = 14 },  -- extra padding below the Name/Modkey checkbox block (before the font rows)
+    { type = "dropdownslider", label = "Name", get = "GetSeqFontName", set = "SetSeqFontName", options = FontOptions,
       tooltip = "Font for the sequence/spell name shown above the icons.",
       sliderLabel = "Size", sliderGet = "GetSeqFontSize", sliderSet = "SetSeqFontSize", smin = 6, smax = 24, sstep = 1, tooltip2 = "Name text size." },
     { type = "dropdownslider", label = "Modifiers", get = "GetModFontName", set = "SetModFontName", options = FontOptions,
@@ -1422,7 +1731,7 @@ local function ActionTrackerRows()
         if addon.ApplyFontFaces then addon:ApplyFontFaces() end
       end },
     { type = "spacer", h = 12 },  -- top padding above the bottom Scale slider
-    { type = "slider", label = "Action Tracker Scale",
+    { type = "slider", label = "Action Tracker Scale", stacked = true,
       get = function() return math.floor(((addon.GetScale and addon:GetScale()) or 1) * 100 + 0.5) end,
       set = function(v) if addon.SetScaleValue then addon:SetScaleValue((tonumber(v) or 100) / 100) end end,
       min = 0, max = 200, step = 5, percent = true, width = 280, center = true,
@@ -1449,14 +1758,20 @@ local function CenterMarkerRows()
       end,
       -- Scale shares the row; refreshes the marker live AND the AH centre mirror (which IS
       -- the marker when "Assisted Highlight" is chosen, and is sized from this Scale).
-      sliderLabel = "Scale", sliderGet = "GetCombatMarkerSize",
+      -- Shown as a PERCENT: 100% == 38px (the neutral point), range 25%-200% (= 9.5px .. 76px).
+      sliderLabel = "Scale",
+      sliderGet = function()
+        local sz = (addon.GetCombatMarkerSize and addon:GetCombatMarkerSize()) or 38
+        return math.floor((sz / 38) * 100 + 0.5)
+      end,
       sliderSet = function(v)
-        if addon.SetCombatMarkerSize then addon:SetCombatMarkerSize(v) end
+        local sz = (tonumber(v) or 100) / 100 * 38
+        if addon.SetCombatMarkerSize then addon:SetCombatMarkerSize(sz) end
         if addon.RefreshCombatMarker then addon:RefreshCombatMarker(false) end
         if addon.RefreshAssistedHighlight then addon:RefreshAssistedHighlight(true) end
       end,
-      smin = C.COMBAT_MARKER_MIN_SIZE or 16, smax = C.COMBAT_MARKER_MAX_SIZE or 128, sstep = 1,
-      tooltip2 = "Size of the Center Marker (works for all marker types, including Assisted Highlight)." },
+      smin = 25, smax = 200, sstep = 5, percent = true,
+      tooltip2 = "Size of the Center Marker (100% = normal; 25%-200%). Works for all marker types, including Assisted Highlight." },
     -- Row under the dropdown: Class / Custom colour + swatch, tri-state like the Pressed
     -- Indicator -- unchecking both = no colour (the image shows its own colours).
     { type = "tricolor", label = "Class Color", label2 = "Custom",
@@ -1502,8 +1817,11 @@ local function MetersBottomRows()
     { type = "dropdown", label = "Outline", get = MetersFontOutlineGet, set = MetersFontOutlineSet, options = OUTLINE_OPTIONS,
       tooltip = "Outline style for the Meters readout text.",
       unavailable = function() return not (ns.Caps and ns.Caps.meters) end },
-    { type = "spacer", h = 12 },
-    { type = "slider", label = "Meters Scale",
+    -- 26 (not 12): Meters has one fewer section than Action Tracker, so this extra ~14px makes the Meters
+    -- content the same total height as the Action Tracker content -- the two Edit Mode windows then come
+    -- out the same height with identical bottom padding below the Scale slider.
+    { type = "spacer", h = 26 },
+    { type = "slider", label = "Meters Scale", stacked = true,
       get = function() return math.floor(((_G.Meter_GetScale and _G.Meter_GetScale()) or 1) * 100 + 0.5) end,
       set = function(v) if _G.Meter_SetScale then _G.Meter_SetScale((tonumber(v) or 100) / 100) end end,
       min = 0, max = 200, step = 5, percent = true, width = 280, center = true,
@@ -1524,19 +1842,35 @@ local function AssistedHighlightRows()
     { type = "dualcheck",
       label = "Range Check", get = "GetAssistedHighlightRangeCheckerEnabled", set = "SetAssistedHighlightRangeCheckerEnabled",
       tooltip = "Red-tint the highlight when the suggested ability is out of range of your target.",
-      label2 = "Show Keybind/Stacks", get2 = "GetAssistedHighlightShowKeybind", set2 = "SetAssistedHighlightShowKeybind",
-      tooltip2 = "Show the suggested ability's keybind text AND its stack/charge count on the highlight.",
-      -- Keybind + stacks are hidden in Target Portrait mode (no room on the round emblem),
-      -- so this toggle has no effect there -- grey it out.
-      disable2 = function()
-        return addon.GetAssistedHighlightAnchorTarget and addon:GetAssistedHighlightAnchorTarget() == "Target Nameplate"
+      label2 = "Show GCD Swipe", get2 = "GetAssistedHighlightShowGCD", set2 = "SetAssistedHighlightShowGCD",
+      tooltip2 = "Sweep a cooldown 'swipe' across the highlight for the global cooldown." },
+    { type = "check", label = "Rotation Matching System", get = "GetProcGlowEnabled", set = "SetProcGlowEnabled",
+      unavailable = function() return not (ns.Caps and ns.Caps.assistedHighlight) end,
+      tooltip = "Track how often your casts match the Assisted Highlight suggestion (drives the AH Match %% readout and the proc-glow flash)." },
+    -- AH Match % readout (under the Action Tracker) + AH Match Audible (its own enable checkbox + sound
+    -- dropdown). Both are gated by "Rotation Matching System" -- greyed when it's off (see PopulateNative
+    -- "matchrow"). SBA % moved to the standalone SLG-SBA Monitor addon -- this is the AH-only readout.
+    { type = "matchrow",
+      unavailable = function() return not (ns.Caps and ns.Caps.assistedHighlight) end,
+      -- Row 1: [check] AH Match % (4/99)
+      label = "AH Match % (4/99)", get = "GetAHMatchPercentEnabled", set = "SetAHMatchPercentEnabled",
+      tooltip = "Show the AH Match percentage readout (matched/total) under the Action Tracker.",
+      -- Row 2: [check] Match Audible  + short-sound dropdown (<=1s cues only)
+      label2 = "Match Audible", audGet = "GetAHMatchAudibleEnabled", audSet = "SetAHMatchAudibleEnabled",
+      tooltip2 = "Play a short sound each time your cast matches the Assisted Highlight suggestion.",
+      ddget = function() return (addon.GetAHMatchSound and addon:GetAHMatchSound()) or nil end,
+      ddset = function(v)
+        if addon.SetAHMatchSound then addon:SetAHMatchSound(v) end
+        if addon.PlayAHMatchSound then addon:PlayAHMatchSound(true) end -- preview the pick
       end,
-      label3 = "Show GCD Swipe", get3 = "GetAssistedHighlightShowGCD", set3 = "SetAssistedHighlightShowGCD",
-      tooltip3 = "Sweep a cooldown 'swipe' across the highlight for the global cooldown." },
+      ddoptions = SoundOptionsShort },
     -- Border options removed: the icon border now always adopts the player's
     -- action-bar frame art (Blizzard default or skinner), like the rest of the UI.
-    { type = "spacer" },
     { type = "header", text = "Keybind" },
+    { type = "check", label = "Show Keybind/Stacks", get = "GetAssistedHighlightShowKeybind", set = "SetAssistedHighlightShowKeybind",
+      tooltip = "Show the suggested ability's keybind text AND its stack/charge count on the highlight.",
+      -- Hidden in Target Portrait mode (no room on the round emblem) -- grey it out there.
+      disable = function() return addon.GetAssistedHighlightAnchorTarget and addon:GetAssistedHighlightAnchorTarget() == "Target Nameplate" end },
     { type = "dropdownslider", label = "Font", get = "GetAssistedHighlightFontName", set = "SetAssistedHighlightFontName", options = FontOptions,
       tooltip = "Font for the keybind text shown on the highlight.",
       sliderLabel = "Size", sliderGet = "GetAssistedHighlightFontSize", sliderSet = "SetAssistedHighlightFontSize", smin = 6, smax = 24, sstep = 1, tooltip2 = "Keybind text size." },
@@ -1544,7 +1878,7 @@ local function AssistedHighlightRows()
       tooltip = "Which corner of the highlight the keybind text sits in." },
     { type = "spacer", h = 12 },  -- top padding above the bottom Scale slider
     -- 0-200% of the 52px default (100% = normal). Soft-clamps to the size limits underneath.
-    { type = "slider", label = "Assisted Highlight Scale",
+    { type = "slider", label = "Assisted Highlight Scale", stacked = true,
       get = function() return math.floor((((addon.GetAssistedHighlightSize and addon:GetAssistedHighlightSize()) or 52) / 52) * 100 + 0.5) end,
       set = function(v) if addon.SetAssistedHighlightSize then addon:SetAssistedHighlightSize((tonumber(v) or 100) / 100 * 52) end end,
       min = 0, max = 200, step = 5, percent = true, width = 280, center = true,
@@ -1567,32 +1901,6 @@ local function QoLRows()
     { type = "header", text = "Saved Settings" },
     { type = "check", label = "Account Wide", get = "GetAccountWide", set = "SetAccountWide",
       tooltip = "Share these settings across all your characters. Unchecked: settings are saved per-character." },
-    { type = "header", text = "Assisted Highlight" },
-    { type = "check", label = "Assisted Highlight Rotation Matching System", get = "GetProcGlowEnabled", set = "SetProcGlowEnabled",
-      unavailable = function() return not (ns.Caps and ns.Caps.assistedHighlight) end,
-      tooltip = "Track how often your casts match the Assisted Highlight suggestion (drives the AH Match % readout)." },
-    { type = "matchrow",
-      unavailable = function() return not (ns.Caps and ns.Caps.assistedHighlight) end,
-      label = "AH/SBA Match %", get = "GetAHMatchPercentEnabled", set = "SetAHMatchPercentEnabled",
-      tooltip = "Show the AH Match percentage readout under the Action Tracker.",
-      tooltip2 = "Play a sound each time your cast matches the suggestion. 'None' disables the audible match.",
-      label2 = "Match Audible",
-      -- The dropdown now drives the audible match: "None" disables it, any sound enables
-      -- it and selects that sound.
-      ddget = function()
-        if addon.GetAHMatchAudibleEnabled and not addon:GetAHMatchAudibleEnabled() then return "None" end
-        return (addon.GetAHMatchSound and addon:GetAHMatchSound()) or "None"
-      end,
-      ddset = function(v)
-        if v == "None" then
-          if addon.SetAHMatchAudibleEnabled then addon:SetAHMatchAudibleEnabled(false) end
-          return
-        end
-        if addon.SetAHMatchAudibleEnabled then addon:SetAHMatchAudibleEnabled(true) end
-        if addon.SetAHMatchSound then addon:SetAHMatchSound(v) end
-        if addon.PlayAHMatchSound then addon:PlayAHMatchSound(true) end -- preview the pick
-      end,
-      ddoptions = SoundOptions },
     { type = "header", text = "Pressed Indicator" },
     { type = "dropdownslider", label = "Shape", get = "GetPressedIndicatorShape", set = "SetPressedIndicatorShape", options = PRESSED_SHAPE_OPTIONS,
       tooltip = "Image flashed on screen when you press your macro key. 'None' turns it off.",
@@ -1624,25 +1932,65 @@ local function QoLRows()
   }
 end
 
+-- The HUD elements (Action Tracker, Meters, Assisted Highlight) live ONLY in Edit Mode now -- click each
+-- one's box to open its native options pop-up. The Settings tab bar keeps General / Quality of Life.
 local TABS = {
   { key = "General", text = "General", rows = GeneralRows },
-  { key = "Meters", text = "Meters", embed = "MetersOptionsPanel", centerContent = true,
-    -- Size the embedded Meters panel to its visible content (Show GCD/DPS row + Details
-    -- rows + Refresh/Opacity sliders, ~135px) so the bottom Font/Scale rows sit a NORMAL row-gap
-    -- below it -- not a big empty gap. The hidden Font Style/Size/Reset controls below the sliders
-    -- don't count toward the height. Trimmed to ~the content's bottom so the spacing is even.
-    embedHeight = 135,
-    -- Top of the tab: title + the Center Marker section (above the embedded readout panel).
-    rows = function()
-      local r = { { type = "header", text = "Meters" } }
-      for _, row in ipairs(CenterMarkerRows()) do r[#r + 1] = row end
-      return r
-    end,
-    -- Font controls + the Meters Scale slider pinned to the BOTTOM, below the embedded panel.
-    bottomRows = MetersBottomRows },
-  { key = "AssistedHighlight", text = "Assisted Highlight", rows = AssistedHighlightRows, enableGet = "IsAssistedHighlightMirrorEnabled", centerContent = true, cap = "assistedHighlight" },
-  { key = "ActionTracker", text = "Action Tracker", rows = ActionTrackerRows, enableGet = "IsEnabled", centerContent = true },
   { key = "QoL", text = "Quality of Life", rows = QoLRows, centerContent = true },
+}
+
+-- Edit Mode option pop-ups: Meters, Action Tracker and Assisted Highlight, all rendered one-per-row in
+-- the native EditModeSystemSettingsDialog style. You position the frame AND tune its options in one place
+-- while editing. Index order matters: the boxes in ui/editmode.lua reference these by index
+-- (Meters=1, Action Tracker=2, Assisted Highlight=3). winWidth 444 gives equal ~42px L/R padding.
+
+-- The Show GCD/DPS/HPS/SBAssist + Refresh + Opacity controls (formerly the embedded MetersOptionsPanel)
+-- expressed as native descriptors. They drive MetersSavedVars + the apply-functions exposed by
+-- meters/MetersOptions.lua (Meters_ApplyDisplayToggles / _ApplyOpacity / _ApplyRefreshRate).
+local function MetersReadoutRows()
+  local function showDesc(label, key, tip)
+    return label, function() return MetersSavedVars and MetersSavedVars[key] end,
+      function(v)
+        if MetersSavedVars then MetersSavedVars[key] = v and true or false end
+        if _G.Meters_ApplyDisplayToggles then _G.Meters_ApplyDisplayToggles() end
+      end, tip
+  end
+  local gL, gG, gS, gT = showDesc("Show GCD", "showGCD", "Your global cooldown timer.")
+  local dL, dG, dS, dT = showDesc("Show DPS", "showDPS", "Your damage per second (retail Blizzard meter; Classic uses Details!).")
+  local hL, hG, hS, hT = showDesc("Show HPS", "showHPS", "Your healing per second (retail Blizzard meter; Classic uses Details!).")
+  -- "Show SBAssist %" was moved out to the standalone SLG-SBA Monitor addon (personal GSE testing tool).
+  return {
+    { type = "dualcheck", label = gL, get = gG, set = gS, tooltip = gT,
+      label2 = dL, get2 = dG, set2 = dS, tooltip2 = dT },
+    { type = "check", label = hL, get = hG, set = hS, tooltip = hT },
+    { type = "slider", label = "Refresh Rate", float = true, min = 0.02, max = 0.15, step = 0.01,
+      get = function() return (_G.Meters_GetRefreshRate and _G.Meters_GetRefreshRate()) or 0.10 end,
+      set = function(v)
+        if MetersSavedVars then MetersSavedVars.refreshRate = v end
+        if _G.Meters_ApplyRefreshRate then _G.Meters_ApplyRefreshRate() end
+      end,
+      tooltip = "How often the readouts refresh (seconds)." },
+    { type = "slider", label = "Opacity", percent = true, min = 25, max = 100, step = 1,
+      get = function() return (MetersSavedVars and MetersSavedVars.opacity) or 100 end,
+      set = function(v)
+        if MetersSavedVars then MetersSavedVars.opacity = v end
+        if _G.Meters_ApplyOpacity then _G.Meters_ApplyOpacity() end
+      end,
+      tooltip = "Opacity of the Meters readout text." },
+  }
+end
+
+local EDITMODE_TABS = {
+  { key = "Meters", text = "Meters", centerContent = true, winWidth = 444,
+    rows = function()
+      local r = {}
+      for _, row in ipairs(CenterMarkerRows())   do r[#r + 1] = row end  -- Center Marker + Press Detection/colour
+      for _, row in ipairs(MetersReadoutRows())  do r[#r + 1] = row end  -- Show GCD/DPS/HPS/SBA + Refresh + Opacity
+      for _, row in ipairs(MetersBottomRows())   do r[#r + 1] = row end  -- Font + Outline + Meters Scale
+      return r
+    end },
+  { key = "ActionTracker", text = "Action Tracker", rows = ActionTrackerRows, enableGet = "IsEnabled", centerContent = true, winWidth = 444 },
+  { key = "AssistedHighlight", text = "Assisted Highlight", rows = AssistedHighlightRows, enableGet = "IsAssistedHighlightMirrorEnabled", cap = "assistedHighlight", centerContent = true, winWidth = 444 },
 }
 
 -- ── Panel construction ──────────────────────────────────────────────────────
@@ -1711,6 +2059,74 @@ end
 -- is 52 tall) plus a small gap, so tab content/scroll never overlaps the icons.
 local FOOTER_RESERVE = 60
 
+-- Build ONE page for a tab definition `t` into `host`, anchored below `topAnchor`, with `bottomReserve`
+-- pixels left at the bottom. Handles both whole-frame "embed" tabs (the Meters readout panel + optional
+-- top/bottom GSE rows) and plain scroll+rows tabs. Returns the page entry { scroll=, pane=, enableGet= }.
+-- Reused by both the settings tab bar and the Edit Mode options panel so the controls are identical.
+local function BuildPage(host, t, idx, topAnchor, bottomReserve)
+  if t.embed then
+    local page = CreateFrame("Frame", "GSETrackerCanvasEmbed" .. idx, host)
+    page:SetPoint("TOPLEFT", topAnchor, "BOTTOMLEFT", 4, -6)
+    page:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT", -8, bottomReserve)
+
+    local topOffset = 0
+    if t.rows then
+      local rowPane = CreateFrame("Frame", nil, page)
+      rowPane:SetPoint("TOPLEFT", page, "TOPLEFT", 0, 0)
+      rowPane:SetPoint("TOPRIGHT", page, "TOPRIGHT", -8, 0)
+      rowPane:SetHeight(10)
+      Populate(rowPane, t.rows(), t.centerContent)
+      topOffset = (rowPane.GetHeight and rowPane:GetHeight()) or 0
+      page.rowPane = rowPane
+    end
+
+    local bPane, bPaneH
+    if t.bottomRows then
+      bPane = CreateFrame("Frame", nil, page)
+      bPane:SetPoint("TOPLEFT", page, "TOPLEFT", 0, 0)
+      bPane:SetPoint("TOPRIGHT", page, "TOPRIGHT", -8, 0)
+      bPane:SetHeight(10)
+      Populate(bPane, t.bottomRows(), t.centerContent)
+      bPaneH = (bPane.GetHeight and bPane:GetHeight()) or 0
+      page.bottomRowPane = bPane
+    end
+
+    local fb = page:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    fb:SetPoint("TOPLEFT", page, "TOPLEFT", 16, -(topOffset + 20))
+    fb:SetText("Meters is not loaded.")
+    fb:Hide()
+    page.embedFallback = fb
+
+    local bottomOffset = (bPane and not t.embedHeight) and (bPaneH + 12) or 0
+    local embedTopOffset = math.max(0, topOffset - 12)
+    local mp = EmbedGlobalPanel(page, t.embed, embedTopOffset, bottomOffset, t.embedHeight)
+    if bPane then
+      bPane:ClearAllPoints()
+      if t.embedHeight and mp then
+        bPane:SetPoint("TOPLEFT", mp, "BOTTOMLEFT", 0, -8)
+        bPane:SetPoint("TOPRIGHT", mp, "BOTTOMRIGHT", 0, -8)
+      else
+        bPane:SetPoint("BOTTOMLEFT", page, "BOTTOMLEFT", 0, 8)
+        bPane:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", -8, 8)
+      end
+      bPane:SetHeight(bPaneH or 10)
+    end
+    return { scroll = page, pane = page }
+  else
+    local scroll = CreateFrame("ScrollFrame", "GSETrackerCanvasScroll" .. idx, host, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", topAnchor, "BOTTOMLEFT", 4, -6)
+    scroll:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT", -30, bottomReserve)
+
+    local pane = CreateFrame("Frame", nil, scroll)
+    pane:SetSize(560, 10)
+    scroll:SetScrollChild(pane)
+
+    Populate(pane, t.rows(), t.centerContent)
+    if t.cap and not (ns.Caps and ns.Caps[t.cap]) then GreyOutPane(pane) end
+    return { scroll = scroll, pane = pane, enableGet = t.enableGet and ResolveGet(t.enableGet) or nil }
+  end
+end
+
 local function BuildPanel()
   if panel then return panel end
   -- Re-scan the marker-images folder now that the UI is up (the file-load scan can miss
@@ -1740,77 +2156,9 @@ local function BuildPanel()
     tab:SetScript("OnClick", function(self) ShowTab(self:GetID()) end)
     prev = tab
 
-    if t.embed then
-      -- A whole-frame tab (e.g. the embedded Meters panel), optionally with GSE option
-      -- rows pinned across the TOP of the page (the panel fills the space below them).
-      local page = CreateFrame("Frame", "GSETrackerCanvasEmbed" .. i, panel)
-      page:SetPoint("TOPLEFT", firstTab, "BOTTOMLEFT", 4, -6)
-      page:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -8, FOOTER_RESERVE)
-
-      local topOffset = 0
-      if t.rows then
-        local rowPane = CreateFrame("Frame", nil, page)
-        rowPane:SetPoint("TOPLEFT", page, "TOPLEFT", 0, 0)
-        rowPane:SetPoint("TOPRIGHT", page, "TOPRIGHT", -8, 0)
-        rowPane:SetHeight(10)
-        Populate(rowPane, t.rows(), t.centerContent)
-        topOffset = (rowPane.GetHeight and rowPane:GetHeight()) or 0
-        page.rowPane = rowPane
-      end
-
-      -- Optional GSE rows below the embed. Populated first to measure their height.
-      local bPane, bPaneH
-      if t.bottomRows then
-        bPane = CreateFrame("Frame", nil, page)
-        bPane:SetPoint("TOPLEFT", page, "TOPLEFT", 0, 0)
-        bPane:SetPoint("TOPRIGHT", page, "TOPRIGHT", -8, 0)
-        bPane:SetHeight(10)
-        Populate(bPane, t.bottomRows(), t.centerContent)
-        bPaneH = (bPane.GetHeight and bPane:GetHeight()) or 0
-        page.bottomRowPane = bPane
-      end
-
-      local fb = page:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-      fb:SetPoint("TOPLEFT", page, "TOPLEFT", 16, -(topOffset + 20))
-      fb:SetText("Meters is not loaded.")
-      fb:Hide()
-      page.embedFallback = fb
-
-      -- With embedHeight the panel is sized to its content and the bottom rows flow right
-      -- below it (no gap); otherwise the panel fills the page and the rows pin to the bottom.
-      local bottomOffset = (bPane and not t.embedHeight) and (bPaneH + 12) or 0
-      -- Tuck the embed up under the row content: Populate leaves ~12px of bottom margin in the row
-      -- pane, which would otherwise stack with the embed's own top inset into an oversized gap.
-      -- Subtracting it keeps the gap ABOVE the embed even with the gap BELOW it.
-      local embedTopOffset = math.max(0, topOffset - 12)
-      local mp = EmbedGlobalPanel(page, t.embed, embedTopOffset, bottomOffset, t.embedHeight)
-      if bPane then
-        bPane:ClearAllPoints()
-        if t.embedHeight and mp then
-          -- -8 keeps the gap below the embed even with the ~row gaps above/below it.
-          bPane:SetPoint("TOPLEFT", mp, "BOTTOMLEFT", 0, -8)
-          bPane:SetPoint("TOPRIGHT", mp, "BOTTOMRIGHT", 0, -8)
-        else
-          bPane:SetPoint("BOTTOMLEFT", page, "BOTTOMLEFT", 0, 8)
-          bPane:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", -8, 8)
-        end
-        bPane:SetHeight(bPaneH or 10)
-      end
-      panel.tabEntries[i] = { tab = tab, scroll = page, pane = page }
-    else
-      local scroll = CreateFrame("ScrollFrame", "GSETrackerCanvasScroll" .. i, panel, "UIPanelScrollFrameTemplate")
-      scroll:SetPoint("TOPLEFT", firstTab, "BOTTOMLEFT", 4, -6)
-      scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -30, FOOTER_RESERVE)
-
-      local pane = CreateFrame("Frame", nil, scroll)
-      pane:SetSize(560, 10)
-      scroll:SetScrollChild(pane)
-
-      Populate(pane, t.rows(), t.centerContent)
-      -- Whole-tab grey-out when the feature isn't available on this client (e.g. AH on Classic).
-      if t.cap and not (ns.Caps and ns.Caps[t.cap]) then GreyOutPane(pane) end
-      panel.tabEntries[i] = { tab = tab, scroll = scroll, pane = pane, enableGet = t.enableGet and ResolveGet(t.enableGet) or nil }
-    end
+    local entry = BuildPage(panel, t, i, firstTab, FOOTER_RESERVE)
+    entry.tab = tab
+    panel.tabEntries[i] = entry
   end
 
   -- Persistent social footer pinned to the bottom of the whole frame (shows on every
@@ -1828,6 +2176,119 @@ local function BuildPanel()
   -- path and break Logout/Exit.)
   ShowTab(1)
   return panel
+end
+
+-- ── Edit Mode option windows (one pop-up per element) ────────────────────────
+-- Each element ("Click To Edit" box) opens its OWN movable, native-styled pop-up window holding just
+-- that element's options (rendered by the shared BuildPage). Built lazily, cached per index. Shown only
+-- in Edit Mode; the Meters readout panel (MetersOptionsPanel) reparents into the Meters window.
+local emWindows = {}  -- [idx into EDITMODE_TABS] = window frame
+local function BuildEditWindow(idx)
+  local t = EDITMODE_TABS[idx]
+  if not t then return nil end
+  if emWindows[idx] then return emWindows[idx] end
+  RebuildMarkerOptionLists()
+
+  local w = CreateFrame("Frame", "GSETrackerEditWin" .. idx, UIParent, "BackdropTemplate")
+  w:SetSize(t.winWidth or 580, (t.winHeight or 460) + 200)
+  w:SetPoint("CENTER", UIParent, "CENTER", (idx - 1) * 50 - 25, (idx - 1) * -50 + 25)  -- stagger so they don't fully overlap
+  -- DIALOG strata + high level so it floats ABOVE Blizzard's Edit Mode manager (Plumber's pattern).
+  w:SetFrameStrata("DIALOG"); w:SetFrameLevel(200); w:SetToplevel(true)
+  w:EnableMouse(true); w:SetClampedToScreen(true)
+  -- Native Edit Mode dialog look: the same "Dialog" NineSlice the DamageMeter dialog uses.
+  local okN = _G.NineSliceUtil and _G.NineSliceUtil.ApplyLayoutByName
+    and pcall(_G.NineSliceUtil.ApplyLayoutByName, w, "Dialog")
+  if not okN and w.SetBackdrop then
+    w:SetBackdrop({
+      bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
+      edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+      tile = true, tileSize = 32, edgeSize = 24,
+      insets = { left = 8, right = 8, top = 8, bottom = 8 },
+    })
+  end
+  -- The "Dialog" NineSlice only draws the border; fill the interior to match the HUD Edit Mode manager.
+  -- Dumped: the manager + settings dialogs are NOT fully opaque -- their center fill (a SetColorTexture
+  -- inset 7px) is a semi-transparent dark, so the world shows faintly through. We match that with a
+  -- single dark fill at ~0.82 alpha (no opaque underlay -- that made ours read fully solid). Inset 7 to
+  -- match Blizzard's center-fill inset. (Color value eyeballed to the manager; tweak GSET_EDIT_BG_ALPHA.)
+  local GSET_EDIT_BG_ALPHA = 0.82
+  local bg = w:CreateTexture(nil, "BACKGROUND", nil, -1)
+  bg:SetPoint("TOPLEFT",     w, "TOPLEFT",     7, -7)
+  bg:SetPoint("BOTTOMRIGHT", w, "BOTTOMRIGHT", -7,  7)
+  bg:SetColorTexture(0.05, 0.05, 0.06, GSET_EDIT_BG_ALPHA)
+
+  -- Close button: the exact native Edit Mode dialog close (RedButton-Exit atlas, 24x24, flush TOPRIGHT),
+  -- not UIPanelCloseButton -- matches EditModeSystemSettingsDialog from the dump.
+  local close = CreateFrame("Button", nil, w)
+  close:SetSize(24, 24)
+  close:SetPoint("TOPRIGHT", w, "TOPRIGHT", 0, 0)
+  close:SetNormalAtlas("RedButton-Exit")
+  close:SetPushedAtlas("RedButton-exit-pressed")
+  close:SetHighlightAtlas("RedButton-Highlight")
+  local closeHL = close:GetHighlightTexture(); if closeHL then closeHL:SetBlendMode("ADD") end
+  close:SetScript("OnClick", function() w:Hide() end)
+
+  -- Centred element-name title (native: GameFontHighlightLarge, white, TOP offset -15).
+  local title = w:CreateFontString(nil, "ARTWORK", "GameFontHighlightLarge")
+  title:SetPoint("TOP", w, "TOP", 0, -15)
+  title:SetText(t.text)
+  w.title = title
+
+  -- Drag the window by its title strip.
+  w:SetMovable(true)
+  local grab = CreateFrame("Frame", nil, w)
+  grab:SetPoint("TOPLEFT", w, "TOPLEFT", 0, 0)
+  grab:SetPoint("TOPRIGHT", w, "TOPRIGHT", 0, 0)
+  grab:SetHeight(40); grab:EnableMouse(true); grab:RegisterForDrag("LeftButton")
+  grab:SetScript("OnDragStart", function() w:StartMoving() end)
+  grab:SetScript("OnDragStop",  function() w:StopMovingOrSizing() end)
+
+  -- Invisible header anchor under the title; the element's page fills from here to the bottom.
+  local header = CreateFrame("Frame", nil, w)
+  header:SetPoint("TOPLEFT", w, "TOPLEFT", 8, -40)
+  header:SetSize(1, 1)
+  -- Both Edit Mode pop-ups (Meters + Action Tracker) render natively now. The embed path is kept only
+  -- as a fallback for any future tab that still embeds a prebuilt panel.
+  if t.embed then
+    BuildPage(w, t, 100 + idx, header, 14)
+  else
+    -- Native one-per-row layout (matches the HUD Edit Mode dialogs). No scroll bar -- the window sizes
+    -- to its content like Blizzard's native dialogs.
+    local pane = CreateFrame("Frame", nil, w)
+    pane:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 14, -6)
+    pane:SetWidth((w:GetWidth() or 580) - 44)
+    PopulateNative(pane, t.rows())
+    if t.cap and not (ns.Caps and ns.Caps[t.cap]) then GreyOutPane(pane) end
+    -- Fit the window height to the content: title strip (~46) + content + bottom padding.
+    -- (The "Revert Changes" / "Reset To Default Position" buttons were REMOVED -- they could wipe data.)
+    local contentH = (pane.GetHeight and pane:GetHeight()) or 200
+    w:SetHeight(46 + contentH + 30)
+  end
+
+  -- Meters used to embed MetersOptionsPanel, whose OnShow drove the readout preview (12345/6789 etc.).
+  -- That panel is no longer embedded, so refresh the meter display whenever the Meters window opens.
+  if t.key == "Meters" then
+    w:HookScript("OnShow", function()
+      if _G.Meters_ApplyDisplayToggles then pcall(_G.Meters_ApplyDisplayToggles) end
+    end)
+  end
+
+  w:Hide()
+  emWindows[idx] = w
+  return w
+end
+
+-- Open one element's pop-up window (called when its "Click To Edit" box is clicked). idx -> EDITMODE_TABS.
+function _G.GSETracker_EditModeShowTab(idx)
+  idx = tonumber(idx); if not idx then return end
+  local w = BuildEditWindow(idx)
+  if w then w:Show(); w:Raise() end
+end
+
+-- Edit Mode exit (from ui/editmode.lua): hide every element window. (Windows open on box click, not here.)
+function _G.GSETracker_SetEditModeOptions(show)
+  if show then return end
+  for _, w in pairs(emWindows) do w:Hide() end
 end
 
 -- ── Registration + entry points ─────────────────────────────────────────────

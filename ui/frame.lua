@@ -206,41 +206,10 @@ function UI:EnsureActionTrackerMoveMarker()
 end
 
 function UI:UpdateActionTrackerMoveMarker()
-  local marker = self:EnsureActionTrackerMoveMarker()
-  EnsureDB()
-  if not addon._editingOptions or self:IsLocked() then
-    marker:Hide()
-    return
-  end
-
-  local r, g, b = self:GetClassColorRGB()
-  local ui = self.ui
-
-  marker:ClearAllPoints()
-  if ui then
-    local markerTarget = ui.content or ui
-    if marker:GetParent() ~= markerTarget then
-      marker:SetParent(markerTarget)
-    end
-    marker:SetFrameStrata(ui:GetFrameStrata() or (C.STRATA_TOOLTIP or "TOOLTIP"))
-    marker:SetFrameLevel((ui:GetFrameLevel() or 0) + 20)
-    marker:SetAllPoints(markerTarget)
-  else
-    if marker:GetParent() ~= UIParent then
-      marker:SetParent(UIParent)
-    end
-    marker:SetFrameStrata(C.STRATA_TOOLTIP or "TOOLTIP")
-    marker:SetFrameLevel(C.ACTION_TRACKER_MARKER_FRAME_LEVEL or 50)
-    local x, y = self:GetActionTrackerOffset()
-    marker:SetSize(C.ACTION_TRACKER_MARKER_BASE_SIZE or 48, C.ACTION_TRACKER_MARKER_BASE_SIZE or 48)
-    SetFramePointIfChanged(marker, "CENTER", UIParent, "CENTER", x, y)
-  end
-  marker:SetBackdropColor(r, g, b, C.ALPHA_SOFT or 0.10)
-  marker:SetBackdropBorderColor(r, g, b, C.ALPHA_STRONG or 0.95)
-  marker.glow:SetVertexColor(r, g, b, C.ALPHA_GLOW or 0.18)
-  marker.crossH:SetVertexColor(r, g, b, C.ALPHA_STRONG or 0.95)
-  marker.crossV:SetVertexColor(r, g, b, C.ALPHA_STRONG or 0.95)
-  marker:Show()
+  -- The old class-coloured centering marker (box + crosshair lines) is superseded by the native Edit
+  -- Mode selection box drawn around the Action Tracker (ui/editmode.lua). Keep it permanently hidden so
+  -- there's no duplicate green-lined guide. (Function kept as a harmless no-op for its many call sites.)
+  if self._actionTrackerMoveMarker then self._actionTrackerMoveMarker:Hide() end
 end
 
 function UI:HideActionTrackerMoveMarker()
@@ -719,7 +688,9 @@ function UI:CanDragActionTracker()
   local ui = self.ui
   if not ui then return false end
   if not ui:IsShown() then return false end
-  if self:IsLocked() then return false end
+  -- Locked blocks dragging EXCEPT while editing (Blizzard Edit Mode sets addon._editingOptions),
+  -- so the tracker is movable in Edit Mode without changing its saved lock.
+  if self:IsLocked() and not addon._editingOptions then return false end
   if API.InCombatLockdown and API.InCombatLockdown() then return false end
   return true
 end

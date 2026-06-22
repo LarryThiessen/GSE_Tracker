@@ -29,8 +29,7 @@ local defaults = {
     showHPS          = true,
     showGCD          = true,
     showAHLightUsage = true,
-    showDetails      = true,
-    hideDetailsInCombat = false,
+    skinDamageMeter  = true,   -- DamageMeter Skinner: restyle Blizzard's meter (Retail, no Details!)
     locked           = true,
     fontSize         = 18,
     fontStyle        = "Friz Quadrata TT",
@@ -45,6 +44,10 @@ for k, v in pairs(defaults) do
         MetersSavedVars[k] = v
     end
 end
+
+-- The SBAssist % readout moved out to the standalone SLG-SBA Monitor addon. Force it OFF so it never
+-- shows in the meter cluster OR in the unlocked preview examples (ApplyTestDisplay reads this flag).
+MetersSavedVars.showAHLightUsage = false
 
 local function NormalizeMarker(value)
     if value == "SBA" then value = "AHLight" end
@@ -135,7 +138,7 @@ local positionXBox,    positionYBox
 local opacitySlider,   opacityBox
 local refreshRateSlider
 local resetBtn, lockCB
-local MarkerDrop, detailsCB, detailsCombatCB, autoResetCB
+local MarkerDrop
 
 local function IsCombatLockActive()
     return UnitAffectingCombat("player")
@@ -274,7 +277,7 @@ end
 local function ClampRefreshRateValue(value)
     value = tonumber(value) or 0.10
     value = math.floor((value * 100) + 0.5) / 100
-    if value < 0.05 then value = 0.05 end
+    if value < 0.02 then value = 0.02 end
     if value > 0.15 then value = 0.15 end
     return value
 end
@@ -470,39 +473,11 @@ local function ApplyDisplayToggles()
     ApplyTestDisplay()
 end
 
--- ─── Details Toggle ───────────────────────────────────────
-local function ApplyDetailsToggle(openWhenEnabled)
-    local show = MetersSavedVars.showDetails ~= false
-    MetersSavedVars.Details = MetersSavedVars.Details or {}
-    MetersSavedVars.Details.enabled = show
-    MetersSavedVars.Details.hideInCombat = MetersSavedVars.hideDetailsInCombat == true
-    if show then
-        if openWhenEnabled or MetersSavedVars.Details.wasShown then
-            if Details_Show then Details_Show() end
-        end
-    else
-        if Details_Hide then Details_Hide() end
-        MetersSavedVars.Details.wasShown = false
-    end
-end
-
-local function ApplyDetailsCombatToggle()
-    MetersSavedVars.hideDetailsInCombat = MetersSavedVars.hideDetailsInCombat == true
-    MetersSavedVars.Details = MetersSavedVars.Details or {}
-    MetersSavedVars.Details.hideInCombat = MetersSavedVars.hideDetailsInCombat
-    if detailsCombatCB then detailsCombatCB:SetChecked(MetersSavedVars.hideDetailsInCombat) end
-    if Details_ApplyCombatVisibility then Details_ApplyCombatVisibility() end
-end
-
-function Meters_SetDetailsOptionChecked(checked)
-    local show = checked == true
-    MetersSavedVars.showDetails = show
-    MetersSavedVars.Details = MetersSavedVars.Details or {}
-    MetersSavedVars.Details.enabled = show
-    MetersSavedVars.Details.hideInCombat = MetersSavedVars.hideDetailsInCombat == true
-    if not show then MetersSavedVars.Details.wasShown = false end
-    if detailsCB then detailsCB:SetChecked(show) end
-end
+-- Exposed so the native Edit Mode Meters options (settings_panel.lua, rendered one-per-row) can apply
+-- changes with the EXACT same logic the old embedded panel used.
+_G.Meters_ApplyDisplayToggles = ApplyDisplayToggles
+_G.Meters_ApplyOpacity        = ApplyOpacity
+_G.Meters_ApplyRefreshRate    = ApplyRefreshRate
 
 local function UpdateLockState()
     -- The meters frame follows GSE: Tracker's "Lock All"; combat no longer force-locks it
@@ -639,8 +614,9 @@ MarkerDrop:Hide()
 -- front of Show DPS -- it is the single source for showGCD, so the addon's Player Marker
 -- colour row no longer carries a duplicate Show GCD checkbox.)
 local gcdCB = CreateFrame("CheckButton", nil, panel, "InterfaceOptionsCheckButtonTemplate")
--- Row 2: the Details row is now ABOVE this one (rows swapped); -54 keeps the original row spacing.
-gcdCB:SetPoint("TOPLEFT", panel, "TOPLEFT", LEFT_MARGIN, -54)
+-- Top row (the old Details checkbox row was removed; the meter source is now picked in the Edit Mode
+-- "GSE: Tracker Skinner" panel).
+gcdCB:SetPoint("TOPLEFT", panel, "TOPLEFT", LEFT_MARGIN, -16)
 gcdCB.Text:SetText("Show GCD")
 
 local dpsCB = CreateFrame("CheckButton", nil, panel, "InterfaceOptionsCheckButtonTemplate")
@@ -656,31 +632,8 @@ local ahLightUsageCB = CreateFrame("CheckButton", nil, panel, "InterfaceOptionsC
 ahLightUsageCB:SetPoint("TOPLEFT", hpsCB, "TOPLEFT", 130, 0)
 ahLightUsageCB.Text:SetText("Show SBAssist %")
 
--- Details row (ROW 1, on top, centred horizontally): Show Details | Auto Reset Details | Hide
--- Details in Combat. Positioned at the left for now; re-centred once all three labels exist.
-detailsCB = CreateFrame("CheckButton", nil, panel, "InterfaceOptionsCheckButtonTemplate")
-detailsCB:SetPoint("TOPLEFT", panel, "TOPLEFT", LEFT_MARGIN, -16)
-detailsCB.Text:SetText("Show Details")
-
-autoResetCB = CreateFrame("CheckButton", nil, panel, "InterfaceOptionsCheckButtonTemplate")
-autoResetCB:SetPoint("LEFT", detailsCB.Text, "RIGHT", 24, 0)
-autoResetCB.Text:SetText("Auto Reset Details")
-
-detailsCombatCB = CreateFrame("CheckButton", nil, panel, "InterfaceOptionsCheckButtonTemplate")
-detailsCombatCB:SetPoint("LEFT", autoResetCB.Text, "RIGHT", 24, 0)
-detailsCombatCB.Text:SetText("Hide Details in Combat")
-
--- Centre the Details row horizontally over the content (the sliders span LEFT_MARGIN .. +MAIN_SLIDER_WIDTH).
--- Width = the 3 (checkbox + label) groups + the 2x 24px gaps between them (~132 of fixed chrome).
-do
-    local rowW = 132 + (detailsCB.Text:GetStringWidth() or 0)
-                     + (autoResetCB.Text:GetStringWidth() or 0)
-                     + (detailsCombatCB.Text:GetStringWidth() or 0)
-    local cx = math.floor((LEFT_MARGIN + MAIN_SLIDER_WIDTH * 0.5) - rowW * 0.5 + 0.5)
-    if cx < LEFT_MARGIN then cx = LEFT_MARGIN end
-    detailsCB:ClearAllPoints()
-    detailsCB:SetPoint("TOPLEFT", panel, "TOPLEFT", cx, -16)
-end
+-- (Removed: the "Show Details / Auto Reset Details / Hide Details in Combat" row. The meter source is
+-- now chosen in the Edit Mode "GSE: Tracker Skinner" panel; the breakdown opens on a meter line-click.)
 
 -- Hover tooltips. Read-only OnEnter/OnLeave -> taint-safe on the embedded Settings canvas. The
 -- Classic DPS/HPS/Details paths run off the Details! Damage Meter addon, so call that out.
@@ -698,9 +651,6 @@ AddMeterTooltip(gcdCB, "Show GCD", "Your global cooldown timer. Works on every g
 AddMeterTooltip(dpsCB, "Show DPS", "Your damage per second. Retail: Blizzard's real-time damage meter. Classic: the |cff33ff99Details! Damage Meter|r addon (if installed).")
 AddMeterTooltip(hpsCB, "Show HPS", "Your healing per second. Retail: Blizzard's real-time damage meter. Classic: the |cff33ff99Details! Damage Meter|r addon (if installed).")
 AddMeterTooltip(ahLightUsageCB, "Show SBAssist %", "How often your casts match the Assisted Highlight suggestion. Retail only.")
-AddMeterTooltip(detailsCB, "Show Details", "Show the damage-meter window. |cff33ff99Details!|r: re-opens its window even if you'd closed it. Blizzard's built-in (Retail, no Details!): shows it -- but the meter must be enabled in Settings > Gameplay Enhancements first (there's no API to switch it on).")
-AddMeterTooltip(autoResetCB, "Auto Reset Details", "Automatically reset the damage meter at the start of each combat, so it shows only the current fight. Enables auto-reset even if it was switched off in the meter's settings.")
-AddMeterTooltip(detailsCombatCB, "Hide Details in Combat", "Hide the Details window during combat, then show it again afterwards.")
 
 -- Refresh Rate. Anchored to gcdCB -- the GCD row is now the LOWER of the two checkbox rows (rows
 -- were swapped, Details on top), so the sliders sit just below it at the left margin.
@@ -827,20 +777,7 @@ ahLightUsageCB:SetScript("OnClick", function(self)
     MetersSavedVars.showAHLightUsage = self:GetChecked(); ApplyDisplayToggles()
 end)
 
-detailsCB:SetScript("OnClick", function(self)
-    Meters_SetDetailsOptionChecked(self:GetChecked()); ApplyDetailsToggle(self:GetChecked())
-end)
-
-autoResetCB:SetScript("OnClick", function(self)
-    MetersSavedVars.autoResetDetails = self:GetChecked() == true
-end)
-
-detailsCombatCB:SetScript("OnClick", function(self)
-    MetersSavedVars.hideDetailsInCombat = self:GetChecked() == true
-    ApplyDetailsCombatToggle()
-end)
-
-resetBtn:SetScript("OnClick", function()
+local function ResetMetersDefaults()
     for k in pairs(MetersSavedVars) do MetersSavedVars[k] = nil end
     for k, v in pairs(defaults)       do MetersSavedVars[k] = v   end
     MetersSavedVars.centerIndicator = nil
@@ -848,10 +785,10 @@ resetBtn:SetScript("OnClick", function()
     SetCurrentFontName(defaults.fontStyle); SyncLegacyShowAHLight()
     MetersSavedVars.point = "CENTER"; MetersSavedVars.relPoint = "CENTER"
     MetersSavedVars.x = 0; MetersSavedVars.y = -15
+    MetersSavedVars.showAHLightUsage = false  -- SBA % lives in SLG-SBA Monitor now; stays off after reset
 
     lockCB:SetChecked(true); gcdCB:SetChecked(true); dpsCB:SetChecked(true)
-    hpsCB:SetChecked(true); ahLightUsageCB:SetChecked(true); detailsCB:SetChecked(true)
-    detailsCombatCB:SetChecked(false); autoResetCB:SetChecked(false)
+    hpsCB:SetChecked(true); ahLightUsageCB:SetChecked(false)
 
     opacitySlider:SetValue(100); UpdateOpacityText(100); UpdateOpacityBox()
 
@@ -874,9 +811,12 @@ resetBtn:SetScript("OnClick", function()
     end
 
     SyncPositionControlsFromSaved(); UpdatePositionControlState()
-    ApplyFontSettings(); ApplyDisplayToggles(); ApplyDetailsToggle(); ApplyDetailsCombatToggle()
+    ApplyFontSettings(); ApplyDisplayToggles()
     UpdateLockState(); UpdateLockLabel(); ApplyOpacity(); ApplyRefreshRate(); UpdateVisibility()
-end)
+end
+resetBtn:SetScript("OnClick", ResetMetersDefaults)
+-- Exposed so the Edit Mode "Revert All Changes" hook can factory-reset Meters alongside the rest.
+_G.Meters_ResetToDefaults = ResetMetersDefaults
 
 -- Per-feature greying of the readout controls:
 --   GCD            -- Blizzard cooldown read; works on EVERY flavor -> never greyed.
@@ -892,10 +832,10 @@ local function ApplyReadoutAvailability()
         if w.SetEnabled then w:SetEnabled(false) elseif w.Disable then w:Disable() end
         if w.Text and w.Text.SetTextColor then w.Text:SetTextColor(0.5, 0.5, 0.5) end
     end
-    -- DPS/HPS + the Details window all need a damage-meter source (retail C_DamageMeter OR the
-    -- Details! addon). SBA% is the only one that's strictly retail (C_AssistedCombat).
+    -- DPS/HPS need a damage-meter source (retail C_DamageMeter OR the Details! addon). SBA% is the only
+    -- one that's strictly retail (C_AssistedCombat).
     if not (_G.GSETracker_HasDPSSource and _G.GSETracker_HasDPSSource()) then
-        dim(dpsCB); dim(hpsCB); dim(detailsCB); dim(detailsCombatCB); dim(autoResetCB)
+        dim(dpsCB); dim(hpsCB)
     end
     if not METERS_CAPABLE then
         dim(ahLightUsageCB)
@@ -917,9 +857,6 @@ panel:SetScript("OnShow", function()
     dpsCB:SetChecked(MetersSavedVars.showDPS)
     hpsCB:SetChecked(MetersSavedVars.showHPS)
     ahLightUsageCB:SetChecked(MetersSavedVars.showAHLightUsage)
-    detailsCB:SetChecked(MetersSavedVars.showDetails ~= false)
-    detailsCombatCB:SetChecked(MetersSavedVars.hideDetailsInCombat == true)
-    autoResetCB:SetChecked(MetersSavedVars.autoResetDetails == true)
     UpdateLockLabel()
 
     opacitySlider:SetValue(MetersSavedVars.opacity or 100)
@@ -938,7 +875,7 @@ panel:SetScript("OnShow", function()
     if MetersSavedVars.locked then ApplyMarkerPreview(false) end
 
     SyncPositionControlsFromSaved(); UpdatePositionControlState()
-    ApplyFontSettings(); ApplyDisplayToggles(); ApplyDetailsCombatToggle()
+    ApplyFontSettings(); ApplyDisplayToggles()
     UpdateLockState(); ApplyOpacity(); ApplyRefreshRate(); UpdateVisibility()
 end)
 

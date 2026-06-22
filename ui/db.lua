@@ -1439,7 +1439,8 @@ function Utils:SetHideErrors(enabled)
   if addon.ApplyHideErrors then addon:ApplyHideErrors(db.hideErrors) end
 end
 
--- AH match % readout (matches / casts over the session's combat time). Default OFF.
+-- AH match % readout (matches / casts over the session's combat time). Default OFF. Also available as a
+-- separate window in the standalone SLG-SBA Monitor addon; this is the in-tracker version.
 function Utils:GetAHMatchPercentEnabled()
   local db = GetRuntimeDB()
   return db.ahMatchPercentEnabled and true or false
