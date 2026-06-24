@@ -166,7 +166,7 @@ local function BuildWindow(dialog)
   local brand = (ns.Utils and ns.Utils.Constants and ns.Utils.Constants.ADDON_DISPLAY_NAME)
     or (ns.Constants and ns.Constants.ADDON_DISPLAY_NAME)
     or "|cFFFFFFFFGS|r|cFF00FFFFE:|r|cFFFFFF00 Tracker|r"
-  title:SetText(brand .. " Skinner")  -- GS white / E: cyan / Tracker yellow; "Skinner" = base white
+  title:SetText(brand .. ": Details")  -- GS white / E: cyan / Tracker yellow; ": Details" = base white
   title:SetTextColor(1, 1, 1)
   local icon = win:CreateTexture(nil, "OVERLAY")
   icon:SetSize(20, 20)

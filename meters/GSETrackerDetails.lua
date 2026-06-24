@@ -306,6 +306,19 @@ end
 -- ─── Window state ─────────────────────────────────────────────────────────────
 local function SaveGSETrackerDetailsWindowState()
     if not frame then return end
+    -- Normalize to a UIParent-relative anchor BEFORE reading the point. Save discards the relativeTo
+    -- frame and Restore always re-applies against UIParent, so a stock-window-relative anchor (set once
+    -- by AnchorToStockMeter, e.g. TOPLEFT->stock TOPRIGHT) would be reinterpreted as UIParent's TOPRIGHT
+    -- on reopen -- landing the window on the opposite side of the screen. Re-anchoring to UIParent at the
+    -- same on-screen spot (the file's GetLeft/GetTop -> BOTTOMLEFT convention) makes save/restore round-trip.
+    local _, relTo = frame:GetPoint(1)
+    if relTo and relTo ~= UIParent then
+        local left, top = frame:GetLeft(), frame:GetTop()
+        if left and top then
+            frame:ClearAllPoints()
+            frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
+        end
+    end
     local db = GetWindowDB(activeInst and activeInst.id)
     local point, _, relativePoint, x, y = frame:GetPoint(1)
     db.point         = point         or "CENTER"
@@ -413,6 +426,22 @@ local function GetPlayerClassColor()
     local c = classTag and classColors and classColors[classTag]
     if c then return c.r, c.g, c.b end
     return 0.48, 0.66, 0.25
+end
+
+-- The class colour to paint the breakdown bars with: the player's own, UNLESS the window is focused on
+-- another combatant (clicked their stock-meter row) -- then THEIR class colour, resolved from the GUID via
+-- GetPlayerInfoByGUID (works for grouped/seen players). Falls back to the player's colour if it can't
+-- resolve a class (e.g. focus is a pet/NPC or info not cached yet).
+local function GetFocusClassColor()
+    local focusGUID = activeInst and activeInst.focusGUID
+    if not focusGUID or focusGUID == UnitGUID("player") then
+        return GetPlayerClassColor()
+    end
+    local classColors = CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS
+    local ok, _, classTag = pcall(GetPlayerInfoByGUID, focusGUID)  -- (localizedClass, englishClass, ...)
+    local c = ok and classTag and classColors and classColors[classTag]
+    if c then return c.r, c.g, c.b end
+    return GetPlayerClassColor()
 end
 
 local function GetPlayerClassIconInfo()
@@ -914,50 +943,78 @@ local function GetPlayerSourceFromAvailableSessions(meterType, playerGUID)
 end
 
 -- Follow the segment the user picked in the stock meter: its window exposes the displayed session's
--- ID (DamageMeterSessionWindow1.sessionID). Read the player's source for THAT session so our
--- breakdown matches the meter's segment (Current / Overall / a past combat).
-local function GetMeterSelectedSource(meterType, playerGUID)
+-- ID (DamageMeterSessionWindow1.sessionID). Read the TARGET combatant's source for THAT session so our
+-- breakdown matches the meter's segment (Current / Overall / a past combat). `targetGUID` is the player
+-- by default, or another combatant when one was clicked. `isSelf` lets the self lookup also try the
+-- "player" convenience string the API accepts; for OTHER combatants we MUST pass their real GUID (the
+-- "player" string would wrongly return us). SourceMatchesPlayer matches any GUID, not just the player.
+local function GetMeterSelectedSource(meterType, targetGUID, isSelf)
     local w = _G.DamageMeterSessionWindow1
     local sid = w and w.sessionID
     if not sid then return nil end
     -- Direct source-by-session-ID lookup (works for past/Expired combats, where the combatSources
     -- iteration below comes back empty).
     if C_DamageMeter.GetCombatSessionSourceFromID then
-        local ok, src = pcall(C_DamageMeter.GetCombatSessionSourceFromID, sid, meterType, playerGUID)
+        local ok, src = pcall(C_DamageMeter.GetCombatSessionSourceFromID, sid, meterType, targetGUID)
         if ok and src then return src end
-        ok, src = pcall(C_DamageMeter.GetCombatSessionSourceFromID, sid, meterType, "player")
-        if ok and src then return src end
+        if isSelf then
+            ok, src = pcall(C_DamageMeter.GetCombatSessionSourceFromID, sid, meterType, "player")
+            if ok and src then return src end
+        end
     end
-    -- Fallback: pull the session and find the player among its combatSources (Current/Overall).
+    -- Fallback: pull the session and find the target among its combatSources (Current/Overall).
     if C_DamageMeter.GetCombatSessionFromID then
         local ok, info = pcall(C_DamageMeter.GetCombatSessionFromID, sid, meterType)
         if ok and info and type(info.combatSources) == "table" then
             for _, src in ipairs(info.combatSources) do
-                if SourceMatchesPlayer(src, playerGUID) then return src end
+                if SourceMatchesPlayer(src, targetGUID) then return src end
             end
         end
     end
     return nil
 end
 
+-- Resolve the session source for a SPECIFIC combatant GUID through every available avenue (selected
+-- segment first, then current/typed sessions, then a scan of available sessions). `isSelf` enables the
+-- "player" convenience-string fallbacks; for other combatants only the real GUID is used.
+local function ResolveSourceForGUID(meterType, targetGUID, isSelf)
+    local sel = GetMeterSelectedSource(meterType, targetGUID, isSelf)  -- the meter's selected segment wins
+    if sel then return sel end
+    if C_DamageMeter.GetCurrentCombatSessionSource then
+        local ok, src = pcall(C_DamageMeter.GetCurrentCombatSessionSource, meterType, targetGUID)
+        if ok and src then return src end
+        if isSelf then
+            ok, src = pcall(C_DamageMeter.GetCurrentCombatSessionSource, meterType, "player")
+            if ok and src then return src end
+        end
+    end
+    if C_DamageMeter.GetCombatSessionSourceFromType then
+        local ok, src = pcall(C_DamageMeter.GetCombatSessionSourceFromType, SESSION_TYPE, meterType, targetGUID)
+        if ok and src then return src end
+        if isSelf then
+            ok, src = pcall(C_DamageMeter.GetCombatSessionSourceFromType, SESSION_TYPE, meterType, "player")
+            if ok and src then return src end
+        end
+    end
+    return GetPlayerSourceFromAvailableSessions(meterType, targetGUID)
+end
+
+-- The breakdown normally shows YOU, but clicking another combatant's row in the stock meter focuses
+-- THEM for that window (activeInst.focusGUID). If the focused combatant has no data in the shown
+-- segment, revert to self so the window is never stranded empty. activeInst.focusName carries who is
+-- actually rendered (nil = self) for the title bar.
 local function GetPlayerSource(meterType)
     if not C_DamageMeter then return nil, "C_DamageMeter is not available." end
     local playerGUID = UnitGUID("player"); if not playerGUID then return nil, "Player GUID is not ready." end
-    local sel = GetMeterSelectedSource(meterType, playerGUID)  -- the meter's selected segment wins
-    if sel then return sel end
-    if C_DamageMeter.GetCurrentCombatSessionSource then
-        local ok, src = pcall(C_DamageMeter.GetCurrentCombatSessionSource, meterType, playerGUID)
-        if ok and src then return src end
-        ok, src = pcall(C_DamageMeter.GetCurrentCombatSessionSource, meterType, "player")
-        if ok and src then return src end
+    local targetGUID = (activeInst and activeInst.focusGUID) or playerGUID
+    local isSelf = (targetGUID == playerGUID)
+    local src = ResolveSourceForGUID(meterType, targetGUID, isSelf)
+    if not src and not isSelf then
+        if activeInst then activeInst.focusGUID = nil end  -- focused combatant absent here -> back to self
+        isSelf = true
+        src = ResolveSourceForGUID(meterType, playerGUID, true)
     end
-    if C_DamageMeter.GetCombatSessionSourceFromType then
-        local ok, src = pcall(C_DamageMeter.GetCombatSessionSourceFromType, SESSION_TYPE, meterType, playerGUID)
-        if ok and src then return src end
-        ok, src = pcall(C_DamageMeter.GetCombatSessionSourceFromType, SESSION_TYPE, meterType, "player")
-        if ok and src then return src end
-    end
-    local src = GetPlayerSourceFromAvailableSessions(meterType, playerGUID)
+    if activeInst then activeInst.focusName = (not isSelf and src and src.name) or nil end
     if src then return src end
     return nil, "No stock details session source was returned."
 end
@@ -1392,7 +1449,14 @@ end
 local function UpdateTitleBarText()
     if not (frame and frame.titleText) then return end
     local info = VIEW_DATA[currentView] or VIEW_DATA[DEFAULT_VIEW]
-    frame.titleText:SetText("Filter: " .. ((info and info.label) or ""))
+    local label = (info and info.label) or ""
+    -- Focused on another combatant (clicked their row in the stock meter) -> show their name; else self.
+    local who = activeInst and activeInst.focusName
+    if type(who) == "string" and who ~= "" then
+        frame.titleText:SetText(who .. " - " .. label)
+    else
+        frame.titleText:SetText("Filter: " .. label)
+    end
 end
 local function UpdateTitleBarClassIcon() return end
 
@@ -2185,6 +2249,11 @@ local function CreateRow(index)
 
     function row:UpdateBar(pf)
         pf = Clamp(pf or 0, 0, 1); self.percentFraction = pf; self.bar:SetValue(pf)
+        -- Re-tint to the focused combatant's class colour each render (bars are coloured once at creation,
+        -- but the focus -- whose breakdown we show -- can change). Self = the player's own colour, as before.
+        local r, g, b = GetFocusClassColor()
+        if self.bar.SetStatusBarColor then self.bar:SetStatusBarColor(r, g, b, 0.95) end
+        if self.barBG and self.barBG.SetVertexColor then self.barBG:SetVertexColor(r * 0.25, g * 0.25, b * 0.25, 0.45) end
     end
 
     row:SetScript("OnClick", function(self, button)
@@ -2538,17 +2607,28 @@ end
 -- secret boolean tests, no taint.
 st.focusWithin = function(root)
     if not root then return false end
-    local foci = GetMouseFoci and GetMouseFoci()
-    if type(foci) == "table" then
-        for _, f in ipairs(foci) do
-            local cur = f
-            while cur do if cur == root then return true end; cur = cur.GetParent and cur:GetParent() or nil end
+    -- Walk a frame's parent chain looking for `root` by reference. Guard FORBIDDEN frames (e.g. the Shop/
+    -- Store UI is protected -- calling :GetParent() on it from addon code throws "bad self") and pcall the
+    -- GetParent call. A chain that can't be walked simply isn't our window, so treat it as "not within".
+    local function chainHasRoot(cur)
+        while cur do
+            if cur == root then return true end
+            if cur.IsForbidden and cur:IsForbidden() then return false end
+            if not cur.GetParent then return false end
+            local ok, parent = pcall(cur.GetParent, cur)
+            if not ok then return false end
+            cur = parent
         end
         return false
     end
-    local cur = GetMouseFocus and GetMouseFocus()
-    while cur do if cur == root then return true end; cur = cur.GetParent and cur:GetParent() or nil end
-    return false
+    local foci = GetMouseFoci and GetMouseFoci()
+    if type(foci) == "table" then
+        for _, f in ipairs(foci) do
+            if chainHasRoot(f) then return true end
+        end
+        return false
+    end
+    return chainHasRoot(GetMouseFocus and GetMouseFocus())
 end
 local clickAway = CreateFrame("Frame")
 clickAway:SetScript("OnEvent", function()
@@ -2616,11 +2696,12 @@ local function AnchorToStockMeter(stockWin)
 end
 -- Open the breakdown for stock meter window `stockId` (1..5): each gets its OWN window, built on first
 -- use and anchored beside its own stock window.
-local function OpenMine(stockId)
+local function OpenMine(stockId, focusGUID)
     if not st.isSkinnerMode() then return end  -- another source owns the breakdown
     stockId = tonumber(stockId) or 1
     local ins = instances[stockId] or BuildInstance(stockId)
     SetActive(ins)
+    ins.focusGUID = focusGUID or nil  -- whose breakdown to show: a clicked combatant, or nil = the player
     local sw = _G["DamageMeterSessionWindow" .. stockId]
     ins.stockWindow = sw or _G.DamageMeter
     -- Open to the view matching the clicked window's meter type (DPS bar -> DPS view, HPS -> HPS, etc.).
@@ -2650,17 +2731,43 @@ local function OpenMine(stockId)
 end
 
 -- Blizzard re-assigns the line buttons' OnClick on every meter refresh, so a one-time override gets
--- wiped. Re-assert ours whenever Blizzard's is back: left-click opens OUR window (skips the in-place
--- drill-down); right-click still runs Blizzard's last handler (its menu). We only SetScript when the
--- current handler isn't ours, so it's not a per-tick churn. Skipped under Details!.
+-- wiped. Re-assert ours whenever Blizzard's is back: BOTH left- and right-click open OUR window (skipping
+-- the stock in-place drill-down and its right-click menu). We only SetScript when the current handler
+-- isn't ours, so it's not a per-tick churn. Skipped under Details!.
 local _origClick = setmetatable({}, { __mode = "k" })
-local function MyLineClick(self, button, down)
-    if button == "RightButton" then
-        local o = _origClick[self]
-        if o then return o(self, button, down) end
-        return
+-- Pull the COMBATANT GUID off a clicked stock-meter row so the breakdown can focus that player. The
+-- stock meter is a modern ScrollBox, so the data is most likely on the row's element data; we also try
+-- direct fields the bar may stash. Returns nil if none resolve -> the breakdown harmlessly shows self.
+-- NOTE: the exact field name is best-effort (verified visually, but the meter internals can shift between
+-- builds); _G.GSETrackerDetails_LastClickedRow is left as a diagnostic handle to confirm/extend this.
+local function ResolveRowGUID(b)
+    if type(b) ~= "table" then return nil end
+    local function fromData(d)
+        if type(d) ~= "table" then return nil end
+        local g = d.sourceGUID or d.guid or d.unitGUID or d.actorGUID or d.GUID
+        if g then return g end
+        if type(d.combatSource) == "table" then return d.combatSource.sourceGUID or d.combatSource.guid end
+        if d.unit and UnitGUID then return UnitGUID(d.unit) end
+        return nil
     end
-    OpenMine(self._gsetStockId or 1)  -- open the window tied to the stock meter window that was clicked
+    if b.GetElementData then
+        local ok, d = pcall(b.GetElementData, b)
+        if ok then local g = fromData(d); if g then return g end end
+    end
+    local g = b.sourceGUID or b.guid or b.unitGUID or b.actorGUID
+    if g then return g end
+    if type(b.combatSource) == "table" then g = b.combatSource.sourceGUID or b.combatSource.guid; if g then return g end end
+    if type(b.data) == "table" then g = fromData(b.data); if g then return g end end
+    if b.unit and UnitGUID then return UnitGUID(b.unit) end
+    return nil
+end
+local function MyLineClick(self, button, down)
+    -- BOTH left- and right-click open OUR breakdown focused on the clicked combatant, replacing the stock
+    -- meter's in-place drill-down (left) AND its right-click drill/menu (user wants ours on right too).
+    _G.GSETrackerDetails_LastClickedRow = self  -- diagnostic handle (confirm the source-GUID field in-game)
+    -- Open the window tied to the stock meter window that was clicked, focused on the clicked combatant
+    -- (their own row -> their GUID -> shows them; nil if unresolved -> shows the player, as before).
+    OpenMine(self._gsetStockId or 1, ResolveRowGUID(self))
 end
 -- A real data ROW is a Button that contains a StatusBar (the bar fill). The title-bar controls
 -- (Settings cog, minimize, the icon cluster) are Buttons WITHOUT a StatusBar -- never override those,
@@ -2681,8 +2788,10 @@ local function AssertLineOverrides()
                 c._gsetStockId = stockId  -- tag which stock window this row belongs to (routes the click)
                 local cur = c:GetScript("OnClick")
                 if cur ~= MyLineClick then
-                    if cur then _origClick[c] = cur end  -- remember Blizzard's (for right-click)
+                    if cur then _origClick[c] = cur end  -- remember Blizzard's (kept, currently unused)
                     c:SetScript("OnClick", MyLineClick)
+                    -- Ensure BOTH buttons reach our OnClick so right-click opens our breakdown too.
+                    if c.RegisterForClicks then c:RegisterForClicks("LeftButtonUp", "RightButtonUp") end
                 end
             end
             scan(c, d + 1, stockId)

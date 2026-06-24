@@ -470,10 +470,18 @@ local function EnsureMatchReadout(self)
   if ui._ahMatchReadout then return ui._ahMatchReadout end
   local fs = _G.UIParent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   fs:ClearAllPoints()
-  fs:SetPoint("TOP", ui, "BOTTOM", 0, 6)
+  fs:SetPoint("TOP", ui.modifiersFrame or ui, "BOTTOM", 0, -4)  -- BELOW the MODKEYS row (re-anchored in UpdateAHMatchReadout)
   fs:Hide()
   ui._ahMatchReadout = fs
   return fs
+end
+
+-- Anchor the AH Match readout just under the MODKEYS row. Re-applied on each update so it follows the
+-- modkeys when the layout/font/swap changes. Falls back to the tracker bottom if there's no modkey frame.
+local function AnchorMatchReadoutBelowModkeys(ui, fs)
+  if not (ui and fs) then return end
+  fs:ClearAllPoints()
+  fs:SetPoint("TOP", ui.modifiersFrame or ui, "BOTTOM", 0, -4)
 end
 
 -- Second line, just under the match %: how many of the matches were Single-Button
@@ -515,6 +523,7 @@ function UI:UpdateAHMatchReadout()
   end
   local pct = (casts > 0) and (matches / casts * 100) or 0
   fs:SetText(string.format("AH Match: %d%% (%d/%d)", math.floor(pct + 0.5), matches, casts))
+  AnchorMatchReadoutBelowModkeys(ui, fs)
   fs:Show()
 
   -- SBA sub-line removed: only the AH Match %% is shown here. The SBA % readout lives in the standalone

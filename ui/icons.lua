@@ -424,6 +424,139 @@ function UI:PositionIconKeybind(b)
   b.keybindText:SetJustifyV(a.jv)
 end
 
+-- Resolve the user-configured Name (sequence) font so vertical per-icon names and the
+-- Edit Mode name overlays follow the Name "Size" slider, matching nameText2. Falls back
+-- to the legacy constant if the resolver isn't available yet (early load).
+local function ResolvedSeqFont()
+  -- Resolve via the FINALIZED addon (ns), not ns.UI: GetResolvedSeqFont reaches into Utils getters
+  -- (GetSeqFontSize/Name/FontPath) which exist on ns but NOT on the bare ns.UI table. Calling it on
+  -- ns.UI made `self:GetSeqFontSize()` nil, silently falling back to size 12 and ignoring the slider.
+  if addon and addon.GetResolvedSeqFont then
+    return addon:GetResolvedSeqFont()
+  end
+  return _G.STANDARD_TEXT_FONT, uiShared.NAME_FONT_SIZE or 12, "OUTLINE"
+end
+
+local function EnsureIconNameLabel(icon)
+  if not icon then return nil end
+  local lbl = icon.nameLabel
+  if not lbl and icon.CreateFontString then
+    lbl = icon:CreateFontString(nil, "OVERLAY")
+    icon.nameLabel = lbl
+  end
+  if not lbl then return nil end
+
+  if lbl.SetParent then lbl:SetParent(icon) end
+  if lbl.SetDrawLayer then lbl:SetDrawLayer("OVERLAY", 7) end
+  if lbl.SetFont then
+    local path, size, flags = ResolvedSeqFont()
+    local key = tostring(path) .. ":" .. tostring(size) .. ":" .. tostring(flags)
+    if lbl._gsetNameLabelFontKey ~= key then
+      if not lbl:SetFont(path, size, flags) then
+        lbl:SetFont(_G.STANDARD_TEXT_FONT, size, flags)
+      end
+      lbl._gsetNameLabelFontKey = key
+    end
+  end
+  return lbl
+end
+
+local function EnsureVerticalNameOverlayLayer(ui)
+  if not ui then return nil end
+  local layer = ui._verticalNameOverlayLayer
+  if not layer then
+    local createFrame = API.CreateFrame or _G.CreateFrame
+    if not createFrame then return nil end
+    layer = createFrame("Frame", nil, ui)
+    layer:SetAllPoints(ui)
+    ui._verticalNameOverlayLayer = layer
+  else
+    layer:SetParent(ui)
+    layer:ClearAllPoints()
+    layer:SetAllPoints(ui)
+  end
+
+  if layer.SetFrameStrata then
+    -- Ride at the SELECTION BOX's strata (HIGH) when it exists, so the example name/modkey text renders
+    -- ON TOP of the box's translucent green fill instead of being tinted/buried under it. The +5 level
+    -- below keeps the layer above the box within that strata. Falls back to the tracker's strata.
+    local strata = (ui.GetFrameStrata and ui:GetFrameStrata()) or "MEDIUM"
+    if ui._gsetEditBox and ui._gsetEditBox.GetFrameStrata then
+      strata = ui._gsetEditBox:GetFrameStrata() or strata
+    end
+    layer:SetFrameStrata(strata)
+  end
+  if layer.SetFrameLevel then
+    local level = (ui.GetFrameLevel and ui:GetFrameLevel()) or 0
+    if ui.content and ui.content.GetFrameLevel then
+      level = math.max(level, ui.content:GetFrameLevel() or level)
+    end
+    if ui._gsetEditBox and ui._gsetEditBox.GetFrameLevel then
+      level = math.max(level, ui._gsetEditBox:GetFrameLevel() or level)
+    end
+    layer:SetFrameLevel(level + 5)
+  end
+  layer:Show()
+  return layer
+end
+
+local function EnsureVerticalPreviewTextFrame(ui, key, width)
+  local layer = EnsureVerticalNameOverlayLayer(ui)
+  if not layer then return nil, nil end
+
+  ui._verticalPreviewTextFrames = ui._verticalPreviewTextFrames or {}
+  local frame = ui._verticalPreviewTextFrames[key]
+  if not frame then
+    local createFrame = API.CreateFrame or _G.CreateFrame
+    if not createFrame then return nil, nil end
+    frame = createFrame("Frame", nil, layer)
+    frame.text = frame:CreateFontString(nil, "OVERLAY")
+    frame.text:SetAllPoints(frame)
+    frame.text:SetJustifyV("MIDDLE")
+    ui._verticalPreviewTextFrames[key] = frame
+  else
+    frame:SetParent(layer)
+  end
+
+  frame:SetSize(math.max(width or 0, uiShared.TEXT_W or 140, 140), uiShared.NAME_H or 24)
+  if frame.SetFrameLevel and layer.GetFrameLevel then
+    frame:SetFrameLevel((layer:GetFrameLevel() or 0) + 1)
+  end
+  local text = frame.text
+  if text then
+    if text.SetDrawLayer then text:SetDrawLayer("OVERLAY", 7) end
+    if text.SetFont then
+      local path, size, flags = ResolvedSeqFont()
+      if not text:SetFont(path, size, flags) then
+        text:SetFont(_G.STANDARD_TEXT_FONT, size, flags)
+      end
+    end
+    text:SetTextColor(1, 1, 1, 1)
+  end
+
+  return frame, text
+end
+
+local function HideVerticalPreviewNameOverlays(ui)
+  if not ui then return end
+  local frames = ui._verticalPreviewTextFrames
+  if frames then
+    for _, frame in pairs(frames) do
+      if frame then
+        if frame.text then frame.text:SetText("") end
+        frame:Hide()
+      end
+    end
+  end
+  if ui._verticalNameOverlayLayer then ui._verticalNameOverlayLayer:Hide() end
+  -- Put the MODKEYS readout back on the content frame (it was lifted onto the overlay layer for Edit
+  -- Mode so it drew above the selection box). Without this it would stay parented to the hidden layer.
+  if ui._modifiersReparented and ui.modifiersFrame and ui.modifiersFrame.SetParent and ui.content then
+    ui.modifiersFrame:SetParent(ui.content)
+    ui._modifiersReparented = nil
+  end
+end
+
 local function AcquireIconFrame(owner, ui, index, showBorder, thickness)
   ui._iconPool = ui._iconPool or {}
   ui._iconBackdropCache = ui._iconBackdropCache or {}
@@ -445,9 +578,14 @@ local function AcquireIconFrame(owner, ui, index, showBorder, thickness)
     b.keybindText:SetDrawLayer("OVERLAY", 7)
     b.keybindText:SetJustifyH("RIGHT")
     b.keybindText:Hide()
+    -- Per-icon spell name (VERTICAL layout only): the ability on this icon, shown beside it. A CHILD of
+    -- the icon, so it rides the icon as the row scrolls and fades with the icon's alpha automatically.
+    b.nameLabel = EnsureIconNameLabel(b)
+    if b.nameLabel then b.nameLabel:Hide() end
     ui._iconPool[index] = b
   else
     b:SetParent(ui.iconHolder)
+    EnsureIconNameLabel(b)
   end
 
   b:SetSize(pixelSnap(ICON_SIZE, ui), pixelSnap(ICON_SIZE, ui))
@@ -734,6 +872,9 @@ function UI:RebuildNameDisplay()
     self:SetSequenceText(table.concat(parts, "\n"), nil, nil, self._activeSeqKey)
   end
   self:_UpdateTopNameLabel(self._gseSeqName, split)
+  -- Register activity so the names fade after a few seconds of no casting EVEN out of combat (the
+  -- post-combat fade only fires on PLAYER_REGEN_ENABLED). Only when a name is actually shown.
+  if (gse ~= "" or spell ~= "") and self.NoteNameActivity then self:NoteNameActivity() end
 end
 
 -- True when the layout SPLITS into two separate labels: BOTH name toggles on AND both names are
@@ -747,20 +888,150 @@ function UI:_NameSplitActive()
     and (self._gseSeqName or "") ~= "" and (self._lastSpellName or "") ~= "" and true or false
 end
 
--- Render the hoisted top GSE label (nameText2): visible ONLY when doSplit (the layout is actually
--- splitting) and the main name is showing; mirrors the main name's colour/alpha. `gseText` is the
--- text (the unlocked example preview passes its sample); r/g/b/a override the colour (else copied).
+local VERTICAL_GSE_SLIDE_DISTANCE = 12
+local VERTICAL_GSE_SLIDE_DURATION = 0.18
+
+local function VerticalGSENameNow()
+  return (API.GetTime and API.GetTime()) or (_G.GetTime and _G.GetTime()) or 0
+end
+
+local function ApplyVerticalGSENameAnchor(ui)
+  if not (ui and ui.nameText2 and ui.iconHolder) then return end
+  local slideY = ui.nameText2._verticalGSESlideOffset or 0
+  -- Anchor to the FIXED top of the icon column (iconHolder is sized to the configured icon count, so its
+  -- top never moves), NOT the topmost VISIBLE icon. The GSE Sequence Name must stay put while icons
+  -- populate / scroll behind it -- icon flow must not drag the name. This matches the Edit Mode example
+  -- overlay (RefreshVerticalEditModeNames), which already anchors the top label to iconHolder TOP.
+  ui.nameText2:ClearAllPoints()
+  ui.nameText2:SetPoint("BOTTOM", ui.iconHolder, "TOP", 0, (uiShared.GAP_ICONS_MODS or 6) + 10 + slideY)
+end
+
+local function VerticalGSENameSlideOnUpdate(driver)
+  local owner = driver and driver._owner
+  local ui = owner and owner.ui
+  local fs = ui and ui.nameText2
+  if not (owner and fs and fs._verticalGSESlideStart) then
+    if driver then driver:SetScript("OnUpdate", nil) end
+    return
+  end
+
+  local t = (VerticalGSENameNow() - fs._verticalGSESlideStart) / VERTICAL_GSE_SLIDE_DURATION
+  if t >= 1 then
+    fs._verticalGSESlideStart = nil
+    fs._verticalGSESlideOffset = 0
+    ApplyVerticalGSENameAnchor(ui)
+    driver:SetScript("OnUpdate", nil)
+  else
+    local inv = 1 - t
+    fs._verticalGSESlideOffset = -VERTICAL_GSE_SLIDE_DISTANCE * inv * inv
+    ApplyVerticalGSENameAnchor(ui)
+  end
+end
+
+function UI:SlideVerticalGSENameIn()
+  if (self.GetActionTrackerLayout and self:GetActionTrackerLayout()) ~= "VERTICAL" then return end
+  local ui = self.ui
+  local fs = ui and ui.nameText2
+  if not (ui and fs and fs.IsShown and fs:IsShown()) then return end
+
+  fs._verticalGSESlideStart = VerticalGSENameNow()
+  fs._verticalGSESlideOffset = -VERTICAL_GSE_SLIDE_DISTANCE
+  addon._gseSlideFires = (addon._gseSlideFires or 0) + 1  -- diag: /gsetracker emstate counts slide-in fires
+  ApplyVerticalGSENameAnchor(ui)
+
+  local driver = ui._verticalGSENameSlideDriver
+  if not driver then
+    local createFrame = API.CreateFrame or _G.CreateFrame
+    if not createFrame then return end
+    driver = createFrame("Frame")
+    ui._verticalGSENameSlideDriver = driver
+  end
+  driver._owner = self
+  driver:SetScript("OnUpdate", VerticalGSENameSlideOnUpdate)
+end
+
+function UI:_RefreshVerticalGSENameLabel(r, g, b)
+  local ui = self.ui
+  if not (ui and ui.nameText2) then return false end
+  if (self.GetActionTrackerLayout and self:GetActionTrackerLayout()) ~= "VERTICAL" then return false end
+
+  local showSeq = (self.GetActionTrackerShowSequenceName == nil) or self:GetActionTrackerShowSequenceName()
+  local inPreview = (self.IsEditModePreviewActive and self:IsEditModePreviewActive()) or false
+  if inPreview then
+    ui.nameText2._verticalGSEVisible = false
+    ui.nameText2._verticalGSESlideStart = nil
+    ui.nameText2._verticalGSESlideOffset = 0
+    if ui._verticalGSENameSlideDriver then
+      ui._verticalGSENameSlideDriver:SetScript("OnUpdate", nil)
+      ui._verticalGSENameSlideDriver._owner = nil
+    end
+    ApplyVerticalGSENameAnchor(ui)
+    ui.nameText2:SetText("")
+    ui.nameText2:Hide()
+    return false
+  end
+
+  -- A post-combat fade is ramping nameText2 (events.lua PLAYER_REGEN_ENABLED). Leave its alpha to
+  -- SmoothFadeOut -- don't re-show it at full here mid-ramp. Mirrors ApplyRuntimeSequenceVisibility's
+  -- _namesFading guard. (Edit Mode preview handled above; it cancels the fade itself.)
+  if ui._namesFading then return false end
+
+  local text = ""
+  if showSeq then
+    text = self._gseSeqName or ""
+  end
+
+  if text ~= "" and ui.iconHolder then
+    local wasVerticalShown = ui.nameText2._verticalGSEVisible == true
+    local oldText = (ui.nameText2.GetText and ui.nameText2:GetText()) or ""
+    ApplyVerticalGSENameAnchor(ui)
+    ui.nameText2:SetJustifyH("CENTER")
+    ui.nameText2:SetText(text)
+    -- GSE Sequence Name uses the player's class colour (was the per-sequence accent colour).
+    local cr, cg, cb = self:GetClassColorRGB()
+    ui.nameText2:SetTextColor(cr, cg, cb, 1)
+    ui.nameText2:Show()
+    ui.nameText2._verticalGSEVisible = true
+    if (not wasVerticalShown or oldText ~= text) and self.SlideVerticalGSENameIn then
+      self:SlideVerticalGSENameIn()
+    end
+    return true
+  end
+
+  ui.nameText2._verticalGSEVisible = false
+  ui.nameText2._verticalGSESlideStart = nil
+  ui.nameText2._verticalGSESlideOffset = 0
+  if ui._verticalGSENameSlideDriver then
+    ui._verticalGSENameSlideDriver:SetScript("OnUpdate", nil)
+    ui._verticalGSENameSlideDriver._owner = nil
+  end
+  ui.nameText2:SetText("")
+  ui.nameText2:Hide()
+  return false
+end
+
+-- Render the hoisted top GSE label (nameText2). Vertical owns this as the always-top GSE label;
+-- horizontal keeps the old split-only label above the main name/modkey side.
 function UI:_UpdateTopNameLabel(gseText, doSplit, r, g, b, a)
   local ui = self.ui
   if not (ui and ui.nameText2) then return end
   gseText = gseText or self._gseSeqName or ""
   local nr, ng, nb, na
   if ui.nameText and ui.nameText.GetTextColor then nr, ng, nb, na = ui.nameText:GetTextColor() end
+
+  -- VERTICAL: the GSE sequence name is its OWN element, centred HORIZONTALLY above the icon column,
+  -- independent of the per-icon Spell names. Live play follows the Sequence-Name toggle; Edit Mode
+  -- preview always paints the placeholder so the label can be placed.
+  if (self.GetActionTrackerLayout and self:GetActionTrackerLayout()) == "VERTICAL" then
+    self:_RefreshVerticalGSENameLabel(r, g, b)
+    return
+  end
+
+  -- HORIZONTAL: the hoisted GSE label appears only in split mode (both names on), centred above the
+  -- inner Spell name -- or above ModKeys when swapped (names on opposite sides of the icons).
   local mainText = (ui.nameText and ui.nameText:GetText()) or ""
   local mainShown = mainText ~= "" and ((na == nil) or (na > 0))
   if doSplit and gseText ~= "" and mainShown then
-    -- Anchor the top (GSE) label centred above the nearest upper element: ModKeys when swapped
-    -- (names are on opposite sides of the icons), else directly above the inner (Spell) name.
     local swapped = self.GetActionTrackerSwapNameModkeys and self:GetActionTrackerSwapNameModkeys()
     ui.nameText2:ClearAllPoints()
     if swapped and ui.modifiersFrame then
@@ -774,6 +1045,204 @@ function UI:_UpdateTopNameLabel(gseText, doSplit, r, g, b, a)
   else
     ui.nameText2:SetText("")
     ui.nameText2:Hide()
+  end
+end
+
+-- Per-icon spell name labels (VERTICAL layout): each label is a child of its icon, so it rides the icon
+-- as the row scrolls and fades with the icon's alpha for free. Side flips with the Name<->ModKeys swap
+-- (RIGHT of the column normally, LEFT when swapped). Set per-icon: live spell name (addon._recentNames)
+-- or the "Spell Name" placeholder in Edit Mode preview. Set whenever an icon's texture is set (SetIconRow
+-- / ApplyEditModeIconPreview) AND on every refresh, so they ride the same reliable path the icons do.
+function UI:SetIconNameLabel(icon, idx)
+  if not icon then return end
+  local lbl = EnsureIconNameLabel(icon)
+  if not lbl then return end
+  local vertical = (self.GetActionTrackerLayout and self:GetActionTrackerLayout()) == "VERTICAL"
+  local inPreview = (self.IsEditModePreviewActive and self:IsEditModePreviewActive()) or false
+  if vertical and inPreview then
+    lbl:SetText("")
+    lbl:Hide()
+    return
+  end
+  local showSpell = inPreview or (self.GetActionTrackerShowSpellName == nil) or self:GetActionTrackerShowSpellName()
+  local txt = ""
+  if vertical and showSpell and icon.tex and icon.tex:GetTexture() then
+    if inPreview then
+      txt = "Spell Name"
+    else
+      local names = addon._recentNames
+      txt = (names and names[idx]) or ""
+    end
+  end
+  if txt ~= "" then
+    local swapped = self.GetActionTrackerSwapNameModkeys and self:GetActionTrackerSwapNameModkeys()
+    -- VERTICAL per-icon spell name: hug the icon -- near edge a fixed 5px from the icon, growing OUTWARD
+    -- (away from the column). Centre-justified so a multi-word name reads as one tidy block.
+    local gap = 5
+    lbl:ClearAllPoints()
+    if swapped then
+      lbl:SetPoint("RIGHT", icon, "LEFT", -gap, 0); lbl:SetJustifyH("CENTER")
+    else
+      lbl:SetPoint("LEFT", icon, "RIGHT", gap, 0); lbl:SetJustifyH("CENTER")
+    end
+    if lbl.SetDrawLayer then lbl:SetDrawLayer("OVERLAY", 7) end
+    if lbl.SetAlpha then lbl:SetAlpha(1) end
+    local pr, pg, pb = self:GetClassColorRGB()  -- per-icon spell names use the player's class colour
+    lbl:SetText(txt); lbl:SetTextColor(pr, pg, pb, 1); lbl:Show()
+  else
+    lbl:SetText(""); lbl:Hide()
+  end
+end
+
+function UI:UpdateIconNames()
+  local ui = self.ui
+  if not (ui and ui.icons) then return end
+  for i = 1, #ui.icons do
+    self:SetIconNameLabel(ui.icons[i], i)
+  end
+  if self._RefreshVerticalGSENameLabel then self:_RefreshVerticalGSENameLabel() end
+end
+
+function UI:RefreshVerticalEditModeNames()
+  local ui = self.ui
+  if not (ui and ui.icons) then return false end
+  local vertical = (self.GetActionTrackerLayout and self:GetActionTrackerLayout()) == "VERTICAL"
+  local active = (self.IsEditModePreviewActive and self:IsEditModePreviewActive()) or false
+  if not (vertical and active) then
+    HideVerticalPreviewNameOverlays(ui)
+    return false
+  end
+
+  local changed = false
+  -- Edit Mode name examples MIRROR the live toggles: the top "GSE Sequence Name" example shows only when
+  -- GSE Sequence Name is checked, the per-icon "Spell Name" examples only when Spell Name is checked.
+  -- (Default ON when the getter is missing, matching SetIconNameLabel.) Overlays whose key is left out of
+  -- visibleOverlayKeys get hidden by the cleanup loop below.
+  local showSeq = (self.GetActionTrackerShowSequenceName == nil) or self:GetActionTrackerShowSequenceName()
+  local showSpell = (self.GetActionTrackerShowSpellName == nil) or self:GetActionTrackerShowSpellName()
+  local ecr, ecg, ecb = self:GetClassColorRGB()  -- example overlays match the live class-coloured names
+  local visibleOverlayKeys = {}
+  local swapped = self.GetActionTrackerSwapNameModkeys and self:GetActionTrackerSwapNameModkeys()
+  local gap = 5  -- Edit Mode example: near edge 5px from the icon (match SetIconNameLabel)
+
+  for i = 1, #ui.icons do
+    local icon = ui.icons[i]
+    if icon then
+      local tex = icon.tex
+      if tex and not tex:GetTexture() then
+        local texture = GetEditModePreviewTexture(i)
+        if texture then
+          tex:SetTexture(texture)
+          tex:Show()
+          icon:SetAlpha(1)
+          icon:Show()
+          changed = true
+        end
+      end
+      self:SetIconNameLabel(icon, i)
+
+      if showSpell then
+        local key = "icon" .. tostring(i)
+        visibleOverlayKeys[key] = true
+        local frame, text = EnsureVerticalPreviewTextFrame(ui, key, math.max(uiShared.TEXT_W or 0, 150))
+        if frame and text then
+          frame:ClearAllPoints()
+          if swapped then
+            frame:SetPoint("RIGHT", icon, "LEFT", -gap, 0)
+          else
+            frame:SetPoint("LEFT", icon, "RIGHT", gap, 0)
+          end
+          text:SetJustifyH("CENTER")
+          text:SetText("Spell Name")
+          text:SetTextColor(ecr, ecg, ecb, 1)
+          frame:SetAlpha(1)
+          frame:Show()
+          changed = true
+        end
+      end
+    end
+  end
+
+  if ui.nameText2 then
+    ui.nameText2._verticalGSEVisible = false
+    ui.nameText2._verticalGSESlideStart = nil
+    ui.nameText2._verticalGSESlideOffset = 0
+    if ui._verticalGSENameSlideDriver then
+      ui._verticalGSENameSlideDriver:SetScript("OnUpdate", nil)
+      ui._verticalGSENameSlideDriver._owner = nil
+    end
+    ApplyVerticalGSENameAnchor(ui)
+    ui.nameText2:SetText("")
+    ui.nameText2:Hide()
+  end
+
+  if showSeq then
+    visibleOverlayKeys.top = true
+    local topFrame, topText = EnsureVerticalPreviewTextFrame(ui, "top", math.max(uiShared.TEXT_W or 0, 180))
+    if topFrame and topText then
+      topFrame:ClearAllPoints()
+      if ui.nameText2 then
+        topFrame:SetPoint("CENTER", ui.nameText2, "CENTER", 0, 0)
+      elseif ui.iconHolder then
+        topFrame:SetPoint("BOTTOM", ui.iconHolder, "TOP", 0, (uiShared.GAP_ICONS_MODS or 6) + 10)
+      else
+        topFrame:SetPoint("CENTER", ui, "CENTER", 0, 0)
+      end
+      topText:SetJustifyH("CENTER")
+      topText:SetText("GSE Sequence Name")
+      topText:SetTextColor(ecr, ecg, ecb, 1)
+      topFrame:SetAlpha(1)
+      topFrame:Show()
+      changed = true
+    end
+  end
+
+  local overlayFrames = ui._verticalPreviewTextFrames
+  if overlayFrames then
+    for key, frame in pairs(overlayFrames) do
+      if not visibleOverlayKeys[key] and frame then
+        if frame.text then frame.text:SetText("") end
+        frame:Hide()
+      end
+    end
+  end
+
+  -- Size each visible overlay to its actual text so large Name fonts don't clip vertically or
+  -- truncate ("GSE Sequence...") horizontally. These are our own FontStrings (not C_DamageMeter),
+  -- so GetStringWidth/Height is taint-safe here -- same precedent as FitActionTrackerBox.
+  -- Lift the live MODKEYS readout (modShift on modifiersFrame) onto the raised overlay layer so it draws
+  -- ABOVE the selection box's green fill, same as the name examples. Anchors are unchanged (cross-frame),
+  -- only the render parent/z changes. HideVerticalPreviewNameOverlays puts it back on content on exit.
+  local layer = ui._verticalNameOverlayLayer
+  if layer and ui.modifiersFrame and ui.modifiersFrame.SetParent then
+    ui.modifiersFrame:SetParent(layer)
+    if ui.modifiersFrame.SetFrameLevel and layer.GetFrameLevel then
+      ui.modifiersFrame:SetFrameLevel((layer:GetFrameLevel() or 0) + 1)
+    end
+    ui._modifiersReparented = true
+  end
+
+  self:_FitVerticalPreviewFrames()
+
+  return changed
+end
+
+function UI:_FitVerticalPreviewFrames()
+  local ui = self.ui
+  local frames = ui and ui._verticalPreviewTextFrames
+  if not frames then return end
+  for key, frame in pairs(frames) do
+    local text = frame and frame.text
+    if frame and text and frame.IsShown and frame:IsShown() then
+      if text.SetWordWrap then text:SetWordWrap(false) end
+      local w = (text.GetStringWidth and text:GetStringWidth()) or 0
+      local h = (text.GetStringHeight and text:GetStringHeight()) or 0
+      -- Per-icon name frames HUG their text (no min width) so they sit flush against the icon on either
+      -- side -- a wide fixed frame pushed the swapped (right-side) labels far out to the left. The top GSE
+      -- name is centre-anchored, so a min width there is harmless and keeps it tidy.
+      local minW = (key == "top") and math.max(uiShared.TEXT_W or 0, 180) or 0
+      frame:SetSize(math.max(minW, w + 8), math.max(uiShared.NAME_H or 24, h + 6))
+    end
   end
 end
 
@@ -802,7 +1271,12 @@ function UI:SetSequenceText(displayName, _, _, seqKey)
     ui.nameText:SetText("")
     ui.nameText:SetTextColor(1, 1, 1, 0)
     if ui.sequenceTextFrame then ui.sequenceTextFrame:Hide() end
-    if ui.nameText2 then ui.nameText2:SetText(""); ui.nameText2:Hide() end
+    -- VERTICAL: nameText2 is the always-on GSE name owned by _UpdateTopNameLabel -- don't hide it on an
+    -- empty live sequence or it vanishes in Edit Mode / between casts.
+    if ui.nameText2 and (self.GetActionTrackerLayout and self:GetActionTrackerLayout()) ~= "VERTICAL" then
+      ui.nameText2:SetText(""); ui.nameText2:Hide()
+    end
+    if self._RefreshVerticalGSENameLabel then self:_RefreshVerticalGSENameLabel() end
     ui._seqWasVisible = false
     self:SetKeybindText("")
     self:_ResizeToContent()
@@ -836,14 +1310,22 @@ function UI:SetSequenceText(displayName, _, _, seqKey)
   ui._lastSeqText = txt
   ui._lastSeqKey = seqKey
   ui._accentR, ui._accentG, ui._accentB, ui._accentA = r, g, b, 1
-  ui.nameText:SetText((uiShared.FormatLabelForLayout and uiShared.FormatLabelForLayout(txt)) or txt)
-  self:_ApplyNameVOffset(txt)
+  -- VERTICAL: the single name is replaced by per-icon labels + the hoisted GSE name, so don't render it
+  -- here (the accent colour above is still set for the GSE name to pick up).
+  local verticalLayout = (self.GetActionTrackerLayout and self:GetActionTrackerLayout()) == "VERTICAL"
+  if verticalLayout then
+    ui.nameText:SetText(""); ui.nameText:SetTextColor(r, g, b, 0)
+  else
+    ui.nameText:SetText((uiShared.FormatLabelForLayout and uiShared.FormatLabelForLayout(txt)) or txt)
+  end
+  self:_ApplyNameVOffset(verticalLayout and "" or txt)
   if liveKeybindText ~= nil then
     self:SetKeybindText(liveKeybindText)
   end
-  ui.nameText:SetTextColor(r, g, b, 1)
+  if not verticalLayout then ui.nameText:SetTextColor(r, g, b, 1) end
+  if verticalLayout and self._RefreshVerticalGSENameLabel then self:_RefreshVerticalGSENameLabel(r, g, b) end
 
-  if ui.sequenceTextFrame and ui._lastVisible ~= false then
+  if not verticalLayout and ui.sequenceTextFrame and ui._lastVisible ~= false then
     local seqCfg = (self.GetElementLayout and self:GetElementLayout("sequenceText")) or nil
     local seqEnabled = seqCfg and seqCfg.enabled ~= false
     if seqEnabled then
@@ -853,6 +1335,8 @@ function UI:SetSequenceText(displayName, _, _, seqKey)
       if self.SlideSequenceNameIn then self:SlideSequenceNameIn() end
       ui._seqWasVisible = true
     end
+  elseif verticalLayout and ui.sequenceTextFrame then
+    ui.sequenceTextFrame:Hide(); ui._seqWasVisible = false
   end
 
   self:UpdateModifiers(true)
@@ -877,25 +1361,30 @@ function UI:_GetIconLayoutSignature()
   }, "|")
 end
 
--- Placement preview: while the Action Tracker is unlocked and the player is out
--- of combat, show the chosen number of icons (sample textures) so the row can be
--- positioned. Requires the tracker to be enabled.
+-- Placement preview: while Blizzard Edit Mode is open and the player is out of
+-- combat, show the chosen number of sample icons so the row can be positioned.
+-- The Action Tracker's master enable toggle is a live-play visibility setting;
+-- Edit Mode still gets placeholders so the "Click to Edit" box is not empty.
 function UI:IsEditModePreviewActive()
-  -- Blizzard Edit Mode (addon._editingOptions) counts as "editing": show the example icons even when
-  -- the frames are Locked, so the Action Tracker is visible/positionable. Outside Edit Mode, the
-  -- unlocked preview still requires the frames to be unlocked.
-  local editing = addon and addon._editingOptions
-  if not editing and self.IsLocked and self:IsLocked() then return false end
-  if self.IsEnabled and not self:IsEnabled() then return false end
-
-  local ui = self.ui
-  local inCombat
-  if ui and ui._combatState ~= nil then
-    inCombat = ui._combatState == true
-  else
-    inCombat = (API.InCombatLockdown and API.InCombatLockdown()) or false
+  -- Example icons/preview show ONLY in Blizzard Edit Mode now (lock is Edit-Mode-driven, so there's no
+  -- separate "unlocked" preview state). Outside Edit Mode there are never example icons.
+  -- Source of truth = Blizzard Edit Mode being open: prefer our own _editingOptions flag (set by the
+  -- EditMode.Enter/Exit bridge) but FALL BACK to the live EditModeManagerFrame:IsEditModeActive() so a
+  -- missed/late Enter callback can never leave the entire preview (icons+name+keybind+modkeys) hidden.
+  local editing = (addon and addon._editingOptions) and true or false
+  if not editing then
+    local EMM = _G.EditModeManagerFrame
+    if EMM and EMM.IsEditModeActive and EMM:IsEditModeActive() then editing = true end
   end
-  return not inCombat
+  if not editing then return false end
+
+  -- Read combat LIVE, not from the cached ui._combatState. A stale/stuck cached flag (e.g. a missed
+  -- PLAYER_REGEN_ENABLED leaving _combatState == true) would make this return false and silently hide
+  -- the ENTIRE Edit Mode preview -- every example icon, name, keybind and modkey -- even though Edit
+  -- Mode is open and you're standing OOC. Edit Mode is a protected state Blizzard blocks in combat, so
+  -- _editingOptions already implies OOC; InCombatLockdown() is always accurate and never desyncs.
+  if API.InCombatLockdown and API.InCombatLockdown() then return false end
+  return true
 end
 
 function UI:GetEditModePreviewIconCount()
@@ -914,15 +1403,21 @@ function UI:ApplyEditModeIconPreview(force)
   local targetCount = (self.GetEditModePreviewIconCount and self:GetEditModePreviewIconCount()) or #ui.icons
 
   if #ui.icons ~= targetCount and self.RebuildIcons then
-    return self:RebuildIcons(true)
+    local rebuilt = self:RebuildIcons(true)
+    if self.RefreshVerticalEditModeNames then
+      rebuilt = self:RefreshVerticalEditModeNames() or rebuilt
+    end
+    return rebuilt
   end
 
   if not active then
     if not ui._editModePreviewIconsActive and not force then
+      HideVerticalPreviewNameOverlays(ui)
       return false
     end
 
     ui._editModePreviewIconsActive = false
+    HideVerticalPreviewNameOverlays(ui)
     local restored = false
     local lastTextures = ui._lastTextures
     if lastTextures then
@@ -979,7 +1474,13 @@ function UI:ApplyEditModeIconPreview(force)
       end
       btn:SetAlpha(1)
       btn:Show()
+      self:SetIconNameLabel(btn, i)  -- per-icon spell name rides the preview icon (vertical)
     end
+  end
+  if self.RefreshVerticalEditModeNames then
+    changed = self:RefreshVerticalEditModeNames() or changed
+  elseif self._RefreshVerticalGSENameLabel then
+    changed = self:_RefreshVerticalGSENameLabel() or changed
   end
 
   return changed
@@ -1112,6 +1613,7 @@ function UI:SetIconRow(textures)
   ui._lastTextures = ui._lastTextures or {}
   if TexturesMatch(ui, textures, count) then
     self:RefreshPressedIndicator()
+    if self.UpdateIconNames then self:UpdateIconNames() end
     return false
   end
   local prevTextures = BorrowArray(ui, "prevTextures", count)
@@ -1207,12 +1709,14 @@ function UI:SetIconRow(textures)
       btn:SetAlpha(1)
       btn:Show()
       UpdateIconKeybind(btn, tex)
+      self:SetIconNameLabel(btn, i)  -- per-icon spell name rides the icon (vertical)
     else
       btn.tex:SetTexture(nil)
       btn.tex:Hide()
       btn:SetAlpha(0)
       btn:Hide()
       UpdateIconKeybind(btn, nil)
+      if btn.nameLabel then btn.nameLabel:SetText(""); btn.nameLabel:Hide() end
     end
     ui._lastTextures[i] = tex
   end
@@ -1262,6 +1766,7 @@ function UI:SetIconRow(textures)
   end
 
   self:RefreshPressedIndicator()
+  if self.UpdateIconNames then self:UpdateIconNames() end  -- per-icon spell names (vertical)
 end
 
 local function ResetRuntimeSpellHistoryState(ui)

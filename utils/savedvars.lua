@@ -731,7 +731,115 @@ local function FinalizeDatabase(self, db, mergeDefaults, importLegacy)
   return db
 end
 
+-- ─── One-time per-version SV wipe ─────────────────────────────────────────────
+-- Bump FORCED_RESET_TOKEN to force a ONE-TIME wipe of every user's SavedVariables on their first load
+-- after a version where old saved layouts no longer make sense (e.g. a UI overhaul). The token is stored
+-- in the ACCOUNT store and the wipe runs exactly once per token. The account-wide flag is preserved so
+-- the user's save mode survives. Both stores (account + per-character) are cleared.
+local FORCED_RESET_TOKEN = "2026-06-23-overhaul-wipe-1"
+
+local function ClearTableInPlace(t)
+  if type(t) ~= "table" then return end
+  for k in pairs(t) do t[k] = nil end
+end
+
+-- Curated default layout, baked from Larry's configured account-wide setup (2026-06-24). Seeded into the
+-- active store on a fresh install / one-time wipe so new users open with this layout instead of bare
+-- defaults. Management keys (_meta/token/accountWide) and personal/debug toggles (hideErrors, muteFizzles,
+-- Edit Mode panel spots, breakdown-window session state) are intentionally excluded.
+local STOCK_PRESET = {
+  general = { enabled = true, locked = true, showWhen = "Always", strata = "MEDIUM", hideLoginMessage = false },
+  display = {
+    scale = 1, iconCount = 6, iconGap = 0, layout = "HORIZONTAL", scrollDirection = "RIGHT",
+    border = false, borderThickness = 0, borderUseClassColor = false,
+    borderColor = { r = 0, g = 0, b = 0 },
+    point = { "CENTER", "UIParent", "CENTER", 0, -362 },
+    showSpellName = true,
+    pressedIndicator = { shape = "X.png", size = 24, colorMode = "custom", color = { r = 1, g = 0, b = 0 } },
+  },
+  fonts = {
+    outline = "OUTLINE",
+    sequence  = { face = "Friz Quadrata TT", size = 18 },
+    modifiers = { face = "Friz Quadrata TT", size = 16 },
+    keybind   = { face = "Friz Quadrata TT", size = 16 },
+  },
+  flags = { performanceMode = false },
+  combatMarker = {
+    enabled = true, preview = false, showWhen = "Always", symbol = "Crosshairs001.png",
+    size = 18, thickness = 1, borderSize = 0, alpha = 1, locked = true,
+    useClassColor = true, colorMode = "class",
+    point = { "CENTER", "UIParent", "CENTER", 0, 0 },
+    color = { r = 1, g = 0, b = 0.086 },
+  },
+  assistedHighlight = {
+    enabled = true, preview = false, locked = true, showWhen = "Always",
+    size = 52, alpha = 1, borderSize = 1,
+    point = { "CENTER", "UIParent", "CENTER", 0, -200 },
+    anchorTarget = "Screen", showKeybind = true, showGCD = true, rangeChecker = true,
+    useClassColor = true, color = { r = 0, g = 0, b = 0 },
+    keybindXOffset = 16, keybindYOffset = 13, keybindAnchor = "TOPRIGHT",
+    fontFace = "Friz Quadrata TT", fontSize = 15,
+  },
+  minimap = { angle = 225 },
+  appearance = { skin = "AUTO" },
+  layout = {
+    offsetModelVersion = 2, rowRelativeAnchorModelVersion = 2,
+    elements = {
+      keybindText      = { enabled = false, x = 0, y = 0 },
+      sequenceText     = { enabled = true,  x = 0, y = 0 },
+      modifiersText    = { enabled = true,  x = 0, y = 0 },
+      pressedIndicator = { enabled = true,  x = 0, y = -230 },
+    },
+  },
+  colors = {},
+  Meters = {
+    x = 0, y = -32, Marker = "None", showAHLight = false,
+    slots = { GCD = "T", DPS = "L", HPS = "R", Marker = "C" },
+    fontType = "Friz Quadrata TT", fontStyle = "Friz Quadrata TT",
+    locked = true, refreshRate = 0.1,
+  },
+  ahMatchPercentEnabled = false,
+  ahMatchAudibleEnabled = false,
+  ahMatchSound = "kit:5274",
+}
+
+-- Deep-copy STOCK_PRESET into a freshly-wiped store and stamp the current schema so RunMigrations skips
+-- the legacy-flat migrations (the preset is already canonical). FinalizeDatabase still normalizes/validates.
+function SV:ApplySeedPreset(db)
+  if type(db) ~= "table" then return end
+  for k, v in pairs(STOCK_PRESET) do
+    db[k] = DeepCopy(v)
+  end
+  db._meta = db._meta or {}
+  db._meta.schemaVersion    = self.SCHEMA_VERSION
+  db._meta.lastAddonVersion = self.ADDON_VERSION
+  db._meta.migratedFrom     = 0
+end
+
+function SV:ApplyOneTimeReset()
+  if _G[self.DB_NAME] == nil then _G[self.DB_NAME] = {} end
+  if _G[self.CHAR_DB_NAME] == nil then _G[self.CHAR_DB_NAME] = {} end
+  local account = _G[self.DB_NAME]
+  if tostring(account._gseResetToken) == FORCED_RESET_TOKEN then return false end  -- already wiped for this token
+
+  local keepAccountWide = account.accountWide and true or false
+  ClearTableInPlace(_G[self.DB_NAME])
+  ClearTableInPlace(_G[self.CHAR_DB_NAME])
+  account.accountWide    = keepAccountWide
+  account._gseResetToken = FORCED_RESET_TOKEN
+
+  -- Seed the curated default layout into the ACTIVE store (account if account-wide, else this character).
+  self:ApplySeedPreset(self:GetActiveDBRaw())
+
+  local cf = rawget(_G, "DEFAULT_CHAT_FRAME")
+  if cf and cf.AddMessage then
+    cf:AddMessage("|cFFFFFFFFGS|r|cFF00FFFFE|r|cFFFFFF00: Tracker|r |cff66ccffSettings were reset for this version update.|r")
+  end
+  return true
+end
+
 function SV:EnsureDB()
+  self:ApplyOneTimeReset()  -- one-time per-version wipe, BEFORE reading the active store
   local db = self:GetDB()
   self:RunMigrations(db)
   return FinalizeDatabase(self, db, true, ShouldImportLegacyFlat(db))

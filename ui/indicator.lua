@@ -22,6 +22,13 @@ function UI:GetPressedIndicatorSize()
   return uiShared.Clamp(tonumber(C.DEFAULT_PRESSED_INDICATOR_SIZE) or 10, C.PRESSED_INDICATOR_MIN_SIZE or 4, C.PRESSED_INDICATOR_MAX_SIZE or 24)
 end
 
+function UI:GetPressedIndicatorShowWhen()
+  if ns.Utils and ns.Utils.GetPressedIndicatorShowWhen then
+    return ns.Utils:GetPressedIndicatorShowWhen()
+  end
+  return (C.MODE_ALWAYS or "Always")
+end
+
 function UI:GetPressedIndicatorColorMode()
   if ns.Utils and ns.Utils.GetPressedIndicatorColorMode then
     return ns.Utils:GetPressedIndicatorColorMode()
@@ -66,12 +73,15 @@ local function StorePressedIndicatorDragOffset(self)
   if self.SetElementOffset then self:SetElementOffset("pressedIndicator", offX, offY) end
 end
 
--- Enable/disable dragging of the pressed indicator to match the unlock option.
+-- The pressed indicator is positioned through its Edit Mode "Click to Edit" box (which calls
+-- StartMoving on this frame during a box drag, see ui/editmode.lua) -- the standard element lock
+-- behaviour. So the frame itself is always LOCKED for direct mouse: never draggable in normal play,
+-- and the box (a higher-level child) handles all dragging while editing.
 function UI:UpdatePressedIndicatorDragState()
   local ui = self.ui
   local frame = ui and ui.pressedIndicator
   if not frame then return end
-  local unlocked = self:GetPressedIndicatorUnlocked()
+  local unlocked = false
 
   if not frame._gsetPiDragScripts then
     frame._gsetPiDragScripts = true
@@ -337,9 +347,22 @@ function UI:RefreshPressedIndicator(force)
   -- Show whenever there's recent input -- in OR out of combat, tracker shown or
   -- hidden -- so a left-on spammer is always visible. Always show in editing/preview, and
   -- while UNLOCKED, so it can be positioned by dragging.
-  local _ = inCombat -- (combat no longer gates the indicator)
-  local unlocked = self.GetPressedIndicatorUnlocked and self:GetPressedIndicatorUnlocked() or false
-  local shouldShow = enabled and (editing or recentlyUsed or unlocked)
+  -- Visibility (Show-When) gate: applies ONLY to live play. Edit Mode always shows the indicator so it
+  -- can be positioned (via its "Click to Edit" box, the standard element lock behaviour). "Always" =
+  -- input-driven as before; "In Combat" / "Has Target" additionally require that state; "Never" hides
+  -- it outside Edit Mode.
+  local showWhenOK = true
+  if not editing then
+    local mode = self.GetPressedIndicatorShowWhen and self:GetPressedIndicatorShowWhen() or "Always"
+    if mode == "Never" then
+      showWhenOK = false
+    elseif mode == "InCombat" then
+      showWhenOK = inCombat
+    elseif mode == "HasTarget" then
+      showWhenOK = (API.HasHarmTarget and API.HasHarmTarget()) or false
+    end
+  end
+  local shouldShow = enabled and showWhenOK and (editing or recentlyUsed)
 
   local shape = self.GetPressedIndicatorShape and self:GetPressedIndicatorShape() or (C.DEFAULT_PRESSED_INDICATOR_SHAPE or "dot")
   local size = self.GetPressedIndicatorSize and self:GetPressedIndicatorSize() or (C.DEFAULT_PRESSED_INDICATOR_SIZE or 10)
@@ -360,11 +383,11 @@ function UI:RefreshPressedIndicator(force)
   -- BLINK at the input rate: full-bright the instant a monitored key / GSE fire lands,
   -- then ease toward a DIM-BUT-VISIBLE floor between presses, so the image visibly pulses
   -- as fast as the input it's watching. It never fades to invisible (that read as "gone").
-  -- Held solid while editing or unlocked so it can be dragged into place. Set on the frame
+  -- Held solid while editing so it can be dragged into place. Set on the frame
   -- BEFORE the image early-return below, so IMAGE shapes (e.g. Crosshair) pulse too.
   do
-    -- Held solid while editing or unlocked so it can be dragged into place; otherwise blink.
-    local pulse = (editing or unlocked) and 1 or blinkPulse
+    -- Held solid while editing (Edit Mode positioning); otherwise blink at the input rate.
+    local pulse = editing and 1 or blinkPulse
     ui.pressedIndicator:SetAlpha(pulse)
   end
 

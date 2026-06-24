@@ -332,10 +332,13 @@ function UI:ApplyElementPosition(elementName)
   local relativePoint = defaults.relativePoint or point
   local x = (cfg and cfg.x) or defaults.x or 0
   local y = (cfg and cfg.y) or defaults.y or 0
-  -- Swap Name <-> ModKeys: when enabled, each of the pair adopts the OTHER's anchor + offset, so the
-  -- two text rows trade vertical places. (Their "enabled"/visibility stays their own -- only the
-  -- position is swapped.)
+  -- Swap Name <-> ModKeys: each of the pair adopts the OTHER's anchor + offset, so they trade places.
+  -- HORIZONTAL only: in VERTICAL the single name is hidden (per-icon names instead), the GSE name is
+  -- top-centre and MODKEYS is fixed bottom-centre, and the swap just flips which SIDE the per-icon names
+  -- sit (SetIconNameLabel) -- so swapping these anchors here would wrongly move MODKEYS above the column.
+  local verticalSwapLayout = (addon.GetActionTrackerLayout and addon:GetActionTrackerLayout()) == "VERTICAL"
   if (elementName == "sequenceText" or elementName == "modifiersText")
+    and not verticalSwapLayout
     and addon.GetActionTrackerSwapNameModkeys and addon:GetActionTrackerSwapNameModkeys() then
     local other = (elementName == "sequenceText") and "modifiersText" or "sequenceText"
     local ocfg, odef = self:GetElementLayout(other)

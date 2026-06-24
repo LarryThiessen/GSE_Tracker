@@ -1,3 +1,33 @@
+## 1.5.0
+
+### ⚠ Heads up
+- **Your GSE_Tracker settings reset once with this update.** This release ships a fresh, curated default layout and resets saved settings a single time on first login; after that everything saves normally. Re-apply any personal tweaks.
+
+### New
+- **Names now fade out after you stop casting — even out of combat** (previously only when combat ended).
+- **Vertical layout polish:** per-icon **Spell Names** beside each icon, **GSE Sequence Name** centred on top, and **MODKEYS** below.
+
+### Changed
+- **GSE Sequence Name & Spell Names now use your class colour.**
+- **Login welcome popup removed** (the one-line "loaded" chat message stays); the "Hide Login Message" option is gone.
+- **~58% smaller download** — removed unused artwork and backups, recompressed images.
+
+### Fixed
+- **Meters:** DPS / HPS now show in combat on a fresh profile (they could stay hidden).
+- **Edit Mode:** arrow-key nudging now moves the **selected** element (Action Tracker / Meters / Assisted Highlight / Pressed Indicator) instead of always the Pressed Indicator; example names appear as soon as Edit Mode opens, mirror your name toggles, follow the Name font/size, and no longer clip or get buried under the selection box.
+- **Breakdown window** reopens where you left it (was jumping to the other side of the screen), and no longer errors when you click the Shop while it's open.
+- **Vertical:** icons render *behind* the GSE Sequence Name, and the name stays put as icons populate.
+
+## 1.4.1
+
+### Fixed
+- Smooth post-combat fade-outs for the name / keybind readouts.
+
+## 1.4.0
+
+### New
+- **Meters / Details overhaul**, dual GSE + Spell name system, full-tracker scaling, and a restructured options GUI.
+
 ## 1.3.3
 
 ### New

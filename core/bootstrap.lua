@@ -144,10 +144,7 @@ lifecycleEventFrame:SetScript("OnEvent", function(self, event, arg1)
     if Compat and Compat.PrintLoadedMessage then
       Compat:PrintLoadedMessage()
     end
-    -- Welcome window: shows every login unless "Hide Login Message" is checked.
-    if addon.ShowLoginMessage then
-      addon:ShowLoginMessage()
-    end
+    -- (Welcome-window popup feature removed; only the chat "loaded!" line above remains on login.)
 
   elseif event == "PLAYER_LOGOUT" then
     API.SafeUnregisterEvent(self, "PLAYER_LOGOUT")

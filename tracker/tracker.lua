@@ -91,12 +91,15 @@ function Tracker:ResetIcons()
   self._lastCastGUID = nil
   self._lastTexture = false
 
+  local names = addon._recentNames
   if API.wipe then
     API.wipe(recent)
+    if names then API.wipe(names) end
   else
     for i = #recent, 1, -1 do
       recent[i] = nil
     end
+    if names then for i = #names, 1, -1 do names[i] = nil end end
   end
 
   if not hadIcons then
@@ -114,7 +117,7 @@ function Tracker:ResetIcons()
   end
 end
 
-function Tracker:PushRecentTexture(texture)
+function Tracker:PushRecentTexture(texture, name)
   if not texture then
     return false
   end
@@ -127,6 +130,10 @@ function Tracker:PushRecentTexture(texture)
   local recent = self._recentIcons or addon._recentIcons or {}
   self._recentIcons = recent
   addon._recentIcons = recent
+  -- Per-slot spell names, kept in lockstep with `recent` so name[i] always belongs to texture[i]
+  -- (the per-icon name labels in vertical layout read this; SetIconRow picks it up via addon._recentNames).
+  local names = addon._recentNames or {}
+  addon._recentNames = names
 
   local maxCount = GetMaxIconCount()
   local currentCount = self._recentIconCount or #recent
@@ -137,9 +144,11 @@ function Tracker:PushRecentTexture(texture)
   for i = currentCount, 1, -1 do
     if i < maxCount then
       recent[i + 1] = recent[i]
+      names[i + 1] = names[i]
     end
   end
   recent[1] = texture
+  names[1] = name or ""
 
   if currentCount < maxCount then
     currentCount = currentCount + 1
@@ -149,6 +158,7 @@ function Tracker:PushRecentTexture(texture)
 
   for i = currentCount + 1, #recent do
     recent[i] = nil
+    names[i] = nil
   end
 
   setIconRow(addon, recent)
@@ -190,14 +200,13 @@ function Tracker:HandleSpellcast(spellID, castGUID)
   self._lastCastGUID = castGUID or self._lastCastGUID
   self._lastTexture = texture
 
-  -- Feed the spell name into its slot; RebuildNameDisplay combines it with the GSE sequence name
-  -- per the independent toggles (shown alone, or stacked under the sequence name when both are on).
-  if addon.RebuildNameDisplay then
-    local spellName = API.GetSpellName and API.GetSpellName(spellID)
-    if type(spellName) == "string" and spellName ~= "" then
-      addon._lastSpellName = spellName
-      addon:RebuildNameDisplay()
-    end
+  -- Resolve the cast's spell name once; it feeds BOTH the single name display AND the per-icon name
+  -- labels beside each icon in vertical layout (carried through PushRecentTexture into its slot).
+  local spellName = (API.GetSpellName and API.GetSpellName(spellID)) or ""
+  if type(spellName) ~= "string" then spellName = "" end
+  if addon.RebuildNameDisplay and spellName ~= "" then
+    addon._lastSpellName = spellName
+    addon:RebuildNameDisplay()
   end
 
   -- Did this cast match what the AH was suggesting? (current suggestion, or the one
@@ -258,7 +267,7 @@ function Tracker:HandleSpellcast(spellID, castGUID)
     addon:ClearModkeyStacks()
   end
 
-  local pushed = self:PushRecentTexture(texture)
+  local pushed = self:PushRecentTexture(texture, spellName)
   -- On an AH-suggestion match, show the proc as a separate CENTERED icon (grows in,
   -- glows, fades) so the main row stays undisturbed.
   if pushed and matchedSuggestion and addon.ShowProcCenterIcon then

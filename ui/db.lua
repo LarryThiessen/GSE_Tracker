@@ -386,17 +386,6 @@ function Utils:SetMinimapHidden(value)
   PersistRuntimeChange(db)
 end
 
-function Utils:GetHideLoginMessage()
-  local _, general = GetRuntimeDB()
-  return general.hideLoginMessage and true or false
-end
-
-function Utils:SetHideLoginMessage(value)
-  local db, general = GetRuntimeDB()
-  general.hideLoginMessage = not not value
-  PersistRuntimeChange(db)
-end
-
 
 local NormalizeAssistedHighlightPointName
 local NormalizeAssistedHighlightAnchorTarget
@@ -980,6 +969,32 @@ function Utils:SetPressedIndicatorShape(value)
   local pressed = EnsureTable(display, "pressedIndicator")
   pressed.shape = tostring(value or (tostring(GetPressedIndicatorDefaults().shape or "dot")))
   PersistRuntimeChange(db)
+end
+
+-- Visibility (Show-When) for the Pressed Indicator. Like the other HUD elements it can be
+-- "Always" / "InCombat" / "HasTarget" / "Never"; gating happens in RefreshPressedIndicator (live
+-- play only -- Edit Mode/unlocked always show it so it can be positioned). Stored alongside the
+-- other Pressed Indicator display props.
+function Utils:GetPressedIndicatorShowWhen()
+  local _, _, display = GetRuntimeDB()
+  local pressed = EnsureTable(display, "pressedIndicator")
+  local value = tostring(pressed.showWhen or (C.MODE_ALWAYS or "Always"))
+  if value ~= (C.MODE_ALWAYS or "Always") and value ~= (C.MODE_IN_COMBAT or "InCombat") and value ~= (C.MODE_HAS_TARGET or "HasTarget") and value ~= (C.MODE_NEVER or "Never") then
+    value = (C.MODE_ALWAYS or "Always")
+  end
+  return value
+end
+
+function Utils:SetPressedIndicatorShowWhen(value)
+  local db, _, display = GetRuntimeDB()
+  local pressed = EnsureTable(display, "pressedIndicator")
+  local normalized = tostring(value or (C.MODE_ALWAYS or "Always"))
+  if normalized ~= (C.MODE_ALWAYS or "Always") and normalized ~= (C.MODE_IN_COMBAT or "InCombat") and normalized ~= (C.MODE_HAS_TARGET or "HasTarget") and normalized ~= (C.MODE_NEVER or "Never") then
+    normalized = (C.MODE_ALWAYS or "Always")
+  end
+  pressed.showWhen = normalized
+  PersistRuntimeChange(db)
+  if addon.RefreshPressedIndicator then addon:RefreshPressedIndicator(true) end
 end
 
 function Utils:GetPressedIndicatorSize()

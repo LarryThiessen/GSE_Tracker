@@ -80,9 +80,19 @@ local function EnsureActionTrackerRowRelativeAnchorFrames(ui)
   local names = { "sequenceText", "modifiersText", "keybindText", "pressedIndicator" }
   for _, name in ipairs(names) do
     if not ui.elementAnchors[name] then
-      local anchor = API.CreateFrame("Frame", nil, ui.content)
-      anchor:SetSize(1, 1)
-      ui.elementAnchors[name] = anchor
+      -- The Pressed Indicator is SCREEN-anchored (independent of the Action Tracker): its anchor is a
+      -- UIParent child pinned to the screen centre, so moving/resizing the tracker never moves the
+      -- indicator. The other elements anchor inside the tracker content and ride with the icon row.
+      if name == "pressedIndicator" then
+        local anchor = API.CreateFrame("Frame", nil, _G.UIParent)
+        anchor:SetSize(1, 1)
+        anchor:SetPoint("CENTER", _G.UIParent, "CENTER", 0, 0)
+        ui.elementAnchors[name] = anchor
+      else
+        local anchor = API.CreateFrame("Frame", nil, ui.content)
+        anchor:SetSize(1, 1)
+        ui.elementAnchors[name] = anchor
+      end
     end
   end
   return ui.elementAnchors
@@ -98,20 +108,17 @@ local function GetActionTrackerRowRelativeBaselineOffsets(ui)
   local layout = (addon.GetActionTrackerLayout and addon:GetActionTrackerLayout()) or "HORIZONTAL"
 
   if layout == "VERTICAL" then
-    -- Vertical icon column: the labels render as stacked (top-to-bottom) glyph columns
-    -- beside the icons (see FormatLabelForLayout) -- so each is only ~1 glyph wide and
-    -- sits close to the column, centred on its vertical centre. Modifiers go to the
-    -- LEFT; the sequence/spell name (inner) and keybind (outer) go to the RIGHT as two
-    -- narrow columns. _ResizeToContent narrows the frame to match.
-    local rowHalfX = ((ui and ui.iconHolder and ui.iconHolder.GetWidth and ui.iconHolder:GetWidth()) or (tonumber(uiShared.ICON_SIZE) or 45)) * 0.5
-    if not rowHalfX or rowHalfX <= 0 then rowHalfX = (tonumber(uiShared.ICON_SIZE) or 45) * 0.5 end
+    -- Vertical icon column: text now reads HORIZONTALLY (no glyph stacking), centred ABOVE the column
+    -- (Spell name; the GSE name hoists above it via _UpdateTopNameLabel) and MODKEYS centred BELOW the
+    -- bottom icon -- the SAME reliable name path as horizontal, just stacked above/below the column.
     local gap = (uiShared.GAP_ICONS_MODS or 6)
-    local colW = uiShared.VERTICAL_LABEL_W or 24
-    local innerX = rowHalfX + gap + (colW * 0.5)
+    local nameH = (uiShared.NAME_H or 24)
+    local nameAboveY = (rowHalfY + gap + (nameH * 0.5))
+    local modsBelowY = -nameAboveY
     return {
-      sequenceText  = { x = innerX,            y = 0 },
-      keybindText   = { x = innerX + colW + 2, y = 0 },
-      modifiersText = { x = -innerX,           y = 0 },
+      sequenceText  = { x = 0, y = nameAboveY },               -- Spell name, centred above the column
+      keybindText   = { x = 0, y = nameAboveY + nameH + 2 },   -- (off by default) above the names
+      modifiersText = { x = 0, y = modsBelowY },               -- MODKEYS, centred below the column
       pressedIndicator = { x = 0, y = 0, point = "CENTER", relativePoint = "CENTER" },
     }
   end
@@ -136,7 +143,9 @@ local function UpdateActionTrackerRowRelativeAnchors(ui)
   if not anchors then return end
   local baselines = GetActionTrackerRowRelativeBaselineOffsets(ui)
   for elementName, cfg in pairs(baselines) do
-    local anchor = anchors[elementName]
+    -- Pressed Indicator is screen-anchored (UIParent), NOT row-relative -- skip it so it stays put when
+    -- the Action Tracker moves/resizes.
+    local anchor = (elementName ~= "pressedIndicator") and anchors[elementName] or nil
     if anchor then
       local point = cfg.point or "CENTER"
       local relativePoint = cfg.relativePoint or "CENTER"
@@ -294,6 +303,27 @@ function UI:ApplyStrata()
   end
 end
 
+-- Resolve the user-configured Sequence/Name font (face + size + outline), including
+-- the action-bar HotKey skin adoption that nameText/nameText2 receive in ApplyFontFaces.
+-- Single source so the vertical per-icon spell names and the Edit Mode name overlays
+-- (created in ui/icons.lua) track the Name "Size" slider instead of a hardcoded size.
+-- NOTE: keep the seq resolution here in sync with ApplyFontFaces below.
+function UI:GetResolvedSeqFont()
+  local seqName = self.GetSeqFontName and self:GetSeqFontName()
+  local seqPath = (seqName and self.GetFontPathByName and self:GetFontPathByName(seqName)) or STANDARD_TEXT_FONT
+  local seqSize = (self.GetSeqFontSize and self:GetSeqFontSize()) or uiShared.NAME_FONT_SIZE or 12
+  local outline = (ns.Utils and ns.Utils.GetActionTrackerFontOutline and ns.Utils:GetActionTrackerFontOutline()) or "OUTLINE"
+  local seqFlags = (outline == "NONE") and "" or outline
+  if uiShared.GetActionButtonFont then
+    local hp, _, hf = uiShared.GetActionButtonFont("hotkey")
+    if hp then
+      seqPath = hp
+      seqFlags = hf or seqFlags
+    end
+  end
+  return seqPath, seqSize, seqFlags
+end
+
 function UI:ApplyFontFaces()
   EnsureDB()
   if not (self.ui and self.ui.nameText and self.ui.modShift) then
@@ -363,7 +393,20 @@ function UI:ApplyFontFaces()
         SafeSet(b.keybindText, keybindPath, keybindSize, keybindFlags)
         if self.PositionIconKeybind then self:PositionIconKeybind(b) end
       end
+      -- Per-icon spell name (VERTICAL): track the Name font/size like nameText2.
+      if b and b.nameLabel then
+        SafeSet(b.nameLabel, seqPath, seqSize, seqFlags)
+        b.nameLabel._gsetNameLabelFontKey = nil  -- bust the create-time font cache
+      end
     end
+  end
+  -- Edit Mode vertical name overlays (top GSE name + per-icon examples) also track the slider.
+  if self.ui._verticalPreviewTextFrames then
+    for _, fr in pairs(self.ui._verticalPreviewTextFrames) do
+      if fr and fr.text then SafeSet(fr.text, seqPath, seqSize, seqFlags) end
+    end
+    -- Re-fit the overlay frames to the new font size so the top GSE name doesn't clip/truncate.
+    if self._FitVerticalPreviewFrames then self:_FitVerticalPreviewFrames() end
   end
   SafeSet(self.ui.modAlt,   modPath, modSize, modFlags)
   SafeSet(self.ui.modCtrl,  modPath, modSize, modFlags)
@@ -734,6 +777,7 @@ local STRUCTURAL_REBUILD_REASONS = {
   init = true,
   settings = true,
   iconCount = true,
+  editMode = true,
 }
 
 function UI:_GetRenderSettingsSignature()
@@ -951,17 +995,26 @@ function UI:_ResizeToContent()
   end
 end
 
+local function ActionTrackerFrameIsBuilt(ui)
+  return ui and ui.content and ui.iconHolder and ui.icons and ui.nameText
+end
+
 function UI:BuildMainFrame()
-  if self.ui then return end
+  if ActionTrackerFrameIsBuilt(self.ui) then return end
   EnsureDB()
 
-  local ui = _G.GSE_TrackerFrame
-  if ui then
+  local ui = self.ui or _G.GSE_TrackerFrame
+  if ActionTrackerFrameIsBuilt(ui) then
     self.ui = ui
     return
   end
 
-  ui = API.CreateFrame("Frame", "GSE_TrackerFrame", UIParent, "BackdropTemplate")
+  if ui and ui.content and ui.content.Hide then
+    ui.content:Hide()
+  end
+  if not ui then
+    ui = API.CreateFrame("Frame", "GSE_TrackerFrame", UIParent, "BackdropTemplate")
+  end
   self.ui = ui
 
   ui:SetScale(self:GetDesiredScale())
@@ -1043,6 +1096,17 @@ function UI:BuildMainFrame()
 
   ui.iconHolder = API.CreateFrame("Frame", nil, ui.content)
   UpdateActionTrackerIconRowAnchor(ui)
+
+  -- The icon column (iconHolder + its icon child frames) is created AFTER nameText2 and, as a child
+  -- frame, draws ABOVE content's own FontStrings -- so icons rendered on top of the VERTICAL GSE name.
+  -- Give nameText2 its own layer one step above iconHolder so the GSE name always sits in front and the
+  -- icons populate BEHIND it. Anchoring is cross-frame (to iconHolder/modifiersFrame), so this is safe.
+  ui._gseNameLayer = API.CreateFrame("Frame", nil, ui.content)
+  ui._gseNameLayer:SetAllPoints(ui.content)
+  if ui._gseNameLayer.SetFrameLevel and ui.iconHolder.GetFrameLevel then
+    ui._gseNameLayer:SetFrameLevel((ui.iconHolder:GetFrameLevel() or 0) + 5)
+  end
+  if ui.nameText2 and ui.nameText2.SetParent then ui.nameText2:SetParent(ui._gseNameLayer) end
 
   ui.keybindFrame = API.CreateFrame("Frame", nil, ui.content)
   ui.keybindFrame:SetSize(PS(uiShared.TEXT_W), PS(uiShared.NAME_H))

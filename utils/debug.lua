@@ -55,6 +55,108 @@ function DebugModule:HandleSlashCommand(msg)
     return
   end
 
+  if msg == "emstate" or msg == "editmode" then
+    -- Dump the REAL Edit Mode / example-preview state from the addon's own ns table (so it can't be
+    -- confused by guessing the wrong global). Run it while Blizzard Edit Mode is open.
+    local EMM = _G.EditModeManagerFrame
+    local blizz = (EMM and EMM.IsEditModeActive and EMM:IsEditModeActive()) and true or false
+    local UI = ns  -- finalized addon: has cross-module methods (GetActionTrackerLayout etc.); ns.UI alone does not
+    local f = (UI and UI.ui) or _G.GSE_TrackerFrame
+    PrintChat(string.format(
+      "EditMode: blizz=%s editing=%s preview=%s enabled=%s combat=%s frameShown=%s boxShown=%s",
+      tostring(blizz),
+      tostring(ns._editingOptions),
+      tostring(UI and UI.IsEditModePreviewActive and UI:IsEditModePreviewActive()),
+      tostring(ns.IsEnabled and ns:IsEnabled()),
+      tostring(_G.InCombatLockdown and _G.InCombatLockdown() or false),
+      tostring(f and f.IsShown and f:IsShown()),
+      tostring(f and f._gsetEditBox and f._gsetEditBox.IsShown and f._gsetEditBox:IsShown())))
+    -- Second line: actual rendered widget state (ground truth for "nothing shows").
+    local ui = (UI and UI.ui) or f
+    local ic = ui and ui.icons and ui.icons[1]
+    local nt = ui and ui.nameText
+    local nt2 = ui and ui.nameText2
+    local il = ic and ic.nameLabel
+    local overlays = ui and ui._verticalPreviewTextFrames
+    local ot = overlays and overlays.top
+    local oi = overlays and overlays.icon1
+    PrintChat(string.format(
+      "Render: nIcons=%s i1Shown=%s i1Alpha=%s i1Tex=%s frameAlpha=%s nameShown=%s nameAlpha=%s name=%q",
+      tostring(ui and ui.icons and #ui.icons),
+      tostring(ic and ic.IsShown and ic:IsShown()),
+      tostring(ic and ic.GetAlpha and ic:GetAlpha()),
+      tostring(ic and ic.tex and ic.tex.GetTexture and ic.tex:GetTexture()),
+      tostring(f and f.GetAlpha and f:GetAlpha()),
+      tostring(nt and nt.IsShown and nt:IsShown()),
+      tostring(nt and nt.GetAlpha and nt:GetAlpha()),
+      tostring((nt and nt.GetText and nt:GetText()) or "")))
+    PrintChat(string.format(
+      "VerticalNames: layout=%s topShown=%s topAlpha=%s top=%q i1NameShown=%s i1NameAlpha=%s i1Name=%q overlayTop=%s/%q overlayI1=%s/%q",
+      tostring(UI and UI.GetActionTrackerLayout and UI:GetActionTrackerLayout()),
+      tostring(nt2 and nt2.IsShown and nt2:IsShown()),
+      tostring(nt2 and nt2.GetAlpha and nt2:GetAlpha()),
+      tostring((nt2 and nt2.GetText and nt2:GetText()) or ""),
+      tostring(il and il.IsShown and il:IsShown()),
+      tostring(il and il.GetAlpha and il:GetAlpha()),
+      tostring((il and il.GetText and il:GetText()) or ""),
+      tostring(ot and ot.IsShown and ot:IsShown()),
+      tostring((ot and ot.text and ot.text.GetText and ot.text:GetText()) or ""),
+      tostring(oi and oi.IsShown and oi:IsShown()),
+      tostring((oi and oi.text and oi.text.GetText and oi.text:GetText()) or "")))
+    -- Fourth line: overlay LAYER + edit-box stacking. IsVisible (not IsShown) reflects the parent
+    -- chain, so a hidden/under-strata layer shows up here even when the text frames report Shown.
+    local layer = ui and ui._verticalNameOverlayLayer
+    local box = ui and ui._gsetEditBox
+    PrintChat(string.format(
+      "Stacking: layerShown=%s layerStrata=%s layerLvl=%s boxStrata=%s boxLvl=%s topVisible=%s topStrata=%s topLvl=%s i1Visible=%s",
+      tostring(layer and layer.IsShown and layer:IsShown()),
+      tostring(layer and layer.GetFrameStrata and layer:GetFrameStrata()),
+      tostring(layer and layer.GetFrameLevel and layer:GetFrameLevel()),
+      tostring(box and box.GetFrameStrata and box:GetFrameStrata()),
+      tostring(box and box.GetFrameLevel and box:GetFrameLevel()),
+      tostring(ot and ot.IsVisible and ot:IsVisible()),
+      tostring(ot and ot.GetFrameStrata and ot:GetFrameStrata()),
+      tostring(ot and ot.GetFrameLevel and ot:GetFrameLevel()),
+      tostring(oi and oi.IsVisible and oi:IsVisible())))
+    PrintChat(string.format(
+      "GSEnameSlide: fires=%s offset=%s startSet=%s driver=%s",
+      tostring(ns._gseSlideFires or 0),
+      tostring(nt2 and nt2._verticalGSESlideOffset),
+      tostring(nt2 and nt2._verticalGSESlideStart ~= nil),
+      tostring(ui and ui._verticalGSENameSlideDriver and ui._verticalGSENameSlideDriver.GetScript and ui._verticalGSENameSlideDriver:GetScript("OnUpdate") ~= nil)))
+    return
+  end
+
+  if msg == "meters" then
+    -- DPS/HPS not showing? Dump the gates + frame state. Run while IN COMBAT.
+    local sv = _G.MetersSavedVars or {}
+    local slots = sv.slots or {}
+    local dpsF, hpsF, anc = _G.DPSFrame, _G.HPSFrame, _G.MetersAnchor
+    PrintChat(string.format(
+      "Meters caps: capable=%s hasSource=%s combat=%s mode=%s locked=%s enabled=%s",
+      tostring(_G.GSETracker_MetersCapable),
+      tostring(_G.GSETracker_HasDPSSource and _G.GSETracker_HasDPSSource()),
+      tostring(_G.InCombatLockdown and _G.InCombatLockdown() or false),
+      tostring(sv.showWhen), tostring(sv.locked), tostring(sv.enabled)))
+    PrintChat(string.format(
+      "Meters SV: showDPS=%s showHPS=%s slotDPS=%s slotHPS=%s",
+      tostring(sv.showDPS), tostring(sv.showHPS), tostring(slots.DPS), tostring(slots.HPS)))
+    PrintChat(string.format(
+      "DPSFrame: shown=%s alpha=%s parent=%s text=%q",
+      tostring(dpsF and dpsF.IsShown and dpsF:IsShown()),
+      tostring(dpsF and dpsF.GetAlpha and dpsF:GetAlpha()),
+      tostring(dpsF and dpsF.GetParent and dpsF:GetParent() and (dpsF:GetParent():GetName() or "anon")),
+      tostring(dpsF and dpsF.dpsText and dpsF.dpsText.GetText and (dpsF.dpsText:GetText() or ""))))
+    PrintChat(string.format(
+      "HPSFrame: shown=%s alpha=%s text=%q | Anchor: shown=%s alpha=%s",
+      tostring(hpsF and hpsF.IsShown and hpsF:IsShown()),
+      tostring(hpsF and hpsF.GetAlpha and hpsF:GetAlpha()),
+      tostring(hpsF and hpsF.hpsText and hpsF.hpsText.GetText and (hpsF.hpsText:GetText() or "")),
+      tostring(anc and anc.IsShown and anc:IsShown()),
+      tostring(anc and anc.GetAlpha and anc:GetAlpha())))
+    return
+  end
+
   if ns.ToggleSettingsWindow then
     ns:ToggleSettingsWindow()
   end

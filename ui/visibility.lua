@@ -12,14 +12,10 @@ local StartNameSlide -- forward decl (defined with the slide helpers below); sli
 -- (e.g. "Shift" -> S/h/i/f/t). Returns the text unchanged in horizontal layout.
 -- UTF-8 aware so localised names stack per character, not per byte.
 function uiShared.FormatLabelForLayout(text)
-  if type(text) ~= "string" or text == "" then return text end
-  local layout = (addon.GetActionTrackerLayout and addon:GetActionTrackerLayout()) or "HORIZONTAL"
-  if layout ~= "VERTICAL" then return text end
-  local out = {}
-  for c in string.gmatch(text, "[%z\1-\127\194-\244][\128-\191]*") do
-    out[#out + 1] = c
-  end
-  return table.concat(out, "\n")
+  -- The Action Tracker text now reads HORIZONTALLY in BOTH layouts (vertical no longer stacks glyphs:
+  -- the GSE/Spell names sit above the icon column and MODKEYS below). Returns the text unchanged so the
+  -- same reliable name path works for both layouts.
+  return text
 end
 local function FmtLabel(text) return uiShared.FormatLabelForLayout(text) end
 
@@ -52,7 +48,7 @@ local function GetPreviewSequenceText()
   if showSeq and showSpell then return "Spell Name" end   -- both -> Spell is the inner/main name
   if showSpell then return "Spell Name" end
   if showSeq then return "GSE Sequence Name" end
-  return "Sequence / Spell"  -- name fully off: still show a generic sample to place
+  return ""  -- both name toggles OFF -> show NO name text (not even a placeholder)
 end
 
 -- The hoisted GSE example (only when BOTH names are on, i.e. the split layout); "" otherwise.
@@ -119,33 +115,45 @@ local function ApplyRuntimeSequenceVisibility(self, show)
   local ui = self.ui
   if not ui then return end
 
+  -- Placement preview: the example name/keybind placeholders appear on EXACTLY the same
+  -- signal as the example icons -- IsEditModePreviewActive (Blizzard Edit Mode +
+  -- out of combat). Lock is Edit-Mode-driven now, so there is no separate
+  -- "unlocked" preview state; keying on the preview signal keeps name/keybind in lockstep
+  -- with the icons and guarantees they clear the instant Edit Mode exits OR combat starts.
+  -- (No live GSE sequence exists out of combat, so the example always wins while previewing.)
+  local inPreview = (self.IsEditModePreviewActive and self:IsEditModePreviewActive()) or false
+
   -- A post-combat name fade-out is in progress (see ui/events.lua PLAYER_REGEN_ENABLED). Let
   -- SmoothFadeOut own the name/keybind alpha for the duration so a visibility refresh can't snap
   -- them back to full (Always) or zero (In Combat) mid-ramp. A fresh cast/combat clears the flag
-  -- via RebuildNameDisplay before this runs again.
-  if ui._namesFading then return end
+  -- via RebuildNameDisplay before this runs again. EXCEPTION: in Edit Mode preview we must paint
+  -- the example now (there's no live fade to protect, and entering Edit Mode within ~3s of leaving
+  -- combat must still show the placeholders) -- so cancel any lingering fade and continue.
+  if ui._namesFading then
+    if not inPreview then return end
+    ui._namesFading = false
+    if uiShared and uiShared.CancelFade then
+      uiShared.CancelFade(ui.nameText)
+      uiShared.CancelFade(ui.nameText2)
+      uiShared.CancelFade(ui.keybindText)
+    end
+  end
 
   local seqText = show and GetRuntimeSequenceText(ui) or ""
   local keyText = show and GetRuntimeKeybindText(ui) or ""
 
-  -- Placement preview: whenever the tracker is UNLOCKED (in OR out of combat) and
-  -- there's no live GSE sequence, show example text so the sequence/keybind labels
-  -- are visible to position and font -- the user asked for "Example Sequence" in its
-  -- normal spot above the icons while unlocked. A live GSE sequence still wins
-  -- (seqText is non-empty above); locked normal play shows nothing.
-  local unlocked = (not (self.IsLocked and self:IsLocked()))
-    and (not (self.IsEnabled and not self:IsEnabled()))
   local usingPreview = false
-  if show and unlocked then
-    -- In placement-preview (unlocked & out of combat) ALWAYS show the example, even if a
-    -- stale runtime sequence key lingers after combat (which otherwise blocked the example
-    -- from returning). A live sequence only wins while in combat.
-    local inPreview = (self.IsEditModePreviewActive and self:IsEditModePreviewActive()) or false
-    if inPreview or seqText == "" then seqText = GetPreviewSequenceText(); usingPreview = true end
-    if inPreview or keyText == "" then keyText = GetPreviewKeybindText() end
+  if inPreview then
+    seqText = GetPreviewSequenceText(); usingPreview = true
+    keyText = GetPreviewKeybindText()
   end
 
   local seqVisible = seqText ~= "" and ElementEnabled("sequenceText")
+  -- VERTICAL: the single inner Spell name is REPLACED by per-icon labels (UpdateIconNames); the GSE name
+  -- is hoisted top-centre (_UpdateTopNameLabel, still called below). Hide the single name here.
+  if (addon.GetActionTrackerLayout and addon:GetActionTrackerLayout()) == "VERTICAL" then
+    seqVisible = false
+  end
   if ui.sequenceTextFrame then
     if seqVisible then
       -- Slide the name UP into place when it first appears (false -> true).
@@ -188,77 +196,28 @@ local function ApplyRuntimeSequenceVisibility(self, show)
   end
 end
 
-function UI:RefreshEditingPreviewState()
-  local ui = self.ui
-  if not (ui and addon._editingOptions) then return end
-
-  local show = (ui._lastVisible ~= false)
-  local seqVisible = show and ElementEnabled("sequenceText")
-  local keyVisible = show and ElementEnabled("keybindText")
-  local modsVisible = show and ElementEnabled("modifiersText")
-
-  if ui.sequenceTextFrame then
-    if seqVisible then ui.sequenceTextFrame:Show() else ui.sequenceTextFrame:Hide() end
-  end
-  if ui.nameText then
-    ui.nameText:SetText(seqVisible and FmtLabel(GetPreviewSequenceText()) or "")
-    if self._ApplyNameVOffset then self:_ApplyNameVOffset(seqVisible and GetPreviewSequenceText() or "") end
-    ui.nameText:SetTextColor(1, 1, 1, seqVisible and 1 or 0)
-    if self._UpdateTopNameLabel then
-      self:_UpdateTopNameLabel(GetPreviewTopName(), true, 1, 1, 1, seqVisible and 1 or 0)
-    end
-  end
-
-  if ui.keybindFrame then
-    if keyVisible then ui.keybindFrame:Show() else ui.keybindFrame:Hide() end
-  end
-  if ui.keybindText then
-    ui.keybindText:SetText(keyVisible and FmtLabel(GetPreviewKeybindText()) or "")
-    ui.keybindText:SetTextColor(1, 1, 1, keyVisible and 1 or 0)
-  end
-
-  if ui.modifiersFrame then
-    if modsVisible then ui.modifiersFrame:Show() else ui.modifiersFrame:Hide() end
-  end
-  if ui.modAlt then
-    ui.modAlt:SetText(modsVisible and "ALT" or "")
-    if modsVisible then ui.modAlt:Show() else ui.modAlt:Hide() end
-  end
-  if ui.modShift then
-    ui.modShift:SetText(modsVisible and "SHIFT" or "")
-    if modsVisible then ui.modShift:Show() else ui.modShift:Hide() end
-  end
-  if ui.modCtrl then
-    ui.modCtrl:SetText(modsVisible and "CTRL" or "")
-    if modsVisible then ui.modCtrl:Show() else ui.modCtrl:Hide() end
-  end
-
-  if self.ApplyFontFaces then self:ApplyFontFaces() end
-  if self.ApplyAllElementPositions then self:ApplyAllElementPositions() end
-  if self.UpdateModifiers then self:UpdateModifiers(true) end
-  if self._ResizeToContent then self:_ResizeToContent() end
-  if self.RefreshPressedIndicator then self:RefreshPressedIndicator(true) end
-end
-
 function UI:RefreshCombatOnlyElements(show, inCombat)
   local ui = self.ui
   if not ui then return end
 
-  if addon._editingOptions then
-    self:RefreshEditingPreviewState()
-    return
-  end
-
-  local combatVisible = show and inCombat
+  -- ONE unified render path for both live play and Edit Mode placement preview. The
+  -- example name / keybind / modkey placeholders are gated on EXACTLY the same signal as
+  -- the example icons -- IsEditModePreviewActive (Edit Mode + out of combat). So all
+  -- of them switch ON together when Edit Mode opens out of combat and OFF
+  -- together the instant Edit Mode closes OR combat begins. There is deliberately NO
+  -- separate "editing" render path: the old one drifted out of sync with the icons (text
+  -- examples lingered after exit because lock applied after the render, and stayed up in
+  -- combat because it ignored combat; its modkey example was also dead -- it set the legacy
+  -- modAlt/modShift/modCtrl widgets that UpdateModifiers immediately wiped).
+  local inPreview = (self.IsEditModePreviewActive and self:IsEditModePreviewActive()) or false
 
   ApplyRuntimeSequenceVisibility(self, show)
 
-  -- Modifiers now show ONLY while a side-modifier is actually held (UpdateModifiers
-  -- does the show/hide). Here we just set whether they're ALLOWED (tracker visible +
-  -- element enabled) plus a sample for placement preview; UpdateModifiers runs again
-  -- on every MODIFIER_STATE_CHANGED.
-  local modsAllowed = show and ElementEnabled("modifiersText") and true or false
-  local inPreview = (self.IsEditModePreviewActive and self:IsEditModePreviewActive()) or false
+  -- Modifiers show ONLY while a side-modifier is actually held (UpdateModifiers does the
+  -- show/hide); in preview we feed it a fixed sample ("LShift+RCtrl") so it can be placed.
+  -- Allow the readout even if `show` is false in preview (e.g. no target), matching the
+  -- icons/name which also ignore `show` while previewing.
+  local modsAllowed = (show or inPreview) and ElementEnabled("modifiersText") and true or false
   ui._modsAllowed = modsAllowed
   ui._modsPreview = (modsAllowed and inPreview) and "LShift+RCtrl" or nil
   self:UpdateModifiers(true)
@@ -270,8 +229,22 @@ function UI:RefreshCombatOnlyElements(show, inCombat)
   if self.RefreshPressedIndicator then
     self:RefreshPressedIndicator(true)
   end
+  if inPreview and self.RefreshVerticalEditModeNames then
+    self:RefreshVerticalEditModeNames()
+  elseif self.UpdateIconNames then
+    self:UpdateIconNames()
+  end
   if self.UpdateAHMatchReadout then
     self:UpdateAHMatchReadout()
+  end
+
+  -- Entering/leaving preview changes the content size (placeholders appear/disappear); keep
+  -- the frame fitted and the elements anchored so the example sits where the live text will
+  -- (this is the layout work the old editing path did, now folded into the single path).
+  if inPreview then
+    if self.ApplyFontFaces then self:ApplyFontFaces() end
+    if self.ApplyAllElementPositions then self:ApplyAllElementPositions() end
+    if self._ResizeToContent then self:_ResizeToContent() end
   end
 end
 
@@ -289,9 +262,16 @@ function UI:ApplyVisibility()
   local hasTarget = (API.HasHarmTarget and API.HasHarmTarget()) or false
 
   local show
+  -- Edit Mode visibility is DELIBERATELY decoupled from the Show-When setting: while Blizzard Edit
+  -- Mode is open the tracker frame is ALWAYS shown so its selection box + example placeholders are
+  -- visible to position, even if Show-When is "Has Target"/"In Combat"/"Never". Source of truth is
+  -- Blizzard's live EditModeManagerFrame:IsEditModeActive() (our _editingOptions flag is the fast
+  -- path) -- so a missed/late EditMode.Enter callback can't leave the frame hidden behind Show-When.
   local editingOverride = addon._editingOptions and true or false
-  -- Force the tracker visible while placing it (unlocked + out of combat), even
-  -- if the Show mode would otherwise hide it, so the icon row can be positioned.
+  if not editingOverride then
+    local EMM = _G.EditModeManagerFrame
+    if EMM and EMM.IsEditModeActive and EMM:IsEditModeActive() then editingOverride = true end
+  end
   if not editingOverride and self.IsEditModePreviewActive and self:IsEditModePreviewActive() then
     editingOverride = true
   end
@@ -337,20 +317,12 @@ local MOD_SLIDE_DURATION = 0.18
 local function ModNow()
   return (API.GetTime and API.GetTime()) or (_G.GetTime and _G.GetTime()) or 0
 end
-local function SlideIsVertical()
-  return ((addon.GetActionTrackerLayout and addon:GetActionTrackerLayout()) or "HORIZONTAL") == "VERTICAL"
-end
 local function ApplyModSlideY(ui, label, y)
   if not (label and ui and ui.modifiersFrame) then return end
   label:ClearAllPoints()
-  -- Vertical layout: the modifiers sit to the LEFT of the icon column, so the slide
-  -- runs horizontally (out from centre, leftward) instead of vertically. The signed
-  -- offset already starts toward the column and eases to the resting spot.
-  if SlideIsVertical() then
-    label:SetPoint("CENTER", ui.modifiersFrame, "CENTER", (label._modBaseX or 0) + y, 0)
-  else
-    label:SetPoint("CENTER", ui.modifiersFrame, "CENTER", label._modBaseX or 0, y)
-  end
+  -- Vertical keeps ModKeys below the icon column, so it uses the same top-to-bottom
+  -- slide as the horizontal layout.
+  label:SetPoint("CENTER", ui.modifiersFrame, "CENTER", label._modBaseX or 0, y)
 end
 local function ModSlideOnUpdate(driver)
   local ui = driver and driver._ui
@@ -395,14 +367,7 @@ local function ApplyNameSlideY(ui, y)
   local frame = ui and ui.sequenceTextFrame
   if not (fs and frame) then return end
   fs:ClearAllPoints()
-  -- Vertical layout: the name sits to the RIGHT of the icon column, so the slide runs
-  -- horizontally (out from centre, rightward) instead of vertically. The signed offset
-  -- already starts toward the column (negative x) and eases to the resting spot.
-  if SlideIsVertical() then
-    fs:SetPoint("CENTER", frame, "CENTER", y, 0)
-  else
-    fs:SetPoint("CENTER", frame, "CENTER", 0, y)
-  end
+  fs:SetPoint("CENTER", frame, "CENTER", 0, y)
 end
 local function NameSlideOnUpdate(driver)
   local ui = driver and driver._ui
@@ -506,7 +471,10 @@ function UI:UpdateModifiers(force)
   end
   if ui.modShift then
     if has then
-      ui.modShift:SetText(FmtLabel(str))
+      -- MODKEYS reads HORIZONTALLY now (it sits centred below the icon column in vertical layout), so
+      -- skip the per-glyph vertical stacking there; horizontal layout keeps its normal text.
+      local layoutVertical = (addon.GetActionTrackerLayout and addon:GetActionTrackerLayout()) == "VERTICAL"
+      ui.modShift:SetText(layoutVertical and str or FmtLabel(str))
       SetModifierStyle(ui.modShift, true, 1, 1, 1)
       ui.modShift:Show()
       if not prev or prev == "" then StartModSlide(ui, ui.modShift) end -- slide in on press

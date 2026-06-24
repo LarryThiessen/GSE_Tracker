@@ -433,6 +433,69 @@ local function MakeSpacer(_, _, desc)
   return desc.h or 16
 end
 
+-- A simple action button row. desc.red tints the native UIPanelButton red (call-to-action). desc.onClick
+-- fires on click; desc.tooltip/label drive the hover tip; desc.width sets the button width (default 150).
+--
+-- desc.secureMacro (string OR function->string|nil): when set, the button is built from
+-- SecureActionButtonTemplate and fires that slash text as a macro. The point: a macro runs in the
+-- SecureActionButton's *secure* context, so a PROTECTED action it reaches (e.g. TargetUnit() during
+-- Blizzard Edit Mode setup) is ALLOWED -- our insecure code is never on that stack, so no
+-- ADDON_ACTION_FORBIDDEN taint. When secure, desc.preClick/desc.onClick are wired as PreClick/PostClick
+-- (NOT OnClick -- that would replace the secure handler). If the macro resolves to nil (slash not
+-- available) or we're in combat (can't set secure attributes), we fall back to a plain insecure button.
+local function MakeButton(pane, y, desc)
+  local topPad = 2
+  local macro = desc.secureMacro
+  if type(macro) == "function" then macro = macro() end
+  local useSecure = macro and not (_G.InCombatLockdown and _G.InCombatLockdown())
+  local template = useSecure and "UIPanelButtonTemplate, SecureActionButtonTemplate" or "UIPanelButtonTemplate"
+  local b = CreateFrame("Button", nil, pane, template)
+  -- desc.spanRight: a tall (square-ish) button pinned to the pane's RIGHT, OVERLAYING the rows beside it
+  -- (consumes no vertical space -- returns 0). Used for the Edit Mode button next to the enable/show rows.
+  if desc.spanRight then
+    b:SetSize(desc.width or 90, desc.height or 90)
+    b:SetPoint("TOPRIGHT", pane, "TOPRIGHT", -(desc.rightInset or 16), y - topPad)
+  else
+    b:SetSize(desc.width or 150, 24)
+    b:SetPoint("TOPLEFT", pane, "TOPLEFT", 16, y - topPad)
+  end
+  b:SetText(desc.label or "")
+  if desc.red then
+    local function tint(tex) if tex then tex:SetVertexColor(0.80, 0.13, 0.13) end end
+    tint(b:GetNormalTexture()); tint(b:GetPushedTexture()); tint(b:GetDisabledTexture())
+    local hl = b.GetHighlightTexture and b:GetHighlightTexture()
+    if hl then hl:SetVertexColor(1, 0.30, 0.30) end
+    local fs = b.GetFontString and b:GetFontString()
+    if fs then fs:SetTextColor(1, 0.92, 0.92) end
+  end
+  if useSecure then
+    b:RegisterForClicks("LeftButtonUp")
+    b:SetAttribute("type", "macro")
+    b:SetAttribute("macrotext", macro)
+    if desc.preClick then b:SetScript("PreClick", function() desc.preClick() end) end
+    if desc.onClick then b:SetScript("PostClick", function() desc.onClick() end) end
+  else
+    if desc.preClick or desc.onClick then
+      b:SetScript("OnClick", function()
+        if desc.preClick then desc.preClick() end
+        if desc.onClick then desc.onClick() end
+      end)
+    end
+  end
+  AttachTooltip(b, desc.label, desc.tooltip)
+  -- Optional white column header above the button (set on the TOP spanRight button to label the
+  -- whole Edit Mode column, mirroring the "Visibility" header above the dropdowns).
+  if desc.spanRight and desc.spanHeader then
+    local hdr = pane:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    hdr:SetPoint("BOTTOMLEFT", b, "TOPLEFT", 5, 5)
+    hdr:SetText(desc.spanHeader)
+    hdr:SetTextColor(1, 1, 1)
+  end
+  if desc.spanRight then return 0 end  -- overlays the rows beside it; takes no vertical space
+  if desc.center then CenterPaneRow(pane, { b }, 16, desc.width or 150) end
+  return 24 + topPad + ROW_PAD
+end
+
 local function MakeCheck(pane, y, desc)
   local get, set = ResolveGet(desc.get), ResolveSet(desc.set)
   local cb = CreateFrame("CheckButton", nil, pane, "UICheckButtonTemplate")
@@ -456,10 +519,10 @@ end
 
 -- Two or three checkboxes side by side on one row (the third is rendered only when
 -- desc.get3 is supplied). Even horizontal spacing: each checkbox sits a fixed gap after the
--- PREVIOUS label, so the groups are spaced consistently regardless of label width. Row
--- starts shifted right 20.
+-- PREVIOUS label, so the groups are spaced consistently regardless of label width. The first
+-- checkbox starts at x=16 to line up with the single checks / enable-show rows above it.
 local function MakeDualCheck(pane, y, desc)
-  local ROW_X, COL_GAP = 36, 24
+  local ROW_X, COL_GAP = 16, 24
   local lastLbl = nil
   local firstCB, rowRight = nil, ROW_X  -- for optional centering of the whole row
   -- desc.cols = { x1, x2, ... } pins each checkbox at a FIXED pane x (a stacked grid that lines up
@@ -1262,13 +1325,190 @@ local function MakeBorderRow(pane, y, desc)
   return RH_CHECK + ROW_PAD
 end
 
+-- An inline drag-and-drop arranger for the Meters cluster: the readouts (DPS/HPS/GCD), the centre Marker,
+-- and optional cooldowns -- all following the same rules. Rendered inline in the Meters edit panel as a
+-- flush 5x5 grid of 25 cells (M is the true centre row/column). Drag a chip onto any cell to place it, drop
+-- onto an occupied cell to swap; the "+" cells add optional elements. Writes through Meter_SetElementSlot so
+-- the live HUD mirrors every change instantly, and reads Meter_GetElementSlots as the source of truth.
+local function MakeMeterSlots(pane, y, desc)
+  local topPad = 8
+  local BOX_W, BOX_H = 440, 150
+  local CHIP_W, CHIP_H = 82, 24
+  local HGAP, VGAP = CHIP_W, CHIP_H     -- 0px gap (cells flush)
+  local GRID_CY = -8                     -- grid sits just under the gold heading (tight vertical padding)
+
+  local container = CreateFrame("Frame", nil, pane)
+  container:SetSize(BOX_W, BOX_H)
+  container:SetPoint("TOP", pane, "TOP", 0, y - topPad)
+
+  -- Gold section heading above the grid.
+  local heading = container:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+  heading:SetPoint("TOP", container, "TOP", 0, -2)
+  heading:SetText("Layout Control")
+  heading:SetTextColor(1, 0.82, 0)  -- WoW gold
+
+  -- 25 cells: 5 columns (LL/L/C/R/RR) x 5 rows (TT/T/M/B/XB) -- MUST match Meters.lua's slot model.
+  -- 5 rows = odd, so M is the true centre row.
+  local SLOTS = {
+    "TTLL", "TTL", "TTC", "TTR", "TTRR",
+    "LLT",  "TL",  "T",   "TR",  "RRT",
+    "LL",   "L",   "C",   "R",   "RR",
+    "LLB",  "BL",  "B",   "BR",  "RRB",
+    "XBLL", "XBL", "XBC", "XBR", "XBRR",
+  }
+  local COLX = { LL = -2 * HGAP, L = -HGAP, C = 0, R = HGAP, RR = 2 * HGAP }
+  local ROWY = { TT = 2 * VGAP, T = VGAP, M = 0, B = -VGAP, XB = -2 * VGAP }
+  local COL  = {
+    TTLL= "LL", TTL= "L", TTC="C", TTR= "R", TTRR= "RR",
+    LLT = "LL", TL = "L", T = "C", TR = "R", RRT = "RR",
+    LL  = "LL", L  = "L", C = "C", R  = "R", RR  = "RR",
+    LLB = "LL", BL = "L", B = "C", BR = "R", RRB = "RR",
+    XBLL= "LL", XBL= "L", XBC="C", XBR= "R", XBRR= "RR",
+  }
+  local ROW  = {
+    TTLL= "TT", TTL= "TT",TTC="TT",TTR= "TT",TTRR= "TT",
+    LLT = "T",  TL = "T", T = "T", TR = "T", RRT = "T",
+    LL  = "M",  L  = "M", C = "M", R  = "M", RR  = "M",
+    LLB = "B",  BL = "B", B = "B", BR = "B", RRB = "B",
+    XBLL= "XB", XBL= "XB",XBC="XB",XBR= "XB",XBRR= "XB",
+  }
+
+  -- Build the 9 drop-zones (faint target; a thin border if BackdropTemplate is available).
+  local zones = {}
+  for _, slot in ipairs(SLOTS) do
+    local ok, z = pcall(CreateFrame, "Frame", nil, container, "BackdropTemplate")
+    if not ok or not z then z = CreateFrame("Frame", nil, container) end
+    z:SetSize(CHIP_W, CHIP_H)
+    z:SetPoint("CENTER", container, "CENTER", COLX[COL[slot]], GRID_CY + ROWY[ROW[slot]])
+    local zbg = z:CreateTexture(nil, "BACKGROUND")
+    zbg:SetAllPoints(z); zbg:SetColorTexture(1, 1, 1, 0.04)
+    if z.SetBackdrop then
+      z:SetBackdrop({ edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+      z:SetBackdropBorderColor(1, 1, 1, 0.15)
+    end
+    zones[slot] = z
+  end
+
+  -- The visible centre marker is the COMBAT marker (anchored to UIParent centre + offset), not the meters
+  -- MarkerFrame -- so after a Marker move we must re-apply its position (it adds Meter_GetMarkerCellOffset).
+  -- Also refresh the Assisted Highlight, which mirrors its icon at the marker when "Assisted Highlight" is the
+  -- chosen centre marker.
+  local function RefreshCenterMarker()
+    if addon.RefreshCombatMarker then addon:RefreshCombatMarker(false)
+    elseif addon.RefreshCenterMarker then addon:RefreshCenterMarker(false) end
+    if addon.RefreshAssistedHighlight then addon:RefreshAssistedHighlight(true) end
+  end
+
+  -- One chip + one "+" add-button per cell. Redraw() shows the chip (labelled with the cell's occupant) on
+  -- filled cells and the "+" on empty cells (when there's something left to add). Chips drag to rearrange
+  -- (swap on drop); right-clicking an OPTIONAL element's chip removes it. The "+" opens a menu of the
+  -- not-yet-placed optional elements (Trinkets, Healthstone, ...).
+  local cellChips, cellPlus = {}, {}
+  local Redraw, OpenAddMenu
+  local menuFrame  -- reused dropdown frame for the EasyMenu (Classic) fallback
+
+  OpenAddMenu = function(anchorBtn, cell)
+    local items = (_G.Meter_GetAvailableElements and _G.Meter_GetAvailableElements()) or {}
+    if #items == 0 then return end
+    local function pick(id)
+      if _G.Meter_SetElementSlot then _G.Meter_SetElementSlot(id, cell) end
+      RefreshCenterMarker(); Redraw()
+    end
+    if MenuUtil and MenuUtil.CreateContextMenu then
+      MenuUtil.CreateContextMenu(anchorBtn, function(_, root)
+        root:CreateTitle("Add element")
+        for _, e in ipairs(items) do root:CreateButton(e.label, function() pick(e.id) end) end
+      end)
+    elseif EasyMenu then
+      menuFrame = menuFrame or CreateFrame("Frame", "GSETrackerMeterAddMenu", UIParent, "UIDropDownMenuTemplate")
+      local menu = {}
+      for _, e in ipairs(items) do
+        menu[#menu + 1] = { text = e.label, notCheckable = true, func = function() pick(e.id) end }
+      end
+      EasyMenu(menu, menuFrame, anchorBtn, 0, 0, "MENU")
+    end
+  end
+
+  for _, slot in ipairs(SLOTS) do
+    local zone = zones[slot]
+
+    local chip = CreateFrame("Button", nil, container, "UIPanelButtonTemplate")
+    chip:SetSize(CHIP_W, CHIP_H)
+    chip:SetPoint("CENTER", zone, "CENTER", 0, 0)
+    chip:SetMovable(true)
+    chip:RegisterForDrag("LeftButton")
+    chip:RegisterForClicks("RightButtonUp")
+    chip:SetScript("OnDragStart", function(self)
+      self:SetFrameLevel((container:GetFrameLevel() or 1) + 20)  -- float above the zones + other chips
+      self:StartMoving()
+    end)
+    chip:SetScript("OnDragStop", function(self)
+      self:StopMovingOrSizing()
+      local mx, my = self:GetCenter()  -- nearest cell zone (Euclidean to each zone centre)
+      local best, bestd
+      for s2, z2 in pairs(zones) do
+        local zx, zy = z2:GetCenter()
+        if mx and zx then
+          local d = (mx - zx) ^ 2 + (my - zy) ^ 2
+          if not bestd or d < bestd then bestd, best = d, s2 end
+        end
+      end
+      if best and self.elementId and _G.Meter_SetElementSlot then _G.Meter_SetElementSlot(self.elementId, best) end
+      RefreshCenterMarker(); Redraw()
+    end)
+    chip:SetScript("OnClick", function(self, button)
+      if button == "RightButton" and self.elementId and _G.Meter_RemoveElement then
+        _G.Meter_RemoveElement(self.elementId)  -- any element (DPS/HPS/GCD/Marker or a cooldown) -> the + list
+        RefreshCenterMarker(); Redraw()
+      end
+    end)
+    AttachTooltip(chip, "Element", "Drag to move (swaps on drop). Right-click to remove it (it returns to the + list).")
+    cellChips[slot] = chip
+
+    local plus = CreateFrame("Button", nil, container, "UIPanelButtonTemplate")
+    plus:SetSize(CHIP_W, CHIP_H)
+    plus:SetPoint("CENTER", zone, "CENTER", 0, 0)
+    plus:SetText("+")
+    plus:SetScript("OnClick", function(self) OpenAddMenu(self, slot) end)
+    AttachTooltip(plus, "Add", "Add a readout (DPS/HPS/GCD/Marker) or a Trinket / Healthstone / cooldown to this cell.")
+    cellPlus[slot] = plus
+  end
+
+  Redraw = function()
+    local map = (_G.Meter_GetElementSlots and _G.Meter_GetElementSlots()) or {}
+    local occ = {}
+    for id, cell in pairs(map) do occ[cell] = id end
+    local avail = (_G.Meter_GetAvailableElements and _G.Meter_GetAvailableElements()) or {}
+    local hasAvail = #avail > 0
+    for _, slot in ipairs(SLOTS) do
+      local id = occ[slot]
+      local chip, plus = cellChips[slot], cellPlus[slot]
+      chip:ClearAllPoints()
+      chip:SetPoint("CENTER", zones[slot], "CENTER", 0, 0)
+      chip:SetFrameLevel((zones[slot]:GetFrameLevel() or 1) + 4)
+      if id then
+        chip.elementId = id
+        chip:SetText((_G.Meter_ElementLabel and _G.Meter_ElementLabel(id)) or id)
+        chip:Show(); plus:Hide()
+      else
+        chip.elementId = nil
+        chip:Hide()
+        if hasAvail then plus:Show() else plus:Hide() end
+      end
+    end
+  end
+
+  Redraw()
+  return topPad + BOX_H + ROW_PAD
+end
+
 local RENDERERS = {
   header = MakeHeader, check = MakeCheck, slider = MakeSlider, dropdown = MakeDropdown,
   color = MakeColor, enableshow = MakeEnableShow, dropdownslider = MakeDropdownSlider,
   dualslider = MakeDualSlider, borderrow = MakeBorderRow, dualdropdown = MakeDualDropdown,
   dualcheck = MakeDualCheck, matchrow = MakeMatchRow, checkcolor = MakeCheckColor,
   spacer = MakeSpacer, namesource = MakeNameSourceRow, dropdowncheck = MakeDropdownCheck,
-  tricolor = MakeTriColor,
+  tricolor = MakeTriColor, button = MakeButton, meterslots = MakeMeterSlots,
 }
 
 -- When a tab requests centered content, ONLY slider rows are centered; everything else
@@ -1401,7 +1641,10 @@ end
 local function NCheck(row, label, get, set, disableGet, tip)
   local cb = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
   cb:SetSize(28, 28)
-  cb:SetPoint("LEFT", row, "LEFT", 0, 0)
+  -- -4 (not 0): the UICheckButtonTemplate insets its check texture inside the 28px button, so an x=0
+  -- frame reads as indented vs plain left-justified labels and the tricolor cbClass box (also at -4).
+  -- This lines every checkbox's VISIBLE box up with the labels and with each other.
+  cb:SetPoint("LEFT", row, "LEFT", -4, 0)
   cb:SetChecked(get() and true or false)
   cb:SetScript("OnClick", function(self) set(self:GetChecked() and true or false) end)
   local l = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightMedium")
@@ -1415,6 +1658,29 @@ local function NCheck(row, label, get, set, disableGet, tip)
 end
 
 -- Render a descriptor list as native one-per-row rows. Returns nothing; sizes the pane to content.
+-- Live grey-out for native rows: disables the given controls + dims their labels whenever disableName()
+-- is true. Registered as an activeRefresher so it re-evaluates on every settings change (e.g. greying the
+-- keybind Font/Size/Location when the Assisted Highlight is anchored to the Target Portrait).
+local function NDisable(disableName, controls, labels)
+  if not disableName then return end
+  local dg = ResolveGet(disableName)
+  activeRefreshers[#activeRefreshers + 1] = function()
+    local off = dg() and true or false
+    for _, c in ipairs(controls) do
+      if c then
+        if c.SetEnabled then c:SetEnabled(not off)
+        elseif off and c.Disable then c:Disable()
+        elseif (not off) and c.Enable then c:Enable() end
+      end
+    end
+    for _, l in ipairs(labels) do
+      if l and l.SetTextColor then
+        if off then l:SetTextColor(0.5, 0.5, 0.5) else l:SetTextColor(1, 1, 1) end
+      end
+    end
+  end
+end
+
 local function PopulateNative(pane, rows)
   local y = -12
   local function adv(h) y = y - (h or NATIVE_PITCH) end
@@ -1426,10 +1692,12 @@ local function PopulateNative(pane, rows)
     elseif t == "spacer" then
       adv(r.h or 12)
     elseif t == "dropdown" then
-      local row = NRow(pane, y); NLabel(row, r.label)
-      NDropdown(row, r.options, ResolveGet(r.get), ResolveSet(r.set), r.tooltip, r.label)
+      local row = NRow(pane, y); local lbl = NLabel(row, r.label)
+      local dd = NDropdown(row, r.options, ResolveGet(r.get), ResolveSet(r.set), r.tooltip, r.label)
       adv()
+      if r.disableGet then NDisable(r.disableGet, { dd }, { lbl }) end
     elseif t == "slider" then
+      local sFrame, sLabel
       if r.stacked then
         -- "Scale" sliders: label STACKED + CENTERED over a full-width slider.
         local rowL = NRow(pane, y)
@@ -1438,15 +1706,31 @@ local function PopulateNative(pane, rows)
         -- track centre sits 15px left of the row centre -- offset the label to match.
         lbl:SetPoint("CENTER", rowL, "CENTER", -15, 0)
         lbl:SetText(r.label or ""); lbl:SetTextColor(1, 1, 1)
+        sLabel = lbl
         adv()
         local rowS = NRow(pane, y)
-        NSlider(rowS, ResolveGet(r.get), ResolveSet(r.set), r.min, r.max, r.step, r.percent, r.float, r.tooltip, r.label, true)
+        sFrame = NSlider(rowS, ResolveGet(r.get), ResolveSet(r.set), r.min, r.max, r.step, r.percent, r.float, r.tooltip, r.label, true)
         adv()
       else
         -- Inline slider: label left, slider right (like the dropdown-slider rows).
-        local row = NRow(pane, y); NLabel(row, r.label)
-        NSlider(row, ResolveGet(r.get), ResolveSet(r.set), r.min, r.max, r.step, r.percent, r.float, r.tooltip, r.label)
+        local row = NRow(pane, y); sLabel = NLabel(row, r.label)
+        sFrame = NSlider(row, ResolveGet(r.get), ResolveSet(r.set), r.min, r.max, r.step, r.percent, r.float, r.tooltip, r.label)
         adv()
+      end
+      -- Live grey-out: e.g. the Assisted Highlight Scale is disabled in Target Portrait mode (auto-sized).
+      -- A refresher re-evaluates on every settings change (ResolveSet -> ScheduleRefresh -> RunRefreshers).
+      if r.disableGet then
+        local dg = ResolveGet(r.disableGet)
+        activeRefreshers[#activeRefreshers + 1] = function()
+          local off = dg() and true or false
+          if sFrame then
+            if sFrame.SetEnabled then sFrame:SetEnabled(not off)
+            elseif off and sFrame.Disable then sFrame:Disable() end
+          end
+          if sLabel and sLabel.SetTextColor then
+            if off then sLabel:SetTextColor(0.5, 0.5, 0.5) else sLabel:SetTextColor(1, 1, 1) end
+          end
+        end
       end
     elseif t == "tricolor" then
       -- Lead toggle (e.g. "Press Detection") on its own row, then Class/Custom + colour swatch on the next.
@@ -1465,7 +1749,9 @@ local function PopulateNative(pane, rows)
         if cbCustom then cbCustom:SetChecked(m == "custom") end
       end
       cbClass = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
-      cbClass:SetSize(28, 28); cbClass:SetPoint("LEFT", row, "LEFT", 0, 0)
+      -- The check texture is inset inside the 28px button, so a x=0 frame reads as indented vs a plain
+      -- left-justified label (e.g. the Scale label above). Pull it left so the visible box lines up.
+      cbClass:SetSize(28, 28); cbClass:SetPoint("LEFT", row, "LEFT", -4, 0)
       cbClass:SetScript("OnClick", function() modeSet(modeGet() == "class" and "none" or "class"); refresh() end)
       local lC = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightMedium")
       lC:SetPoint("LEFT", cbClass, "RIGHT", 5, 0); lC:SetText(r.label or "Class Color"); lC:SetTextColor(1, 1, 1)
@@ -1495,12 +1781,30 @@ local function PopulateNative(pane, rows)
       refresh()
       adv()
     elseif t == "dropdownslider" then
-      local row = NRow(pane, y); NLabel(row, r.label)
-      NDropdown(row, r.options, ResolveGet(r.get), ResolveSet(r.set), r.tooltip, r.label)
+      local row = NRow(pane, y); local lbl = NLabel(row, r.label)
+      local dd = NDropdown(row, r.options, ResolveGet(r.get), ResolveSet(r.set), r.tooltip, r.label)
       adv()
-      local row2 = NRow(pane, y); NLabel(row2, r.sliderLabel)
-      NSlider(row2, ResolveGet(r.sliderGet), ResolveSet(r.sliderSet), r.smin, r.smax, r.sstep, r.percent, r.sfloat, r.tooltip2, r.sliderLabel)
+      local row2 = NRow(pane, y); local sLabel = NLabel(row2, r.sliderLabel)
+      local sFrame = NSlider(row2, ResolveGet(r.sliderGet), ResolveSet(r.sliderSet), r.smin, r.smax, r.sstep, r.percent, r.sfloat, r.tooltip2, r.sliderLabel)
       adv()
+      -- Grey the WHOLE row -- dropdown + slider + both labels (e.g. the AH keybind Font/Size when the
+      -- keybind is hidden in Target Portrait mode).
+      if r.disableGet then NDisable(r.disableGet, { dd, sFrame }, { lbl, sLabel }) end
+      -- Live grey-out of the slider half only (e.g. AH Opacity is disabled in Target Portrait mode,
+      -- which fades the highlight itself). Same refresher pattern as the standalone "slider" type.
+      if r.sliderDisableGet then
+        local dg = ResolveGet(r.sliderDisableGet)
+        activeRefreshers[#activeRefreshers + 1] = function()
+          local off = dg() and true or false
+          if sFrame then
+            if sFrame.SetEnabled then sFrame:SetEnabled(not off)
+            elseif off and sFrame.Disable then sFrame:Disable() end
+          end
+          if sLabel and sLabel.SetTextColor then
+            if off then sLabel:SetTextColor(0.5, 0.5, 0.5) else sLabel:SetTextColor(1, 1, 1) end
+          end
+        end
+      end
     elseif t == "dropdowncheck" then
       local row = NRow(pane, y); NLabel(row, r.label)
       NDropdown(row, r.options, ResolveGet(r.get), ResolveSet(r.set), r.tooltip, r.label)
@@ -1509,16 +1813,25 @@ local function PopulateNative(pane, rows)
       NCheck(row2, r.checkLabel, ResolveGet(r.checkGet), ResolveSet(r.checkSet), nil, r.tooltip2)
       adv()
     elseif t == "dualcheck" then
-      local row = NRow(pane, y)
-      NCheck(row, r.label, ResolveGet(r.get), ResolveSet(r.set), r.disable and ResolveGet(r.disable) or nil, r.tooltip)
-      adv()
-      local row2 = NRow(pane, y)
-      NCheck(row2, r.label2, ResolveGet(r.get2), ResolveSet(r.set2), r.disable2 and ResolveGet(r.disable2) or nil, r.tooltip2)
-      adv()
-      if r.label3 and r.get3 then  -- optional third checkbox (e.g. AH "Show GCD Swipe")
-        local row3 = NRow(pane, y)
-        NCheck(row3, r.label3, ResolveGet(r.get3), ResolveSet(r.set3), r.disable3 and ResolveGet(r.disable3) or nil, r.tooltip3)
+      if r.inline2 then
+        -- Both checkboxes on ONE row: [check] label   [check] label2 (label2 sits in the control column).
+        local row = NRow(pane, y)
+        NCheck(row, r.label, ResolveGet(r.get), ResolveSet(r.set), r.disable and ResolveGet(r.disable) or nil, r.tooltip)
+        local cb2 = NCheck(row, r.label2, ResolveGet(r.get2), ResolveSet(r.set2), r.disable2 and ResolveGet(r.disable2) or nil, r.tooltip2)
+        if cb2 then cb2:ClearAllPoints(); cb2:SetPoint("LEFT", row, "LEFT", NATIVE_CTRL_X, 0) end
         adv()
+      else
+        local row = NRow(pane, y)
+        NCheck(row, r.label, ResolveGet(r.get), ResolveSet(r.set), r.disable and ResolveGet(r.disable) or nil, r.tooltip)
+        adv()
+        local row2 = NRow(pane, y)
+        NCheck(row2, r.label2, ResolveGet(r.get2), ResolveSet(r.set2), r.disable2 and ResolveGet(r.disable2) or nil, r.tooltip2)
+        adv()
+        if r.label3 and r.get3 then  -- optional third checkbox (e.g. AH "Show GCD Swipe")
+          local row3 = NRow(pane, y)
+          NCheck(row3, r.label3, ResolveGet(r.get3), ResolveSet(r.set3), r.disable3 and ResolveGet(r.disable3) or nil, r.tooltip3)
+          adv()
+        end
       end
     elseif t == "matchrow" then
       -- Row 1: [check] AH Match % (4/99). Row 2: [check] AH Match Audible + sound dropdown.
@@ -1570,6 +1883,10 @@ local function PopulateNative(pane, rows)
         NDropdown(row2, r.showOptions, ResolveGet(r.showGet), ResolveSet(r.showSet))
         adv()
       end
+    elseif t == "meterslots" then
+      -- The drag-and-drop readout arranger (shared with the compact renderer). Returns its full height so
+      -- the pane -- and therefore the auto-fitted window -- grows to include it.
+      adv(MakeMeterSlots(pane, y, r))
     else
       -- Unknown/unsupported-in-native type: skip with a small gap (covered as the rollout expands).
       adv(8)
@@ -1579,26 +1896,49 @@ local function PopulateNative(pane, rows)
   RunRefreshers()
 end
 
+-- A small "Edit Mode" button pinned to the RIGHT of an enable/show row (spanRight -> overlays the row,
+-- takes no height). Enters Edit Mode via the secure /editmode macro, then opens that element's options
+-- panel (tabIdx into EDITMODE_TABS: Meters=1, Action Tracker=2, Assisted Highlight=3). See ui/editmode.lua.
+local function EditModeButtonDesc(tabIdx, headerText)
+  return {
+    type = "button", label = "Edit Mode", red = true, spanRight = true, width = 92, height = 24, rightInset = 16,
+    spanHeader = headerText,  -- white column label drawn above this button (set only on the top row)
+    tooltip = "Enter Edit Mode and open this element's options. (Can't be entered during combat.)",
+    secureMacro = function()
+      if _G.SlashCmdList and _G.SlashCmdList.EDITMODE and _G.SLASH_EDITMODE1 then return _G.SLASH_EDITMODE1 end
+      return nil
+    end,
+    preClick = function()
+      if _G.InCombatLockdown and _G.InCombatLockdown() then
+        local cf = _G.DEFAULT_CHAT_FRAME
+        if cf and cf.AddMessage then
+          cf:AddMessage("|cFFFFFFFFGS|r|cFF00FFFFE|r|cFFFFFF00: Tracker|r |cffff5555Edit Mode can't be entered during combat.|r Try again after combat.")
+        end
+        return
+      end
+      if _G.HideUIPanel and _G.SettingsPanel and _G.SettingsPanel.IsShown and _G.SettingsPanel:IsShown() then
+        pcall(_G.HideUIPanel, _G.SettingsPanel)
+      end
+    end,
+    onClick = function()
+      if _G.InCombatLockdown and _G.InCombatLockdown() then return end
+      local EMM = _G.EditModeManagerFrame
+      if not (EMM and EMM.IsEditModeActive and EMM:IsEditModeActive()) then
+        if _G.GSETracker_EnterEditMode then _G.GSETracker_EnterEditMode() end  -- overlay fallback (no /editmode)
+      end
+      if tabIdx and _G.GSETracker_EditModeShowTab then _G.GSETracker_EditModeShowTab(tabIdx) end
+    end,
+  }
+end
+
 -- ── Tab content ─────────────────────────────────────────────────────────────
 local function GeneralRows()
   return {
-    { type = "header", text = "General" },
-    { type = "check", label = "Lock All",
-      get = function()
-        return CallGet("IsLocked") and CallGet("GetCombatMarkerLocked") and CallGet("GetAssistedHighlightLocked") and true or false
-      end,
-      set = function(v)
-        if addon.SetLocked then addon:SetLocked(v) end
-        if addon.SetCombatMarkerLocked then addon:SetCombatMarkerLocked(v) end
-        if addon.SetAssistedHighlightLocked then addon:SetAssistedHighlightLocked(v) end
-        -- The Meters frame follows the same lock (its own Locked Frame box is removed).
-        if _G.MetersSavedVars then _G.MetersSavedVars.locked = v and true or false end
-        if _G.Meter_SetLocked then _G.Meter_SetLocked(v and true or false) end
-      end,
-      tooltip = "Lock or unlock every GSE: Tracker frame at once (Meters, Player Marker, Assisted Highlight, Action Tracker). Unlock to drag them into place." },
-    { type = "check", label = "Performance Mode", get = "GetPerformanceModeEnabled", set = "SetPerformanceModeEnabledCanonical",
-      tooltip = "Disable the Action Tracker's icon slide/fade animations — icons snap instantly into place. Lowers CPU on low-end systems; does NOT change how often the tracker updates." },
+    -- "Lock All" removed: lock state now follows Blizzard Edit Mode automatically (locked unless you're in
+    -- Edit Mode -- see ui/editmode.lua). Performance Mode lives under the Quality of Life checks.
     { type = "header", text = "Enable" },
+    -- One "Edit Mode" button per enable/show row, pinned to the right of each dropdown (overlays the row).
+    EditModeButtonDesc(1, "Edit / Options"),  -- Meters (top row: also labels the Edit Mode column)
     { type = "enableshow", label = "Meters", showHeader = "Visibility", tooltip = "Enable the Meters cluster. On Classic only the Center Marker is available (DPS/HPS/GCD/Details need retail APIs).",
       get = function() return _G.MetersSavedVars and _G.MetersSavedVars.enabled ~= false end,
       set = function(v)
@@ -1613,13 +1953,32 @@ local function GeneralRows()
       showOptions = METERS_SHOW_OPTIONS },
     -- Player Marker has no separate Enable/Show row: it is pinned to the Meters centre and
     -- follows the Meters frame's visibility (see UI:ShouldShowCombatMarker).
+    EditModeButtonDesc(2),  -- Action Tracker
+    { type = "enableshow", label = "Action Tracker", get = "IsEnabled", set = "SetEnabled",
+      tooltip = "Enable the Action Tracker — the row of upcoming/recent ability icons.",
+      showGet = "GetShowWhen", showSet = "SetShowWhen", showOptions = SHOW_OPTIONS },
+    EditModeButtonDesc(3),  -- Assisted Highlight
     { type = "enableshow", label = "Assisted Highlight", get = "IsAssistedHighlightMirrorEnabled", set = "SetAssistedHighlightMirrorEnabled",
       unavailable = function() return not (ns.Caps and ns.Caps.assistedHighlight) end,
       tooltip = "Enable the Assisted Highlight icon that shows the next suggested ability.",
       showGet = "GetAssistedHighlightShowWhen", showSet = "SetAssistedHighlightShowWhen", showOptions = SHOW_OPTIONS },
-    { type = "enableshow", label = "Action Tracker", get = "IsEnabled", set = "SetEnabled",
-      tooltip = "Enable the Action Tracker — the row of upcoming/recent ability icons.",
-      showGet = "GetShowWhen", showSet = "SetShowWhen", showOptions = SHOW_OPTIONS },
+    -- Pressed Indicator: enable checkbox + Visibility dropdown + Edit Mode button. Show-When gates the
+    -- indicator in LIVE play (Edit Mode always shows it for positioning); see RefreshPressedIndicator.
+    -- Shape/colour/position live in its Edit Mode panel.
+    EditModeButtonDesc(4),  -- Pressed Indicator
+    { type = "enableshow", label = "Pressed Indicator",
+      get = function()
+        local cfg, defaults = addon:GetElementLayout("pressedIndicator")
+        if type(cfg) == "table" and cfg.enabled ~= nil then return cfg.enabled and true or false end
+        if defaults and defaults.enabled ~= nil then return defaults.enabled and true or false end
+        return true
+      end,
+      set = function(v)
+        if addon.SetElementEnabled then addon:SetElementEnabled("pressedIndicator", v) end
+        if addon.RefreshPressedIndicator then addon:RefreshPressedIndicator(true) end
+      end,
+      showGet = "GetPressedIndicatorShowWhen", showSet = "SetPressedIndicatorShowWhen", showOptions = SHOW_OPTIONS,
+      tooltip = "Enable the Pressed Indicator — the image that flashes when you press your macro key. Visibility gates it in normal play (Edit Mode always shows it). Shape, colour and position are in its Edit Mode panel." },
     { type = "header", text = "Skin" },
     -- Checked = force Blizzard Native over any skinner. Unchecked = adopt the
     -- skinner (ElvUI/EllesmereUI...) if installed, else Native automatically.
@@ -1644,23 +2003,26 @@ local function GeneralRows()
         if _G.GSETrackerDetails_ApplyBorder then _G.GSETrackerDetails_ApplyBorder() end
       end,
       tooltip = "Force Blizzard's native button art (border, icon crop and FONT style). Unchecked: automatically adopt your skin addon (ElvUI, EllesmereUI, ...) if one is installed." },
-    -- Master scale for the whole addon, pinned to the bottom (0-200%, 100% = normal). Multiplies on
-    -- top of each element's own size/scale (Action Tracker, Meters, Center Marker, Pressed Indicator).
+    -- Quality of Life + Saved Settings (moved here from the old Quality of Life tab).
+    { type = "header", text = "Quality of Life" },
+    { type = "dualcheck",
+      label = "Mute Fizzle Sounds", get = "GetMuteFizzles", set = "SetMuteFizzles",
+      tooltip = "Mute the 'fizzle' sound a spell makes when it fails to cast (out of range, not enough resource, etc.).",
+      label2 = "Hide Error Messages", get2 = "GetHideErrors", set2 = "SetHideErrors",
+      tooltip2 = "Hide the red Blizzard error text at the top of the screen (e.g. 'Not enough rage', 'Out of range')." },
+    { type = "check", label = "Performance Mode", get = "GetPerformanceModeEnabled", set = "SetPerformanceModeEnabledCanonical",
+      tooltip = "Disable the Action Tracker's icon slide/fade animations — icons snap instantly into place. Lowers CPU on low-end systems; does NOT change how often the tracker updates." },
+    { type = "header", text = "Saved Settings" },
+    { type = "check", label = "Account Wide", get = "GetAccountWide", set = "SetAccountWide",
+      tooltip = "Share these settings across all your characters. Unchecked: settings are saved per-character." },
+    -- Show Minimap Button: pinned to the very bottom of the General tab, centred. (The old "Hide Login
+    -- Message" checkbox was removed -- the welcome-window popup no longer shows on login.)
     { type = "spacer", h = 12 },
-    { type = "slider", label = "General Scale",
-      get = function() return math.floor(((addon.GetGlobalScale and addon:GetGlobalScale()) or 1) * 100 + 0.5) end,
-      set = function(v) if addon.SetGlobalScale then addon:SetGlobalScale((tonumber(v) or 100) / 100) end end,
-      min = 0, max = 200, step = 5, percent = true, width = 280, center = true,
-      tooltip = "Scale the whole GSE: Tracker UI at once — Action Tracker, Meters, Center Marker and Pressed Indicator. 100% is normal size; each element's own scale still applies on top. (The Assisted Highlight has its own Scale and auto-fits the target portrait, so it isn't affected.)" },
-    -- Show Minimap Button + Hide Login Message: pinned to the very bottom of the General tab, centred.
-    { type = "spacer", h = 12 },
-    { type = "dualcheck", center = true,
+    { type = "check", center = true,
       label = "Show Minimap Button",
       get = function() return not (addon.GetMinimapHidden and addon:GetMinimapHidden()) end,
       set = function(v) if addon.SetMinimapHidden then addon:SetMinimapHidden(not v) end end,
-      tooltip = "Show or hide the GSE: Tracker minimap button.",
-      label2 = "Hide Login Message", get2 = "GetHideLoginMessage", set2 = "SetHideLoginMessage",
-      tooltip2 = "Stop showing the GSE: Tracker welcome window each time you log in." },
+      tooltip = "Show or hide the GSE: Tracker minimap button." },
     -- (Social icons are no longer an in-flow row -- they live in a persistent footer
     -- pinned to the bottom of the whole settings frame; see BuildPanel.)
   }
@@ -1705,17 +2067,31 @@ local function ActionTrackerRows()
         if addon.ApplyVisibility then addon:ApplyVisibility() end
       end,
       tooltip2 = "Show the most recently cast spell's name. Can be combined with GSE Sequence Name (the two stack)." },
-    -- Below the Name row: swap Name/ModKeys positions + the Modkey Side L/R toggle. Same fixed
-    -- columns as the Name row above so the checkboxes stack.
-    { type = "dualcheck", cols = { 90, 320 },
+    -- Under the name toggles: [check] Modifiers (show/hide the modifier-key readout element) paired on the
+    -- SAME row with [check] Side (L/R) (the L/R side prefix). inline2 renders them side-by-side.
+    { type = "dualcheck", inline2 = true,
+      label = "Modifiers",
+      get = function()
+        local cfg, defaults = addon:GetElementLayout("modifiersText")
+        if type(cfg) == "table" and cfg.enabled ~= nil then return cfg.enabled and true or false end
+        if defaults and defaults.enabled ~= nil then return defaults.enabled and true or false end
+        return true
+      end,
+      set = function(v)
+        if addon.SetElementEnabled then addon:SetElementEnabled("modifiersText", v) end
+        if addon.ApplyVisibility then addon:ApplyVisibility() end
+      end,
+      tooltip = "Show the modifier-key readout (Shift/Ctrl/Alt) above the icons.",
+      label2 = "Side (L/R)", get2 = "GetActionTrackerModkeySide", set2 = "SetActionTrackerModkeySide",
+      tooltip2 = "Show the L/R side prefix on modifier keys (e.g. 'LShift+RCtrl' vs 'Shift+Ctrl')." },
+    -- Swap Name/ModKeys vertical positions -- now its own row (the side toggle moved up to the Modifiers row).
+    { type = "check",
       label = "Swap Name > ModKeys", get = "GetActionTrackerSwapNameModkeys",
       set = function(v)
         if addon.SetActionTrackerSwapNameModkeys then addon:SetActionTrackerSwapNameModkeys(v) end
         if addon.ApplyAllElementPositions then addon:ApplyAllElementPositions() end
       end,
-      tooltip = "Swap the vertical positions of the Name (sequence/spell) and the modifier-key letters above the icons. Off = Name on top (default); On = ModKeys on top.",
-      label2 = "Modkey Side [L/R]", get2 = "GetActionTrackerModkeySide", set2 = "SetActionTrackerModkeySide",
-      tooltip2 = "Show the L/R side prefix on modifier keys (e.g. 'LShift+RCtrl' vs 'Shift+Ctrl')." },
+      tooltip = "Swap the vertical positions of the Name (sequence/spell) and the modifier-key letters above the icons. Off = Name on top (default); On = ModKeys on top." },
     { type = "spacer", h = 14 },  -- extra padding below the Name/Modkey checkbox block (before the font rows)
     { type = "dropdownslider", label = "Name", get = "GetSeqFontName", set = "SetSeqFontName", options = FontOptions,
       tooltip = "Font for the sequence/spell name shown above the icons.",
@@ -1832,12 +2208,17 @@ end
 local function AssistedHighlightRows()
   return {
     { type = "header", text = "Assisted Highlight" },
-    -- Anchor dropdown + Alpha slider share one row.
+    -- Anchor dropdown + Opacity slider share one row.
     { type = "dropdownslider", label = "Anchor", get = "GetAssistedHighlightAnchorTarget", set = "SetAssistedHighlightAnchorTarget", options = ANCHOR_OPTIONS,
       tooltip = "Where the highlight sits: fixed on screen, following the mouse cursor, or over the target's portrait (only shown with an attackable target).",
-      sliderLabel = "Alpha", sliderGet = "GetAssistedHighlightAlpha", sliderSet = "SetAssistedHighlightAlpha",
+      sliderLabel = "Opacity", sliderGet = "GetAssistedHighlightAlpha", sliderSet = "SetAssistedHighlightAlpha",
       smin = 0.05, smax = 1.00, sstep = 0.05, sfloat = true,
-      tooltip2 = "Transparency of the highlight icon." },
+      tooltip2 = "Opacity of the highlight icon (lower = more transparent).",
+      -- Target Portrait mode draws the highlight on the portrait emblem at a fixed opacity, so the
+      -- Opacity slider has no effect there -- grey it out (matches the Scale slider's behaviour).
+      sliderDisableGet = function()
+        return addon.GetAssistedHighlightAnchorTarget and addon:GetAssistedHighlightAnchorTarget() == "Target Nameplate"
+      end },
     { type = "header", text = "Display" },
     { type = "dualcheck",
       label = "Range Check", get = "GetAssistedHighlightRangeCheckerEnabled", set = "SetAssistedHighlightRangeCheckerEnabled",
@@ -1871,11 +2252,15 @@ local function AssistedHighlightRows()
       tooltip = "Show the suggested ability's keybind text AND its stack/charge count on the highlight.",
       -- Hidden in Target Portrait mode (no room on the round emblem) -- grey it out there.
       disable = function() return addon.GetAssistedHighlightAnchorTarget and addon:GetAssistedHighlightAnchorTarget() == "Target Nameplate" end },
+    -- Font/Size + Location all configure the KEYBIND text, which is hidden in Target Portrait mode --
+    -- so grey them out there too (same condition as Show Keybind/Stacks above).
     { type = "dropdownslider", label = "Font", get = "GetAssistedHighlightFontName", set = "SetAssistedHighlightFontName", options = FontOptions,
       tooltip = "Font for the keybind text shown on the highlight.",
-      sliderLabel = "Size", sliderGet = "GetAssistedHighlightFontSize", sliderSet = "SetAssistedHighlightFontSize", smin = 6, smax = 24, sstep = 1, tooltip2 = "Keybind text size." },
+      sliderLabel = "Size", sliderGet = "GetAssistedHighlightFontSize", sliderSet = "SetAssistedHighlightFontSize", smin = 6, smax = 24, sstep = 1, tooltip2 = "Keybind text size.",
+      disableGet = function() return addon.GetAssistedHighlightAnchorTarget and addon:GetAssistedHighlightAnchorTarget() == "Target Nameplate" end },
     { type = "dropdown", label = "Location", get = "GetAssistedHighlightKeybindAnchor", set = "SetAssistedHighlightKeybindAnchor", options = KEYBIND_ANCHOR_OPTIONS,
-      tooltip = "Which corner of the highlight the keybind text sits in." },
+      tooltip = "Which corner of the highlight the keybind text sits in.",
+      disableGet = function() return addon.GetAssistedHighlightAnchorTarget and addon:GetAssistedHighlightAnchorTarget() == "Target Nameplate" end },
     { type = "spacer", h = 12 },  -- top padding above the bottom Scale slider
     -- 0-200% of the 52px default (100% = normal). Soft-clamps to the size limits underneath.
     { type = "slider", label = "Assisted Highlight Scale", stacked = true,
@@ -1891,32 +2276,17 @@ local function AssistedHighlightRows()
   }
 end
 
-local function QoLRows()
+-- Pressed Indicator edit-mode panel (its own element now -- opens from the "Click to Edit" box, see
+-- ui/editmode.lua). Same controls that used to live on the General tab.
+local function PressedIndicatorRows()
   return {
-    { type = "header", text = "Quality of Life" },
-    { type = "check", label = "Mute Fizzle Sounds", get = "GetMuteFizzles", set = "SetMuteFizzles",
-      tooltip = "Mute the 'fizzle' sound a spell makes when it fails to cast (out of range, not enough resource, etc.)." },
-    { type = "check", label = "Hide Error Messages", get = "GetHideErrors", set = "SetHideErrors",
-      tooltip = "Hide the red Blizzard error text at the top of the screen (e.g. 'Not enough rage', 'Out of range')." },
-    { type = "header", text = "Saved Settings" },
-    { type = "check", label = "Account Wide", get = "GetAccountWide", set = "SetAccountWide",
-      tooltip = "Share these settings across all your characters. Unchecked: settings are saved per-character." },
     { type = "header", text = "Pressed Indicator" },
     { type = "dropdownslider", label = "Shape", get = "GetPressedIndicatorShape", set = "SetPressedIndicatorShape", options = PRESSED_SHAPE_OPTIONS,
       tooltip = "Image flashed on screen when you press your macro key. 'None' turns it off.",
       sliderLabel = "Scale", sliderGet = "GetPressedIndicatorSize", sliderSet = "SetPressedIndicatorSize", smin = C.PRESSED_INDICATOR_MIN_SIZE or 4, smax = C.PRESSED_INDICATOR_MAX_SIZE or 24, sstep = 1, tooltip2 = "Size of the pressed indicator." },
-    -- Colour source row, led by the Lock toggle: [] Lock  [] Class Color  [] Custom Color [swatch].
-    -- Lock checked = locked (flashes on key press at its saved spot); unchecked = unlocked +
-    -- draggable. Class/Custom mutually exclusive; neither = the image's own colours.
+    -- Colour source row: [] Class Color  [] Custom Color [swatch]. No Lock toggle -- positioning uses the
+    -- element's "Click to Edit" box in Edit Mode, exactly like every other HUD element (locked otherwise).
     { type = "tricolor", label = "Class Color", label2 = "Custom",
-      leadLabel = "Lock",
-      leadGet = function() return not (addon.GetPressedIndicatorUnlocked and addon:GetPressedIndicatorUnlocked()) end,
-      leadSet = function(v)
-        if addon.SetPressedIndicatorUnlocked then addon:SetPressedIndicatorUnlocked(not v) end
-        if addon.UpdatePressedIndicatorDragState then addon:UpdatePressedIndicatorDragState() end
-        if addon.RefreshPressedIndicator then addon:RefreshPressedIndicator(true) end
-      end,
-      tooltipLead = "Locked: the indicator only flashes on key press, at its saved spot. Uncheck to unlock it -- then it stays visible and you can drag it to a new location.",
       get = "GetPressedIndicatorColorMode",
       set = function(m)
         if addon.SetPressedIndicatorColorMode then addon:SetPressedIndicatorColorMode(m) end
@@ -1932,11 +2302,11 @@ local function QoLRows()
   }
 end
 
--- The HUD elements (Action Tracker, Meters, Assisted Highlight) live ONLY in Edit Mode now -- click each
--- one's box to open its native options pop-up. The Settings tab bar keeps General / Quality of Life.
+-- The HUD elements (Action Tracker, Meters, Assisted Highlight, Pressed Indicator) live in Edit Mode -- click
+-- each one's box to open its native options pop-up. Everything else (incl. Quality of Life / Saved Settings,
+-- moved off their own tab) is on the single General tab now.
 local TABS = {
   { key = "General", text = "General", rows = GeneralRows },
-  { key = "QoL", text = "Quality of Life", rows = QoLRows, centerContent = true },
 }
 
 -- Edit Mode option pop-ups: Meters, Action Tracker and Assisted Highlight, all rendered one-per-row in
@@ -1948,21 +2318,11 @@ local TABS = {
 -- expressed as native descriptors. They drive MetersSavedVars + the apply-functions exposed by
 -- meters/MetersOptions.lua (Meters_ApplyDisplayToggles / _ApplyOpacity / _ApplyRefreshRate).
 local function MetersReadoutRows()
-  local function showDesc(label, key, tip)
-    return label, function() return MetersSavedVars and MetersSavedVars[key] end,
-      function(v)
-        if MetersSavedVars then MetersSavedVars[key] = v and true or false end
-        if _G.Meters_ApplyDisplayToggles then _G.Meters_ApplyDisplayToggles() end
-      end, tip
-  end
-  local gL, gG, gS, gT = showDesc("Show GCD", "showGCD", "Your global cooldown timer.")
-  local dL, dG, dS, dT = showDesc("Show DPS", "showDPS", "Your damage per second (retail Blizzard meter; Classic uses Details!).")
-  local hL, hG, hS, hT = showDesc("Show HPS", "showHPS", "Your healing per second (retail Blizzard meter; Classic uses Details!).")
   -- "Show SBAssist %" was moved out to the standalone SLG-SBA Monitor addon (personal GSE testing tool).
   return {
-    { type = "dualcheck", label = gL, get = gG, set = gS, tooltip = gT,
-      label2 = dL, get2 = dG, set2 = dS, tooltip2 = dT },
-    { type = "check", label = hL, get = hG, set = hS, tooltip = hT },
+    -- Readout visibility (GCD/DPS/HPS) + the centre Marker are managed in the Layout editor below:
+    -- right-click a chip to remove it, "+" to add it back. (No separate "Show" dropdown needed.)
+    { type = "meterslots" },
     { type = "slider", label = "Refresh Rate", float = true, min = 0.02, max = 0.15, step = 0.01,
       get = function() return (_G.Meters_GetRefreshRate and _G.Meters_GetRefreshRate()) or 0.10 end,
       set = function(v)
@@ -1981,16 +2341,17 @@ local function MetersReadoutRows()
 end
 
 local EDITMODE_TABS = {
-  { key = "Meters", text = "Meters", centerContent = true, winWidth = 444,
+  { key = "Meters", text = "Meters", titleName = "Meters HUD", centerContent = true, winWidth = 490,
     rows = function()
       local r = {}
       for _, row in ipairs(CenterMarkerRows())   do r[#r + 1] = row end  -- Center Marker + Press Detection/colour
-      for _, row in ipairs(MetersReadoutRows())  do r[#r + 1] = row end  -- Show GCD/DPS/HPS/SBA + Refresh + Opacity
+      for _, row in ipairs(MetersReadoutRows())  do r[#r + 1] = row end  -- Layout editor + Refresh + Opacity
       for _, row in ipairs(MetersBottomRows())   do r[#r + 1] = row end  -- Font + Outline + Meters Scale
       return r
     end },
   { key = "ActionTracker", text = "Action Tracker", rows = ActionTrackerRows, enableGet = "IsEnabled", centerContent = true, winWidth = 444 },
   { key = "AssistedHighlight", text = "Assisted Highlight", rows = AssistedHighlightRows, enableGet = "IsAssistedHighlightMirrorEnabled", cap = "assistedHighlight", centerContent = true, winWidth = 444 },
+  { key = "PressedIndicator", text = "Pressed Indicator", titleName = "Pressed Indicator", rows = PressedIndicatorRows, centerContent = true, winWidth = 444 },
 }
 
 -- ── Panel construction ──────────────────────────────────────────────────────
@@ -2018,10 +2379,10 @@ local function ShowTab(index)
   if not panel then return end
   for i, entry in ipairs(panel.tabEntries) do
     if i == index then
-      if PanelTemplates_SelectTab then PanelTemplates_SelectTab(entry.tab) end
+      if entry.tab and PanelTemplates_SelectTab then PanelTemplates_SelectTab(entry.tab) end
       entry.scroll:Show()
     else
-      if PanelTemplates_DeselectTab then PanelTemplates_DeselectTab(entry.tab) end
+      if entry.tab and PanelTemplates_DeselectTab then PanelTemplates_DeselectTab(entry.tab) end
       entry.scroll:Hide()
     end
   end
@@ -2115,7 +2476,18 @@ local function BuildPage(host, t, idx, topAnchor, bottomReserve)
   else
     local scroll = CreateFrame("ScrollFrame", "GSETrackerCanvasScroll" .. idx, host, "UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", topAnchor, "BOTTOMLEFT", 4, -6)
-    scroll:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT", -30, bottomReserve)
+    scroll:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT", -8, bottomReserve)  -- no scrollbar gutter (-30 -> -8)
+    -- Drop the template's scrollbar entirely (user request). Keep mouse-wheel scrolling so any content
+    -- that overflows the canvas is still reachable; Show is no-op'd so OnScrollRangeChanged can't restore it.
+    local sb = scroll.ScrollBar or _G[(scroll:GetName() or "") .. "ScrollBar"]
+    if sb then sb:Hide(); sb.Show = function() end; sb:SetAlpha(0); sb:EnableMouse(false) end
+    scroll:EnableMouseWheel(true)
+    scroll:SetScript("OnMouseWheel", function(self, delta)
+      local range = self:GetVerticalScrollRange() or 0
+      local newY = (self:GetVerticalScroll() or 0) - (delta * 40)
+      if newY < 0 then newY = 0 elseif newY > range then newY = range end
+      self:SetVerticalScroll(newY)
+    end)
 
     local pane = CreateFrame("Frame", nil, scroll)
     pane:SetSize(560, 10)
@@ -2142,21 +2514,30 @@ local function BuildPanel()
   titleFrame:SetSize(320, 36)
   panel.titleFrame = titleFrame
 
+  -- With a single tab there's no point in a tab bar -- hang the page straight off the title and skip
+  -- the tab button entirely (reclaims the tab-bar row). Multi-tab support kept for if tabs return.
+  local singleTab = (#TABS == 1)
   local firstTab, prev
   for i, t in ipairs(TABS) do
-    local tab = CreateTabButton("$parentTab" .. i, panel, t.text)
-    tab:SetID(i)
-    if PanelTemplates_TabResize then PanelTemplates_TabResize(tab, 8) end
-    if i == 1 then
-      tab:SetPoint("TOPLEFT", titleFrame, "BOTTOMLEFT", 4, -6)
-      firstTab = tab
+    local tab, topAnchor
+    if singleTab then
+      topAnchor = titleFrame
     else
-      tab:SetPoint("LEFT", prev, "RIGHT", 2, 0)
+      tab = CreateTabButton("$parentTab" .. i, panel, t.text)
+      tab:SetID(i)
+      if PanelTemplates_TabResize then PanelTemplates_TabResize(tab, 8) end
+      if i == 1 then
+        tab:SetPoint("TOPLEFT", titleFrame, "BOTTOMLEFT", 4, -6)
+        firstTab = tab
+      else
+        tab:SetPoint("LEFT", prev, "RIGHT", 2, 0)
+      end
+      tab:SetScript("OnClick", function(self) ShowTab(self:GetID()) end)
+      prev = tab
+      topAnchor = firstTab
     end
-    tab:SetScript("OnClick", function(self) ShowTab(self:GetID()) end)
-    prev = tab
 
-    local entry = BuildPage(panel, t, i, firstTab, FOOTER_RESERVE)
+    local entry = BuildPage(panel, t, i, topAnchor, FOOTER_RESERVE)
     entry.tab = tab
     panel.tabEntries[i] = entry
   end
@@ -2183,6 +2564,16 @@ end
 -- that element's options (rendered by the shared BuildPage). Built lazily, cached per index. Shown only
 -- in Edit Mode; the Meters readout panel (MetersOptionsPanel) reparents into the Meters window.
 local emWindows = {}  -- [idx into EDITMODE_TABS] = window frame
+
+-- Persist each Edit Mode pop-up's dragged position in the account DB (GSETrackerDB.editPanels[key] =
+-- {point, relPoint, x, y}). Unknown keys survive validation (MergeMissing only ADDS defaults), so this
+-- is safe. Falls back to nil when the DB isn't ready yet.
+local function EditPanelStore()
+  if not _G.GSETrackerDB then return nil end
+  _G.GSETrackerDB.editPanels = _G.GSETrackerDB.editPanels or {}
+  return _G.GSETrackerDB.editPanels
+end
+
 local function BuildEditWindow(idx)
   local t = EDITMODE_TABS[idx]
   if not t then return nil end
@@ -2191,7 +2582,15 @@ local function BuildEditWindow(idx)
 
   local w = CreateFrame("Frame", "GSETrackerEditWin" .. idx, UIParent, "BackdropTemplate")
   w:SetSize(t.winWidth or 580, (t.winHeight or 460) + 200)
-  w:SetPoint("CENTER", UIParent, "CENTER", (idx - 1) * 50 - 25, (idx - 1) * -50 + 25)  -- stagger so they don't fully overlap
+  -- Restore the saved dragged position; else stagger so the windows don't fully overlap on first open.
+  local store = EditPanelStore()
+  local saved = store and store[t.key]
+  w:ClearAllPoints()
+  if saved and saved[1] then
+    w:SetPoint(saved[1], UIParent, saved[2] or saved[1], saved[3] or 0, saved[4] or 0)
+  else
+    w:SetPoint("CENTER", UIParent, "CENTER", (idx - 1) * 50 - 25, (idx - 1) * -50 + 25)
+  end
   -- DIALOG strata + high level so it floats ABOVE Blizzard's Edit Mode manager (Plumber's pattern).
   w:SetFrameStrata("DIALOG"); w:SetFrameLevel(200); w:SetToplevel(true)
   w:EnableMouse(true); w:SetClampedToScreen(true)
@@ -2228,10 +2627,35 @@ local function BuildEditWindow(idx)
   local closeHL = close:GetHighlightTexture(); if closeHL then closeHL:SetBlendMode("ADD") end
   close:SetScript("OnClick", function() w:Hide() end)
 
-  -- Centred element-name title (native: GameFontHighlightLarge, white, TOP offset -15).
+  -- Top-left corner badge: the round GSE icon in the native minimap-style gold ring, sized/positioned to
+  -- match the stock "i" info icon on Blizzard's HUD Edit Mode window. TWO knobs to tweak: BADGE_RING (the
+  -- gold-ring diameter) and the badge TOPLEFT offset. Proven LibDBIcon proportions (the icon is inset in
+  -- the ring texture) scaled by k, so the icon stays centred in the ring at any size. Decorative (branding).
+  -- Icon centred ON the metal DIAMOND stud at the panel's top-left corner (the "Dialog" NineSlice corner
+  -- piece), which sits inset from the absolute corner -- BADGE_POS is that inset (x right, y down). The
+  -- minimap ring texture isn't centred in its own bounds, so the ring is anchored to the icon with the
+  -- proven LibDBIcon offset (-7k, +6k) which makes the visible ring sit centred on the icon.
+  local BADGE_RING = 64
+  local BADGE_X, BADGE_Y = 12, -12   -- diamond-stud centre, from the panel's TOPLEFT
+  local k = BADGE_RING / 54
+  local badge = CreateFrame("Frame", nil, w)
+  badge:SetSize(BADGE_RING, BADGE_RING)
+  badge:SetPoint("CENTER", w, "TOPLEFT", BADGE_X, BADGE_Y)
+  local badgeIcon = badge:CreateTexture(nil, "ARTWORK")
+  badgeIcon:SetSize(20 * k, 20 * k)
+  badgeIcon:SetPoint("CENTER", w, "TOPLEFT", BADGE_X, BADGE_Y)
+  badgeIcon:SetTexture("Interface\\AddOns\\GSE_Tracker\\media\\GSE_Tracker_Round.png")
+  local badgeRing = badge:CreateTexture(nil, "OVERLAY")
+  badgeRing:SetSize(BADGE_RING, BADGE_RING)
+  badgeRing:SetPoint("TOPLEFT", badgeIcon, "TOPLEFT", -7 * k, 6 * k)
+  badgeRing:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
+  w.cornerBadge = badge
+
+  -- Centred title = just the element name (native: GameFontHighlightLarge, TOP offset -15). The "GSE:
+  -- Tracker" brand prefix was dropped per request; the corner diamond badge carries the branding now.
   local title = w:CreateFontString(nil, "ARTWORK", "GameFontHighlightLarge")
   title:SetPoint("TOP", w, "TOP", 0, -15)
-  title:SetText(t.text)
+  title:SetText(t.titleName or t.text or "")
   w.title = title
 
   -- Drag the window by its title strip.
@@ -2241,7 +2665,14 @@ local function BuildEditWindow(idx)
   grab:SetPoint("TOPRIGHT", w, "TOPRIGHT", 0, 0)
   grab:SetHeight(40); grab:EnableMouse(true); grab:RegisterForDrag("LeftButton")
   grab:SetScript("OnDragStart", function() w:StartMoving() end)
-  grab:SetScript("OnDragStop",  function() w:StopMovingOrSizing() end)
+  grab:SetScript("OnDragStop",  function()
+    w:StopMovingOrSizing()
+    local s = EditPanelStore()
+    if s then
+      local p, _, rp, x, y = w:GetPoint(1)
+      if p then s[t.key] = { p, rp, math.floor((x or 0) + 0.5), math.floor((y or 0) + 0.5) } end
+    end
+  end)
 
   -- Invisible header anchor under the title; the element's page fills from here to the bottom.
   local header = CreateFrame("Frame", nil, w)
@@ -2282,6 +2713,11 @@ end
 function _G.GSETracker_EditModeShowTab(idx)
   idx = tonumber(idx); if not idx then return end
   local w = BuildEditWindow(idx)
+  -- Native Edit Mode behaviour: only ONE element's panel is open at a time. Hide every other element
+  -- window first so switching boxes swaps panels instead of stacking them.
+  for i, ow in pairs(emWindows) do
+    if i ~= idx and ow.IsShown and ow:IsShown() then ow:Hide() end
+  end
   if w then w:Show(); w:Raise() end
 end
 
@@ -2385,163 +2821,7 @@ function Options:CloseSettingsWindow()
   RefreshOverlayStrata()
 end
 
--- ── Login / welcome window (5-page) ──────────────────────────────────────────
--- Shown once per login UNLESS "Hide Login Message" (General tab) is checked. A paged
--- walkthrough: each page shows an image (and optional caption). To drop in artwork
--- later, just set `image` on the matching LOGIN_PAGES entry (a texture path) and it
--- renders automatically; until then each page shows a grey placeholder.
-local LOGIN_PAGES = {
-  { image = "Interface\\AddOns\\GSE_Tracker\\media\\GTLogin\\GSETRK-LoginGeneral.png", w = 500, h = 500, caption = "" },
-  { image = "Interface\\AddOns\\GSE_Tracker\\media\\GTLogin\\GSETRK-LoginMeters.png", w = 500, h = 500, caption = "" },
-  { image = "Interface\\AddOns\\GSE_Tracker\\media\\GTLogin\\GSETRK-LoginAssistedHighlight.png", w = 500, h = 500, caption = "" },
-  { image = "Interface\\AddOns\\GSE_Tracker\\media\\GTLogin\\GSETRK-LoginActionTracker.png", w = 500, h = 500, caption = "" },
-  { image = "Interface\\AddOns\\GSE_Tracker\\media\\GTLogin\\GSETRK-LoginQoL.png", w = 500, h = 500, caption = "" },
-}
-
-local loginMessageFrame
-
-local function UpdateLoginPage(f)
-  local total = #LOGIN_PAGES
-  local page = f._page or 1
-  if page < 1 then page = 1 elseif page > total then page = total end
-  f._page = page
-  local data = LOGIN_PAGES[page] or {}
-
-  local INSET_L, INSET_R, INSET_T, INSET_B = 11, 12, 12, 11
-  if data.image then
-    -- Frame wraps the image EXACTLY: dialog size = image size + backdrop insets.
-    -- Prefer the image's NATIVE size (data.w/h) -- no downscaling. Fall back to an
-    -- aspect-fit only for pages that don't declare explicit dimensions.
-    local w, h = tonumber(data.w), tonumber(data.h)
-    if not (w and h) then
-      local MAX_IMG = 380
-      local aspect = tonumber(data.aspect) or 1
-      if aspect >= 1 then w, h = MAX_IMG, MAX_IMG / aspect else w, h = MAX_IMG * aspect, MAX_IMG end
-    end
-    f.image:SetTexture(data.image)
-    f.image:ClearAllPoints()
-    f.image:SetPoint("TOPLEFT", f, "TOPLEFT", INSET_L, -INSET_T)
-    f.image:SetSize(w, h)
-    f.image:Show()
-    f.imgText:Hide()
-    f:SetSize(w + INSET_L + INSET_R, h + INSET_T + INSET_B)
-  else
-    f.image:Hide()
-    f.imgText:SetText("IMAGE WILL GO HERE LATER\n(Page " .. page .. " of " .. total .. ")")
-    f.imgText:Show()
-    f:SetSize(420, 300)
-  end
-
-  if f.prev then if page <= 1 then f.prev:Disable() else f.prev:Enable() end end
-  if f.next then if page >= total then f.next:Disable() else f.next:Enable() end end
-end
-
-local function BuildLoginMessageFrame()
-  if loginMessageFrame then return loginMessageFrame end
-
-  local f = CreateFrame("Frame", "GSETrackerLoginMessageFrame", UIParent, "BackdropTemplate")
-  f:SetSize(480, 400)
-  f:SetPoint("CENTER")
-  f:SetFrameStrata("DIALOG")
-  f:SetToplevel(true)
-  f:EnableMouse(true)
-  f:SetMovable(true)
-  f:RegisterForDrag("LeftButton")
-  f:SetScript("OnDragStart", f.StartMoving)
-  f:SetScript("OnDragStop", f.StopMovingOrSizing)
-  f:SetBackdrop({
-    bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-    edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-    tile = true, tileSize = 32, edgeSize = 32,
-    insets = { left = 11, right = 12, top = 12, bottom = 11 },
-  })
-  -- ESC closes it (add a key to the Blizzard table -- never reassign the table).
-  if UISpecialFrames then table.insert(UISpecialFrames, "GSETrackerLoginMessageFrame") end
-
-  -- Corner close (X) -- no title bar / labels; the image is the whole content.
-  local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
-  close:SetPoint("TOPRIGHT", -2, -2)
-
-  -- Page image (size/anchor set per-page in UpdateLoginPage).
-  local image = f:CreateTexture(nil, "ARTWORK")
-  image:SetPoint("TOPLEFT", f, "TOPLEFT", 11, -12)
-  image:Hide()
-  f.image = image
-
-  -- Placeholder text for pages that don't have an image yet.
-  local imgText = f:CreateFontString(nil, "ARTWORK", "GameFontDisableLarge")
-  imgText:SetPoint("CENTER")
-  imgText:SetJustifyH("CENTER")
-  imgText:SetText("IMAGE WILL GO HERE LATER")
-  f.imgText = imgText
-
-  -- Small Prev / Next arrows, centred at the bottom (overlaid on the image edge).
-  local prev = CreateFrame("Button", nil, f)
-  prev:SetSize(32, 32)
-  prev:SetPoint("BOTTOM", f, "BOTTOM", -22, 18)
-  prev:SetNormalTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Up")
-  prev:SetPushedTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Down")
-  prev:SetDisabledTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Disabled")
-  prev:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight", "ADD")
-  prev:SetScript("OnClick", function() f._page = (f._page or 1) - 1; UpdateLoginPage(f) end)
-  f.prev = prev
-
-  local nextb = CreateFrame("Button", nil, f)
-  nextb:SetSize(32, 32)
-  nextb:SetPoint("BOTTOM", f, "BOTTOM", 22, 18)
-  nextb:SetNormalTexture("Interface\\Buttons\\UI-SpellbookIcon-NextPage-Up")
-  nextb:SetPushedTexture("Interface\\Buttons\\UI-SpellbookIcon-NextPage-Down")
-  nextb:SetDisabledTexture("Interface\\Buttons\\UI-SpellbookIcon-NextPage-Disabled")
-  nextb:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight", "ADD")
-  nextb:SetScript("OnClick", function() f._page = (f._page or 1) + 1; UpdateLoginPage(f) end)
-  f.next = nextb
-
-  -- "Hide Login Message" checkbox -- no visible label (tooltip explains it), bottom-left.
-  local check = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
-  check:SetSize(24, 24)
-  check:SetPoint("LEFT", f, "BOTTOMLEFT", 33, 34)  -- vertical centre aligned with the arrow row (arrows: bottom 18 + half of 32)
-  check:SetScript("OnClick", function(self)
-    if addon.SetHideLoginMessage then addon:SetHideLoginMessage(self:GetChecked() and true or false) end
-  end)
-  check:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-    GameTooltip:SetText("Hide Login Message", 1, 1, 1)
-    GameTooltip:AddLine("Don't show this window on future logins.", 0.8, 0.8, 0.8, true)
-    GameTooltip:Show()
-  end)
-  check:SetScript("OnLeave", function() GameTooltip:Hide() end)
-  local checkLabel = f:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-  checkLabel:SetPoint("LEFT", check, "RIGHT", 2, 0)
-  checkLabel:SetText("Hide Login Message")
-  f.check = check
-
-  loginMessageFrame = f
-  return f
-end
-
-function Options:ShowLoginMessage()
-  -- Respect the opt-out, and don't pop a movable frame during combat lockdown.
-  if addon.GetHideLoginMessage and addon:GetHideLoginMessage() then return end
-  if _G.InCombatLockdown and _G.InCombatLockdown() then return end
-  local f = BuildLoginMessageFrame()
-  if f.check and f.check.SetChecked then
-    f.check:SetChecked(addon.GetHideLoginMessage and addon:GetHideLoginMessage() or false)
-  end
-  f._page = 1
-  UpdateLoginPage(f)
-  -- Showing during PLAYER_LOGIN gets swept away by the loading-screen / CloseSpecialWindows
-  -- pass (UISpecialFrames are hidden as the world finishes loading). Defer the show to the
-  -- first PLAYER_ENTERING_WORLD so the window lands AFTER the loading screen.
-  if not f._pewWaiter then f._pewWaiter = CreateFrame("Frame") end
-  f._pewWaiter:RegisterEvent("PLAYER_ENTERING_WORLD")
-  f._pewWaiter:SetScript("OnEvent", function(waiter)
-    waiter:UnregisterEvent("PLAYER_ENTERING_WORLD")
-    -- Re-check the opt-out in case it was toggled between login and world-load.
-    if addon.GetHideLoginMessage and addon:GetHideLoginMessage() then return end
-    f:Show()
-  end)
-end
-
+-- Login/welcome window feature removed (popup retired); see git history if it needs to return.
 local loginFrame = CreateFrame("Frame")
 loginFrame:RegisterEvent("PLAYER_LOGIN")
 loginFrame:SetScript("OnEvent", function(self)

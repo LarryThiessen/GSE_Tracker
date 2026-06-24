@@ -240,6 +240,14 @@ local iconCenter = CreateFrame("Frame", nil, anchor)
 iconCenter:SetPoint("CENTER", anchor, "CENTER", 0, 0)
 iconCenter:SetSize(1, 1)
 
+-- The centre icon (Marker / AHLight) is itself arrangeable on the 3x3 grid, so it rides on its OWN movable
+-- point -- markerCell -- rather than the fixed iconCenter. SetupFrames moves markerCell to the Marker
+-- slot's cell each layout; the icon AND its GCD swipe anchor to markerCell, so they travel together.
+-- Defaults to dead-centre (the "C" cell).
+local markerCell = CreateFrame("Frame", nil, anchor)
+markerCell:SetPoint("CENTER", iconCenter, "CENTER", 0, 0)
+markerCell:SetSize(1, 1)
+
 local CENTER_GCD_SPELL_ID   = 61304
 local BULLSEYE_SWIPE_TEXTURE = "Interface\\AddOns\\GSE_Tracker\\media\\marker-images\\Crosshairs001.png"
 local GetCenterFrameSize    -- forward declaration
@@ -346,7 +354,7 @@ local function UpdateCenterGCDSwipe()
         centerGCDSwipe:SetFrameLevel(12)
         centerGCDSwipe:SetSize(width, height)
         centerGCDSwipe:ClearAllPoints()
-        centerGCDSwipe:SetPoint("CENTER", iconCenter, "CENTER", 0, 0)
+        centerGCDSwipe:SetPoint("CENTER", markerCell, "CENTER", 0, 0)  -- follows the (movable) centre icon
         centerGCDSwipe._layoutKey = layoutKey
     end
     local startTime, duration, enabled, modRate = GetCenterGCDCooldownInfo()
@@ -388,7 +396,7 @@ local function UpdateMarkerFrame()
     MarkerFrame:SetParent(MetersAnchor or UIParent)
     MarkerFrame:SetFrameLevel(11)
     MarkerFrame:ClearAllPoints()
-    MarkerFrame:SetPoint("CENTER", iconCenter, "CENTER", 0, 0)
+    MarkerFrame:SetPoint("CENTER", markerCell, "CENTER", 0, 0)  -- markerCell follows the Marker grid slot
     MarkerFrame:SetAlpha(1)
     MarkerFrame:Show()
 end
@@ -630,6 +638,302 @@ function Meter_InvalidateLayout()
     end
 end
 
+-- ─── Sub-element slots (user-arrangeable readouts) ─────────────────────────────
+-- The four readouts (DPS/HPS/GCD/Usage) live in four fixed slots around the centre icon:
+-- TOP / BOTTOM / LEFT / RIGHT. We persist only the SLOT NAME per readout (not pixel offsets), so the
+-- arrangement is scale-free and survives icon-size / font changes -- SetupFrames recomputes each slot's
+-- geometry from the live icon size every layout. In Edit Mode the user drags a readout; on drop it
+-- snaps to the nearest cell, and if that cell is taken the two readouts SWAP. The arranger is a 3x3 grid
+-- (9 cells); the CENTRE cell is allowed (a readout can sit over the icon). Defaults reproduce the original
+-- look (DPS left, HPS right, GCD top). NOTE: AHLightUsage is NOT a meters readout -- it's an Assisted
+-- Highlight element positioned at the cluster bottom (see its own block in SetupFrames), so it is NOT in
+-- this slot system. The centre Marker icon, however, IS arrangeable -- it's slot id "Marker" (default "C").
+--
+-- 25 cells: 5 columns (LL/L/C/R/RR) x 5 rows (TT/T/M/B/XB). The inner 9 keep their ORIGINAL names
+-- (TL/T/.../BR) so saved arrangements survive with no migration; the far columns (LL/RR) and the extra
+-- top/bottom rows (TT/XB) are added. 5 rows = odd, so M is the TRUE centre row. Each cell decomposes into
+-- a column + a row, each with a position multiplier from centre.
+local METER_SLOTS = {
+    "TTLL", "TTL", "TTC", "TTR", "TTRR",
+    "LLT",  "TL",  "T",   "TR",  "RRT",
+    "LL",   "L",   "C",   "R",   "RR",
+    "LLB",  "BL",  "B",   "BR",  "RRB",
+    "XBLL", "XBL", "XBC", "XBR", "XBRR",
+}
+local METER_SLOT_SET = {}
+for _, s in ipairs(METER_SLOTS) do METER_SLOT_SET[s] = true end
+local SLOT_COL = {
+    TTLL= "LL", TTL= "L", TTC="C", TTR= "R", TTRR= "RR",
+    LLT = "LL", TL = "L", T = "C", TR = "R", RRT = "RR",
+    LL  = "LL", L  = "L", C = "C", R  = "R", RR  = "RR",
+    LLB = "LL", BL = "L", B = "C", BR = "R", RRB = "RR",
+    XBLL= "LL", XBL= "L", XBC="C", XBR= "R", XBRR= "RR",
+}
+local SLOT_ROW = {
+    TTLL= "TT", TTL= "TT",TTC="TT",TTR= "TT",TTRR= "TT",
+    LLT = "T",  TL = "T", T = "T", TR = "T", RRT = "T",
+    LL  = "M",  L  = "M", C = "M", R  = "M", RR  = "M",
+    LLB = "B",  BL = "B", B = "B", BR = "B", RRB = "B",
+    XBLL= "XB", XBL= "XB",XBC="XB",XBR= "XB",XBRR= "XB",
+}
+-- Position multipliers from centre (in "steps"). The HUD geometry below turns these into pixel offsets.
+local COL_MULT = { LL = -2, L = -1, C = 0, R = 1, RR = 2 }
+local ROW_MULT = { TT = 2, T = 1, M = 0, B = -1, XB = -2 }
+-- Migrate the old 4-name scheme (pre-9-grid) so saved arrangements survive.
+local LEGACY_SLOT_MAP = { TOP = "T", BOTTOM = "B", LEFT = "L", RIGHT = "R" }
+
+-- Marker = the centre icon; it follows the same drag/swap rules as the readouts.
+local METER_SLOT_DEFAULTS = { DPS = "L", HPS = "R", GCD = "T", Marker = "C" }
+
+-- id -> (global frame name created by its module, text fontstring field on that frame). The Marker is NOT
+-- here -- it isn't a text readout placed by PlaceMeterElement; it has its own markerCell positioning.
+local METER_ELEMENTS = {
+    { id = "DPS", frame = "DPSFrame", text = "dpsText" },
+    { id = "HPS", frame = "HPSFrame", text = "hpsText" },
+    { id = "GCD", frame = "GCDFrame", text = "gcdText" },
+}
+
+-- Offset (from iconCenter) where the centre ICON sits for a given grid cell: centred, COL_MULT/ROW_MULT
+-- steps of one icon + gap out per direction (so it lines up with the readout columns/rows).
+local function MarkerCellOffset(slot, iconWidth, iconHeight, gap)
+    local cm = COL_MULT[SLOT_COL[slot] or "C"] or 0
+    local rm = ROW_MULT[SLOT_ROW[slot] or "M"] or 0
+    return cm * ((iconWidth or 0) + gap), rm * ((iconHeight or 0) + gap)
+end
+
+-- Optional cooldown elements (Trinkets, Healthstone, ...) live in the slot map ONLY when placed, keyed by
+-- their CooldownElements id. They're valid grid members but are NOT part of METER_SLOT_DEFAULTS.
+local function OptionalElementValid(id)
+    return (_G.GSETracker_CooldownElements_IsValid and _G.GSETracker_CooldownElements_IsValid(id)) or false
+end
+
+local function MeterSlots()
+    local s = MetersSavedVars.slots
+    if type(s) ~= "table" then s = {}; MetersSavedVars.slots = s end
+    s.Usage = nil  -- legacy: Usage left the meters slot system (it's an Assisted Highlight element)
+    for id, def in pairs(METER_SLOT_DEFAULTS) do
+        local v = s[id]
+        if LEGACY_SLOT_MAP[v] then v = LEGACY_SLOT_MAP[v]; s[id] = v end  -- old TOP/BOTTOM/LEFT/RIGHT -> T/B/L/R
+        if not METER_SLOT_SET[v] then s[id] = def end
+    end
+    -- Drop any optional element whose id is no longer valid or whose cell is invalid (collect-then-delete
+    -- so we never remove keys mid-pairs).
+    local drop
+    for id, v in pairs(s) do
+        if not METER_SLOT_DEFAULTS[id] and not (OptionalElementValid(id) and METER_SLOT_SET[v]) then
+            drop = drop or {}; drop[#drop + 1] = id
+        end
+    end
+    if drop then for _, id in ipairs(drop) do s[id] = nil end end
+    return s
+end
+
+local function MeterElementInSlot(slot)
+    for id, sl in pairs(MeterSlots()) do
+        if sl == slot then return id end
+    end
+end
+
+-- Ids of currently-placed optional elements (stable, sorted order).
+local function PlacedOptionalIds()
+    local out = {}
+    for id, cell in pairs(MeterSlots()) do
+        if not METER_SLOT_DEFAULTS[id] and METER_SLOT_SET[cell] then out[#out + 1] = id end
+    end
+    table.sort(out)
+    return out
+end
+
+-- Move `id` into `slot`. If another readout already holds it, that readout takes `id`'s old slot (swap).
+local function MeterAssignSlot(id, slot)
+    local s = MeterSlots()
+    local from = s[id]
+    if from == slot then return end
+    local occupant = MeterElementInSlot(slot)
+    if occupant and occupant ~= id then s[occupant] = from end
+    s[id] = slot
+end
+
+function Meter_ResetSlots()
+    local s = MeterSlots()
+    for id, def in pairs(METER_SLOT_DEFAULTS) do s[id] = def end
+    Meter_InvalidateLayout()
+    if SetupFrames then SetupFrames() end
+    if ApplyUnlockedPreviewDisplay then ApplyUnlockedPreviewDisplay() end
+    if _G.GSETracker_RefitMetersBox then _G.GSETracker_RefitMetersBox() end  -- resize the Edit Mode box
+end
+
+-- Concatenate the assignments -- folded into the layout cache key so a swap forces a re-layout.
+function Meter_SlotKey()
+    local s = MeterSlots()
+    return (s.DPS or "") .. (s.HPS or "") .. (s.GCD or "") .. (s.Marker or "")
+end
+
+local function MeterTextHeight(fs)
+    local fallback = MetersSavedVars.fontSize or 18
+    if not fs then return fallback end
+    -- Derive height from the FONT size, NEVER GetStringHeight(): a readout whose text came from
+    -- C_DamageMeter (DPS/HPS) has a "secret" string height that THROWS on comparison while our code is
+    -- tainted (same guard as ui/editmode.lua FitMetersBox). The font size is a plain number set by us and
+    -- is close enough for the vertical slot offset. pcall-wrapped in case the font isn't applied yet.
+    local ok, _, size = pcall(fs.GetFont, fs)
+    return (ok and tonumber(size)) or fallback
+end
+
+-- Place ONE readout at its assigned grid cell relative to iconCenter. The cell decomposes into a column
+-- (LL/L/C/R/RR via COL_MULT) and row (T/M/B/XB via ROW_MULT). The first step out from centre hugs the icon
+-- (edge-anchored, text justified outward); each FURTHER column/row step adds a fixed COL_W / ROW_H. The
+-- fontstring hugs the frame's matching edge so it travels with the frame. gap/iconWidth/iconHeight come
+-- from SetupFrames. (COL_W / ROW_H are font-derived estimates for the outer cells -- tune if spacing is off.)
+local function PlaceMeterElement(frame, textField, slot, iconWidth, iconHeight, gap)
+    if not frame then return end
+    frame:SetParent(anchor)
+    frame:SetFrameLevel(11)
+    frame:ClearAllPoints()
+    local fs  = frame[textField]
+    local cm  = COL_MULT[SLOT_COL[slot] or "C"] or 0
+    local rm  = ROW_MULT[SLOT_ROW[slot] or "M"] or 0
+    local fontSize = MetersSavedVars.fontSize or 18
+    local edgeX = (iconWidth > 0) and ((iconWidth / 2) + gap) or 0
+    local COL_W = (fontSize * 4) + gap   -- horizontal spacing per outer column
+
+    -- Horizontal: centre column -> centre-anchored; left columns -> right-edge anchored (justify RIGHT),
+    -- right columns -> left-edge anchored (justify LEFT). |cm| > 1 adds COL_W per extra column out.
+    local point, x, justify
+    if cm == 0 then
+        point, x, justify = "CENTER", 0, "CENTER"
+    elseif cm < 0 then
+        point, x, justify = "RIGHT", -(edgeX + (-cm - 1) * COL_W), "RIGHT"
+    else
+        point, x, justify = "LEFT",   (edgeX + ( cm - 1) * COL_W), "LEFT"
+    end
+
+    -- Vertical: first row step = half the icon + half this readout's text + gap; each further step = one
+    -- text line (ROW_H).
+    local y = 0
+    if rm ~= 0 then
+        local th = MeterTextHeight(fs)
+        local mag = (iconHeight > 0) and ((iconHeight / 2) + (th / 2) + gap) or ((th / 2) + gap)
+        mag = math.floor((mag + (math.abs(rm) - 1) * (th + gap)) + 0.5)
+        y = (rm > 0) and mag or -mag
+    end
+
+    frame:SetPoint(point, iconCenter, "CENTER", x, y)
+    if fs then
+        fs:ClearAllPoints()
+        fs:SetPoint(point, frame, point, 0, 0)  -- hug the same edge the frame is anchored by
+        fs:SetJustifyH(justify)
+    end
+end
+
+-- ── Removable elements (fixed readouts/marker + optional cooldowns) ──────────
+-- DPS/HPS/GCD/Marker can be removed from the grid (right-click) and re-added from the "+" list, like the
+-- optional cooldown elements. "On the grid" maps onto each one's existing visibility: DPS/HPS/GCD follow
+-- their show flag (so the Readouts dropdown stays in sync), the Marker follows markerHidden (gated in
+-- ui/player_tracker.lua ShouldShowCombatMarker). They keep their saved cell while hidden, so re-adding
+-- restores the spot.
+local FIXED_SHOW_KEY = { DPS = "showDPS", HPS = "showHPS", GCD = "showGCD" }
+local FIXED_ORDER    = { "GCD", "DPS", "HPS", "Marker" }
+
+local function FixedElementOn(id)
+    if id == "Marker" then return not MetersSavedVars.markerHidden end
+    local k = FIXED_SHOW_KEY[id]
+    if k then return MetersSavedVars[k] ~= false end
+    return true
+end
+
+local function SetFixedElementOn(id, on)
+    if id == "Marker" then
+        MetersSavedVars.markerHidden = (not on) or nil
+    else
+        local k = FIXED_SHOW_KEY[id]
+        if k then MetersSavedVars[k] = on and true or false end
+    end
+end
+
+-- Re-layout + re-apply readout visibility + refit the Edit Mode box after any grid change. (The combat
+-- marker -- a separate system -- is refreshed by the caller, e.g. the arranger's RefreshCenterMarker.)
+local function AfterGridChange()
+    Meter_InvalidateLayout()
+    if SetupFrames then SetupFrames() end
+    if ApplyUnlockedPreviewDisplay then ApplyUnlockedPreviewDisplay() end
+    if _G.Meters_ApplyDisplayToggles then _G.Meters_ApplyDisplayToggles() end
+    if _G.GSETracker_RefitMetersBox then _G.GSETracker_RefitMetersBox() end
+end
+
+-- Assign `id` to a 3x3 grid `slot` (TL/T/TR/L/C/R/BL/B/BR), swapping any occupant. Placing a fixed element
+-- also turns it back ON. Works for fixed AND optional ids. Returns the slot map.
+function Meter_SetElementSlot(id, slot)
+    if not ((METER_SLOT_DEFAULTS[id] or OptionalElementValid(id)) and METER_SLOT_SET[slot]) then
+        return MeterSlots()
+    end
+    if METER_SLOT_DEFAULTS[id] then SetFixedElementOn(id, true) end
+    MeterAssignSlot(id, slot)
+    AfterGridChange()
+    return MeterSlots()
+end
+
+-- Remove an element from the grid: fixed -> turn its visibility off (keeps its cell for re-add); optional
+-- -> drop it from the slot map + hide its widget. Returns the slot map.
+function Meter_RemoveElement(id)
+    if METER_SLOT_DEFAULTS[id] then
+        SetFixedElementOn(id, false)
+    elseif OptionalElementValid(id) then
+        local s = MeterSlots()
+        if s[id] == nil then return s end
+        s[id] = nil
+        if _G.GSETracker_CooldownElements_Hide then _G.GSETracker_CooldownElements_Hide(id) end
+    else
+        return MeterSlots()
+    end
+    AfterGridChange()
+    return MeterSlots()
+end
+
+-- Elements NOT currently on the grid -- the "+" add list: removed fixed elements first (stable order),
+-- then unplaced optional elements. {id,label}.
+function Meter_GetAvailableElements()
+    local out, s = {}, MeterSlots()
+    for _, id in ipairs(FIXED_ORDER) do
+        if not FixedElementOn(id) then out[#out + 1] = { id = id, label = Meter_ElementLabel(id) } end
+    end
+    if _G.GSETracker_CooldownElements_List then
+        for _, e in ipairs(_G.GSETracker_CooldownElements_List()) do
+            if s[e.id] == nil then out[#out + 1] = e end
+        end
+    end
+    return out
+end
+
+function Meter_IsOptionalElement(id) return not METER_SLOT_DEFAULTS[id] end
+
+-- Display label for any element id (readout labels are literal; optional elements come from the registry).
+function Meter_ElementLabel(id)
+    if METER_SLOT_DEFAULTS[id] then return id end
+    return (_G.GSETracker_CooldownElements_Label and _G.GSETracker_CooldownElements_Label(id)) or id
+end
+
+-- Snapshot of the slot map (id -> slot) of elements currently ON the grid: shown fixed elements + placed
+-- optional elements. (Removed fixed elements are excluded so they appear as "+" cells, not chips.)
+function Meter_GetElementSlots()
+    local s, out = MeterSlots(), {}
+    for id in pairs(METER_SLOT_DEFAULTS) do
+        if FixedElementOn(id) then out[id] = s[id] end
+    end
+    for _, id in ipairs(PlacedOptionalIds()) do out[id] = s[id] end
+    return out
+end
+
+-- The (x, y) the centre marker should shift by for its assigned grid cell, in cluster units. The visible
+-- centre marker is usually the COMBAT marker (ui/player_tracker.lua, anchored to UIParent centre), not the
+-- meters MarkerFrame -- so ApplyCombatMarkerPosition adds this so the "Marker" chip moves the real marker.
+-- (0,0) for the default centre cell = no shift. Uses the same icon size as the readout cells so it lands
+-- on the same grid.
+function Meter_GetMarkerCellOffset()
+    local w, h = GetCenterFrameSize()
+    return MarkerCellOffset(MeterSlots().Marker, w, h, 3)
+end
+
 function SetupFrames()
     local gap = 3
     local iconWidth, iconHeight = 0, 0
@@ -655,45 +959,11 @@ function SetupFrames()
         iconWidth, iconHeight = GetCenterFrameSize()
     end
 
-    local offsetX = (iconWidth > 0) and ((iconWidth / 2) + gap) or 0
-
-    -- GCD text height
-    local gcdTextHeight = MetersSavedVars.fontSize or 18
-    if GCDFrame and GCDFrame.gcdText then
-        local h = tonumber(GCDFrame.gcdText:GetStringHeight()) or 0
-        if h > 0 then
-            gcdTextHeight = h
-        else
-            local _, fs = GCDFrame.gcdText:GetFont()
-            gcdTextHeight = tonumber(fs) or gcdTextHeight
-        end
-    end
-
-    local gcdOffsetY
-    if iconHeight > 0 then
-        gcdOffsetY = math.floor(((iconHeight / 2) + (gcdTextHeight / 2) + gap) + 0.5)
-    else
-        gcdOffsetY = math.floor(((gcdTextHeight / 2) + gap) + 0.5)
-    end
-
-    -- Usage text height
-    local usageTextHeight = math.max(6, (MetersSavedVars.fontSize or 18) - 2)
-    if AHLightUsageFrame and AHLightUsageFrame.ahLightUsageText then
-        local h = tonumber(AHLightUsageFrame.ahLightUsageText:GetStringHeight()) or 0
-        if h > 0 then
-            usageTextHeight = h
-        else
-            local _, fs = AHLightUsageFrame.ahLightUsageText:GetFont()
-            usageTextHeight = tonumber(fs) or usageTextHeight
-        end
-    end
-
-    local usageOffsetY
-    if iconHeight > 0 then
-        usageOffsetY = -math.floor(((iconHeight / 2) + (usageTextHeight / 2) + gap) + 0.5)
-    else
-        usageOffsetY = -math.floor(((usageTextHeight / 2) + gap) + 0.5)
-    end
+    -- GCD / Usage text heights (for the layout cache key). Font-size based via MeterTextHeight -- NOT
+    -- GetStringHeight(), whose value is "secret" (and throws on comparison) once a readout shows
+    -- C_DamageMeter / C_AssistedCombat data while our code is tainted.
+    local gcdTextHeight   = MeterTextHeight(GCDFrame and GCDFrame.gcdText)
+    local usageTextHeight = MeterTextHeight(AHLightUsageFrame and AHLightUsageFrame.ahLightUsageText)
 
     local layoutKey = table.concat({
         tostring(markerMode),
@@ -706,6 +976,7 @@ function SetupFrames()
         tostring(MetersSavedVars.showHPS ~= false),
         tostring(MetersSavedVars.showGCD ~= false),
         tostring(MetersSavedVars.showAHLightUsage ~= false),
+        tostring(Meter_SlotKey()),
     }, ":")
 
     if lastLayoutKey == layoutKey and not needsAnchorLayout then
@@ -714,12 +985,20 @@ function SetupFrames()
     end
     lastLayoutKey = layoutKey
 
+    local slots = MeterSlots()
+
+    -- Move the centre-icon cell to the Marker's assigned grid cell. The icon (AHLight/Marker) and its GCD
+    -- swipe all anchor to markerCell, so they follow it together.
+    local mcx, mcy = MarkerCellOffset(slots.Marker, iconWidth, iconHeight, gap)
+    markerCell:ClearAllPoints()
+    markerCell:SetPoint("CENTER", iconCenter, "CENTER", mcx, mcy)
+
     if AHLightFrame then
         AHLightFrame:SetParent(anchor)
         AHLightFrame._gnomesterLayoutAnchor = anchor
         AHLightFrame:SetFrameLevel(11)
         AHLightFrame:ClearAllPoints()
-        AHLightFrame:SetPoint("CENTER", iconCenter, "CENTER", 0, 0)
+        AHLightFrame:SetPoint("CENTER", markerCell, "CENTER", 0, 0)
     end
 
     if not usingAHLight and MarkerFrame then
@@ -727,51 +1006,47 @@ function SetupFrames()
         MarkerFrame._gnomesterLayoutAnchor = anchor
         MarkerFrame:SetFrameLevel(11)
         MarkerFrame:ClearAllPoints()
-        MarkerFrame:SetPoint("CENTER", iconCenter, "CENTER", 0, 0)
+        MarkerFrame:SetPoint("CENTER", markerCell, "CENTER", 0, 0)
         MarkerFrame:SetAlpha(1)
     end
 
-    if DPSFrame then
-        DPSFrame:SetParent(anchor)
-        DPSFrame:SetFrameLevel(11)
-        DPSFrame:ClearAllPoints()
-        DPSFrame:SetPoint("RIGHT", iconCenter, "CENTER", -offsetX, 0)
-        if DPSFrame.dpsText then
-            DPSFrame.dpsText:ClearAllPoints()
-            DPSFrame.dpsText:SetPoint("RIGHT", iconCenter, "CENTER", -offsetX, 0)
-            DPSFrame.dpsText:SetJustifyH("RIGHT")
+    -- Place the three readouts (DPS/HPS/GCD) at their assigned 3x3 grid cells (arranged from the Meters
+    -- edit panel; see PlaceMeterElement). They anchor to iconCenter (the fixed geometric centre).
+    for _, e in ipairs(METER_ELEMENTS) do
+        PlaceMeterElement(_G[e.frame], e.text, slots[e.id], iconWidth, iconHeight, gap)
+    end
+
+    -- Place any optional cooldown elements (Trinkets, Healthstone, ...). They're icons, so they centre in
+    -- their cell like the marker (one icon + gap out). Sized to the centre-frame size; updated by the
+    -- CooldownElements ticker.
+    if _G.GSETracker_CooldownElements_Ensure then
+        local isize = math.max(16, math.floor((iconWidth > 0 and iconWidth or GetCenterFrameSize()) + 0.5))
+        for _, id in ipairs(PlacedOptionalIds()) do
+            local f = _G.GSETracker_CooldownElements_Ensure(id, anchor)
+            if f then
+                f:SetParent(anchor)
+                f:SetFrameLevel(12)
+                f:SetSize(isize, isize)
+                f:ClearAllPoints()
+                local ox, oy = MarkerCellOffset(slots[id], iconWidth, iconHeight, gap)
+                f:SetPoint("CENTER", iconCenter, "CENTER", ox, oy)
+                f:Show()
+                if _G.GSETracker_CooldownElements_Update then _G.GSETracker_CooldownElements_Update(id) end
+            end
         end
     end
 
-    if HPSFrame then
-        HPSFrame:SetParent(anchor)
-        HPSFrame:SetFrameLevel(11)
-        HPSFrame:ClearAllPoints()
-        HPSFrame:SetPoint("LEFT", iconCenter, "CENTER", offsetX, 0)
-        if HPSFrame.hpsText then
-            HPSFrame.hpsText:ClearAllPoints()
-            HPSFrame.hpsText:SetPoint("LEFT", iconCenter, "CENTER", offsetX, 0)
-            HPSFrame.hpsText:SetJustifyH("LEFT")
-        end
-    end
-
-    if GCDFrame then
-        GCDFrame:SetParent(anchor)
-        GCDFrame:SetFrameLevel(11)
-        GCDFrame:ClearAllPoints()
-        if GCDFrame.gcdText then
-            GCDFrame.gcdText:ClearAllPoints()
-            GCDFrame.gcdText:SetPoint("CENTER", GCDFrame, "CENTER", 0, 0)
-            GCDFrame.gcdText:SetJustifyH("CENTER")
-        end
-        GCDFrame:SetPoint("CENTER", iconCenter, "CENTER", 0, gcdOffsetY)
-    end
-
+    -- AHLightUsage is NOT a meters readout (it's an Assisted Highlight element); it keeps its own fixed
+    -- spot at the cluster bottom, independent of the DPS/HPS/GCD arranger.
     if AHLightUsageFrame then
         AHLightUsageFrame:SetParent(anchor)
         AHLightUsageFrame:SetFrameLevel(11)
         AHLightUsageFrame:ClearAllPoints()
-        AHLightUsageFrame:SetPoint("CENTER", iconCenter, "CENTER", 0, usageOffsetY)
+        local uth = MeterTextHeight(AHLightUsageFrame.ahLightUsageText)
+        local uy  = (iconHeight > 0)
+            and -math.floor(((iconHeight / 2) + (uth / 2) + gap) + 0.5)
+            or  -math.floor(((uth / 2) + gap) + 0.5)
+        AHLightUsageFrame:SetPoint("CENTER", iconCenter, "CENTER", 0, uy)
         if AHLightUsageFrame.ahLightUsageText then
             AHLightUsageFrame.ahLightUsageText:ClearAllPoints()
             AHLightUsageFrame.ahLightUsageText:SetPoint("CENTER", AHLightUsageFrame, "CENTER", 0, 0)
@@ -922,8 +1197,11 @@ function Meter_SetDisplay(showAHLight, showDPS, showHPS, showGCD, showAHLightUsa
         return
     end
 
-    if DPSFrame then DPSFrame:SetShown(DPSHPSOK() and showDPS) end
-    if HPSFrame then HPSFrame:SetShown(DPSHPSOK() and showHPS) end
+    -- nil = ON (default), matching every other showDPS/showHPS read (e.g. ApplyUnlockedPreviewDisplay,
+    -- the layout cache key). Using the bare value treated an unset (nil) SavedVar as OFF, so DPS/HPS
+    -- never showed on a fresh profile. Only an explicit false hides.
+    if DPSFrame then DPSFrame:SetShown(DPSHPSOK() and showDPS ~= false) end
+    if HPSFrame then HPSFrame:SetShown(DPSHPSOK() and showHPS ~= false) end
 
     if GCDFrame and not GCDOK() then
         SetGCDPreviewState(false)

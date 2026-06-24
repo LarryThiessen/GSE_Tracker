@@ -546,6 +546,13 @@ function UI:ApplyCombatMarkerPosition(frame, parent, point, x, y)
   if not frame then return end
   if point == nil then
     point, x, y = GetCenteredAnchorConfig()
+    -- Meters arranger: the "Marker" chip shifts the centre marker by its assigned grid cell. Only on the
+    -- resting (centered-config) path, NOT when an explicit position is passed (e.g. an in-progress drag).
+    if _G.Meter_GetMarkerCellOffset then
+      local dx, dy = _G.Meter_GetMarkerCellOffset()
+      x = (x or 0) + (dx or 0)
+      y = (y or 0) + (dy or 0)
+    end
   end
   ApplyMarkerPointToFrame(frame, parent or GetMarkerParent(), point, x, y)
 end
@@ -645,6 +652,10 @@ function UI:SyncActiveCombatMarkerDragPosition()
 end
 
 function UI:ShouldShowCombatMarker(forceOverride)
+  -- Removed from the Meters grid (right-clicked off in the Layout editor): never show, even in preview.
+  if _G.MetersSavedVars and _G.MetersSavedVars.markerHidden then
+    return false
+  end
   -- The Center Marker is pinned to the Meters readout's centre and has NO independent
   -- enable/show of its own -- it simply follows the Meters frame's visibility: shown when
   -- the Meters readout is shown, hidden otherwise. (forceOverride / editing-tab preview

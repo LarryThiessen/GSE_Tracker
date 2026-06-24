@@ -4,6 +4,54 @@ local UI = ns.UI
 local API = (ns.Utils and ns.Utils.API) or {}
 local uiShared = addon._ui or {}
 
+local NAME_FADE = 3       -- seconds for the name/keybind fade-out ramp
+local NAME_IDLE_HOLD = 3  -- seconds of no casting (OUT of combat) before the names fade
+
+-- Smoothly fade the top-row names + keybind out, then clear. Shared by the post-combat fade AND the
+-- out-of-combat idle fade. Token-guarded: a fresh cast (NoteNameActivity) bumps _nameActivityToken, so a
+-- pending clear from an older fade is skipped and the re-shown name isn't wiped mid-cast.
+function UI:FadeNamesOut()
+  local ui = addon.ui
+  if not ui then return end
+  local token = ui._nameActivityToken or 0
+  ui._namesFading = true
+  uiShared.SmoothFadeOut(ui.nameText, NAME_FADE)
+  uiShared.SmoothFadeOut(ui.nameText2, NAME_FADE)
+  uiShared.SmoothFadeOut(ui.keybindText, NAME_FADE)
+  if _G.C_Timer and _G.C_Timer.After then
+    _G.C_Timer.After(NAME_FADE + 0.1, function()
+      if (ui._nameActivityToken or 0) ~= token then return end  -- a newer cast superseded this fade
+      ui._namesFading = false
+      uiShared.CancelFade(ui.nameText); uiShared.CancelFade(ui.nameText2); uiShared.CancelFade(ui.keybindText)
+      if not (API.InCombatLockdown and API.InCombatLockdown()) then addon._gseSeqName = nil end
+      addon:SetSequenceText("")
+      addon:ApplyVisibility()
+    end)
+  else
+    ui._namesFading = false
+    addon._gseSeqName = nil
+    addon:SetSequenceText("")
+  end
+end
+
+-- Called on every cast that shows a name. Bumps the activity token (cancels any pending fade-clear) and,
+-- OUT of combat, (re)arms the idle timer so the names fade once casting stops. In combat the post-combat
+-- PLAYER_REGEN_ENABLED fade owns it, so we don't arm there.
+function UI:NoteNameActivity()
+  local ui = addon.ui
+  if not ui then return end
+  ui._nameActivityToken = (ui._nameActivityToken or 0) + 1
+  local token = ui._nameActivityToken
+  if API.InCombatLockdown and API.InCombatLockdown() then return end
+  if not (_G.C_Timer and _G.C_Timer.After) then return end
+  _G.C_Timer.After(NAME_IDLE_HOLD, function()
+    if (ui._nameActivityToken or 0) ~= token then return end          -- a newer cast rearmed
+    if API.InCombatLockdown and API.InCombatLockdown() then return end -- combat owns the fade
+    if addon.IsEditModePreviewActive and addon:IsEditModePreviewActive() then return end  -- examples don't fade
+    addon:FadeNamesOut()
+  end)
+end
+
 local function HandleModifierStateChanged(_, _, key, state)
   local ui = addon and addon.ui
   if not ui then return end
@@ -65,28 +113,13 @@ local function HandleCombatEvent(_, event)
     if ui._combatState == false then return end
     ui._combatState = false
     addon:ClearSpellHistory()
-    -- Smoothly fade the top-row names + keybind out over 3s (instead of an instant clear), then
-    -- clear them. ui._namesFading tells ApplyRuntimeSequenceVisibility to leave the name alpha
-    -- alone for the duration so the fade ramp isn't snapped back to full (Always) or zero
-    -- (In Combat). A fresh cast/combat cancels the fade and restores full opacity.
-    local NAME_FADE = 3
-    ui._namesFading = true
-    uiShared.SmoothFadeOut(ui.nameText, NAME_FADE)
-    uiShared.SmoothFadeOut(ui.nameText2, NAME_FADE)
-    uiShared.SmoothFadeOut(ui.keybindText, NAME_FADE)
-    if _G.C_Timer and _G.C_Timer.After then
-      _G.C_Timer.After(NAME_FADE + 0.1, function()
-        ui._namesFading = false
-        uiShared.CancelFade(ui.nameText)
-        uiShared.CancelFade(ui.nameText2)
-        uiShared.CancelFade(ui.keybindText)
-        addon:SetSequenceText("")
-        addon:ApplyVisibility()
-      end)
-    else
-      ui._namesFading = false
-      addon:SetSequenceText("")
-    end
+    -- Clear any modifier left "held" by a key-up missed during the fight (heavy macro spam can drop a
+    -- key-up), so the MODKEYS readout (e.g. "LCtrl") doesn't linger after combat. Live key queries are
+    -- authoritative here (we're not mid key-event); a genuinely-held modifier stays shown.
+    if uiShared.ReconcileModifiersFromLive then uiShared.ReconcileModifiersFromLive(ui) end
+    if addon.UpdateModifiers then addon:UpdateModifiers(true) end
+    -- Smoothly fade the top-row names + keybind out, then clear (shared with the out-of-combat idle fade).
+    addon:FadeNamesOut()
     -- Clear active sequence state so ApplyVisibility does not
     -- re-resolve stale text from the GSE bridge.
     addon._activeSeqKey = nil

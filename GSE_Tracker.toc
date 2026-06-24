@@ -3,7 +3,7 @@
 ## Notes: Standalone Action Tracker
 ## Author: ScaryLarryGames
 ## IconTexture: Interface\AddOns\GSE_Tracker\media\GSE_Tracker.png
-## Version: 1.4.1
+## Version: 1.5.0
 ## SavedVariables: GSETrackerDB
 ## SavedVariablesPerCharacter: GSETrackerCharDB
 ## OptionalDeps: LibSharedMedia-3.0
@@ -86,5 +86,6 @@ meters\GCD.lua
 meters\DPS.lua
 meters\HPS.lua
 meters\AHLightUsage.lua
+meters\CooldownElements.lua
 meters\Meters.lua
 meters\MetersOptions.lua
