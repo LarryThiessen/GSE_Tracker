@@ -64,7 +64,7 @@ NOTES=$(awk -v ver="## $VERSION" '$0==ver{f=1;next} /^## /{f=0} f' "$NOTES_FILE"
 # has that emoji. IDs are recorded in memory (slg-discord-server-emoji).
 FOOTER_BLOCK=$(cat <<'EOF'
 > 📥 **Download**
-> **[CurseForge](https://www.curseforge.com/wow/addons/gse-tracker)**
+> <:CurseForge:1271125181150003312> **[CurseForge](https://www.curseforge.com/wow/addons/gse-tracker)**
 
 Enjoy,
 **ScaryLarryGames!**
@@ -75,7 +75,7 @@ EOF
 
 # Date line at the top of the description (version now lives in the embed title).
 POST_DATE=$(date -u +'%B %-d, %Y')
-HEADER="Update: ${POST_DATE}"
+HEADER="<:GSE_Tracker:1517207208121860377> Update: ${POST_DATE}"
 
 DESCRIPTION="${HEADER}
 
