@@ -90,7 +90,7 @@ PAYLOAD=$(jq -n \
   --arg  gh_url  "$GH_URL" \
   --argjson color 16760576 \
   '{
-    username: "GSE: Tracker",
+    username: "ScaryLarryGames",
     embeds: [{
       title:  ("GSE: Tracker v" + $version + " - Now Live!"),
       url:    $cf_url,
