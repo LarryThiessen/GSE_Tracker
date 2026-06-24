@@ -56,7 +56,8 @@ NOTES=$(awk -v ver="## $VERSION" '$0==ver{f=1;next} /^## /{f=0} f' "$NOTES_FILE"
       -e 's/GSE/**GSE**/g' \
       -e 's/GS:E/**GS:E**/g' \
       -e 's/GSE Tracker/**GSE Tracker**/g' \
-      -e 's/Blizzard/**Blizzard**/g')
+      -e 's/Blizzard/**Blizzard**/g' \
+  | sed '$!G')   # blank line between bullets for breathing room
 
 # Gold #FFD100 = 16760576
 PAYLOAD=$(jq -n \
@@ -73,13 +74,12 @@ PAYLOAD=$(jq -n \
       title:  ("v" + $version + " — Now Live"),
       url:    $cf_url,
       color:  $color,
+      thumbnail: { url: "https://raw.githubusercontent.com/LarryThiessen/GSE_Tracker/main/media/GSE_Tracker_Round.png" },
       description: $notes,
       fields: [
-        { name: "Version",  value: $version, inline: true },
-        { name: "Type",     value: $type,    inline: true },
         {
-          name:   "Download",
-          value:  ("**[📦 CurseForge](" + $cf_url + ")**  •  [📎 GitHub Release](" + $gh_url + ")"),
+          name:   "📥  Download",
+          value:  ("**[CurseForge](" + $cf_url + ")**   •   [GitHub Release](" + $gh_url + ")"),
           inline: false
         }
       ],
