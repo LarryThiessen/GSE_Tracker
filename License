@@ -1,11 +1,32 @@
-Copyright (c) 2026 Larry A Thiessen
+GSE_Tracker License
+Copyright (c) 2026 Larry A. Thiessen ("ScaryLarryGames"). All Rights Reserved.
 
-All Rights Reserved.  
+1. GRANT. You are granted a personal, non-exclusive, non-transferable, revocable
+   license to download and use this software ("the Work") for your own personal,
+   non-commercial use in World of Warcraft, including modifying it for your own
+   personal use.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+2. RESTRICTIONS. You may NOT, without the prior written permission of the author:
+   (a) redistribute, re-host, re-upload, mirror, or publish the Work or any part
+       of it on any website, platform, or service (CurseForge, Wago, etc.);
+   (b) distribute or share modified or derivative versions of the Work;
+   (c) sell, license, sublicense, rent, or otherwise commercialize the Work or
+       any part of it, or include it in any paid or monetized product;
+   (d) remove or alter this license or any author or attribution notices.
+
+3. DISTRIBUTION. Official distribution of the Work is performed solely by the
+   author (e.g., via the author's CurseForge page).
+
+4. THIRD-PARTY LIBRARIES. Bundled libraries (e.g. the contents of any "Libs"
+   directory) are the property of their respective authors and remain licensed
+   under their own terms; this license does not apply to them.
+
+5. RESERVATION. All rights not expressly granted above are reserved by the author.
+
+6. NO WARRANTY. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO
+   EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES
+   OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+   ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+   DEALINGS IN THE SOFTWARE.
