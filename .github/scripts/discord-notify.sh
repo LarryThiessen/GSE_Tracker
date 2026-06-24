@@ -52,30 +52,29 @@ GH_URL="https://github.com/${GITHUB_REPOSITORY:-LarryThiessen/GSE_Tracker}/relea
 NOTES=$(awk -v ver="## $VERSION" '$0==ver{f=1;next} /^## /{f=0} f' "$NOTES_FILE" \
   | grep "^- " \
   | sed \
-      -e 's/^- /• /' \
+      -e 's/^- /* /' \
       -e 's/GSE/**GSE**/g' \
       -e 's/GS:E/**GS:E**/g' \
       -e 's/GSE Tracker/**GSE Tracker**/g' \
-      -e 's/Blizzard/**Blizzard**/g' \
-  | sed '$!G')   # blank line between bullets for breathing room
+      -e 's/Blizzard/**Blizzard**/g')
 
 # Closing signature block, appended to the bottom of the embed description.
-# NOTE: standard emoji must be real unicode (webhooks don't expand :shortcodes:).
-# Custom server emoji must be <:name:ID>; the three below use temporary unicode
-# placeholders until the real IDs are dropped in.
+# NOTE: emoji must be real unicode — webhooks do NOT expand :shortcodes:.
 FOOTER_BLOCK=$(cat <<'EOF'
+> 📥 **Download**
+> **[CurseForge](https://www.curseforge.com/wow/addons/gse-tracker)**
+
 Enjoy,
 **ScaryLarryGames!**
-> 📥 **[Download](https://www.curseforge.com/wow/addons/gse-tracker)** | 💻 **[GitHub](https://github.com/LarryThiessen/GSE_Tracker)** | 🐞 **[Bug Reports](https://github.com/LarryThiessen/GSE_Tracker/issues)**
-> 🧡 **[Patreon](https://www.patreon.com/ScaryLarryGames646)** | ☕ **[Ko-Fi!](https://ko-fi.com/scarylarrygames)** | 📕 **[SLG-Zygor's Affiliate!](https://zygorguides.com/ref/ScaryLarryGames/)** | 🪙 **Donations@Thrall**
+> 💖 **[Patreon](https://www.patreon.com/ScaryLarryGames646)** | ☕ **[Ko-Fi!](https://ko-fi.com/scarylarrygames)** | 🔗 **[SLG-Zygor's Affiliate!](https://zygorguides.com/ref/ScaryLarryGames/)** | 🪙 **Donations@Thrall**
+> 💻 **[GSE: Tracker - GitHub](https://github.com/LarryThiessen/GSE_Tracker)** | 🐞 **[GSE: Tracker - Bug Reports](https://github.com/LarryThiessen/GSE_Tracker/issues)**
 EOF
 )
 
-# Header line — sits at the TOP of the embed description as a heading.
-# (Custom emoji like :GSE_Tracker: only render in the description, never in the
-# embed title/author — so this lives here. Swap to <:GSE_Tracker:ID> once known.)
+# Header — sits at the TOP of the embed description ([VERSION]/[DATE] auto-filled).
 POST_DATE=$(date -u +'%B %-d, %Y')
-HEADER="## Update: ${POST_DATE} :GSE_Tracker: GSE: Tracker v${VERSION}"
+HEADER="## GSE: Tracker v${VERSION}
+Update: ${POST_DATE}"
 
 DESCRIPTION="${HEADER}
 
@@ -94,7 +93,6 @@ PAYLOAD=$(jq -n \
   '{
     username: "GSE: Tracker",
     embeds: [{
-      author: { name: "🔑  New Update Available" },
       color:  $color,
       thumbnail: { url: "https://raw.githubusercontent.com/LarryThiessen/GSE_Tracker/main/media/GSE_Tracker_Round.png" },
       description: $notes,
