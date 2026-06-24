@@ -66,7 +66,7 @@ FOOTER_BLOCK=$(cat <<'EOF'
 
 Enjoy,
 **ScaryLarryGames!**
-> 💖 **[Patreon](https://www.patreon.com/ScaryLarryGames646)** | ☕ **[Ko-Fi!](https://ko-fi.com/scarylarrygames)** | 🔗 **[SLG-Zygor's Affiliate!](https://zygorguides.com/ref/ScaryLarryGames/)** | 🪙 **Donations@Thrall**
+> 💖 **[Patreon](https://www.patreon.com/ScaryLarryGames646)** | ☕ **[Ko-Fi!](https://ko-fi.com/scarylarrygames)** | 🔗 **[SLG-Zygor's Affiliate!](https://zygorguides.com/ref/ScaryLarryGames/)**
 > 💻 **[GSE: Tracker - GitHub](https://github.com/LarryThiessen/GSE_Tracker)** | 🐞 **[GSE: Tracker - Bug Reports](https://github.com/LarryThiessen/GSE_Tracker/issues)**
 EOF
 )
