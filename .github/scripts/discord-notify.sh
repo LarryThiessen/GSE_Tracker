@@ -71,10 +71,9 @@ Enjoy,
 EOF
 )
 
-# Header — sits at the TOP of the embed description ([VERSION]/[DATE] auto-filled).
+# Date line at the top of the description (version now lives in the embed title).
 POST_DATE=$(date -u +'%B %-d, %Y')
-HEADER="## GSE: Tracker v${VERSION}
-Update: ${POST_DATE}"
+HEADER="Update: ${POST_DATE}"
 
 DESCRIPTION="${HEADER}
 
@@ -93,6 +92,8 @@ PAYLOAD=$(jq -n \
   '{
     username: "GSE: Tracker",
     embeds: [{
+      title:  ("v" + $version + " — Now Live"),
+      url:    $cf_url,
       color:  $color,
       thumbnail: { url: "https://raw.githubusercontent.com/LarryThiessen/GSE_Tracker/main/media/GSE_Tracker_Round.png" },
       description: $notes,
