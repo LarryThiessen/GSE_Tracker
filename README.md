@@ -6,14 +6,14 @@
 
 **<font color="#f06292">Meters</font> ·&nbsp; <font color="#ffd54f">Assisted Highlight</font> &nbsp;·&nbsp; <font color="#4fc3f7">Action Tracker</font> &nbsp; ·&nbsp;<font color="#4fc3f7">Quality of Life</font> &nbsp;**
 
-[![Version](https://img.shields.io/badge/Version-1.3.2-4fc3f7?style=for-the-badge&logoColor=white)](https://www.curseforge.com/wow/addons/gse-tracker)
-[![WoW](https://img.shields.io/badge/WoW-Retail-00b4d8?style=for-the-badge)](https://www.curseforge.com/wow/addons/gse-tracker)
+[![Version](https://img.shields.io/badge/Version-1.5.0-4fc3f7?style=for-the-badge&logoColor=white)](https://www.curseforge.com/wow/addons/gse-tracker)
+[![WoW](https://img.shields.io/badge/WoW-All%20Versions-00b4d8?style=for-the-badge)](https://www.curseforge.com/wow/addons/gse-tracker)
 [![License](https://img.shields.io/badge/License-MIT-ffd54f?style=for-the-badge)](License)
 [![CurseForge](https://img.shields.io/badge/CurseForge-Download-f16436?style=for-the-badge&logo=curseforge&logoColor=white)](https://www.curseforge.com/wow/addons/gse-tracker)
 
 <br>
 
-A clean, highly-customizable combat overlay for sequence &amp; macro users — **sequence tracking**, an **assisted-rotation highlight**, a **player marker**, and a **full built-in meters suite**, all in one addon.
+A clean, highly-customizable combat overlay for sequence &amp; macro users — **sequence tracking**, an **assisted-rotation highlight**, a **center marker**, and a **full built-in meters suite**, all in one addon.
 
 Integrates natively with **[GSE](https://www.curseforge.com/wow/addons/gse-gnome-sequencer-enhanced-advanced-macros)** when available, and also works with **Single-Button Assistant** and plain **manual keypresses**.
 
@@ -21,11 +21,10 @@ Integrates natively with **[GSE](https://www.curseforge.com/wow/addons/gse-gnome
 
 ---
 
-> [!CAUTION]
-> **CLEAN INSTALL RECOMMENDED**
+> [!IMPORTANT]
+> **SETTINGS RESET ONCE ON MAJOR UPDATES**
 >
-> After a major version update, a clean reinstall avoids broken settings, misplaced UI elements, or stale data.
-> Remove the previous **GSE: Tracker** folder before installing, and reset saved variables for the cleanest setup.
+> A major update resets **GSE: Tracker** to a fresh, curated default layout **one time** — your old settings are replaced on first login, then everything saves normally again. No manual reinstall needed; just re-apply any personal tweaks afterward.
 
 ---
 
@@ -44,7 +43,7 @@ Integrates natively with **[GSE](https://www.curseforge.com/wow/addons/gse-gnome
 | **<font color="#f06292">Meters</font>** | Details window, DPS/HPS/GCD readouts, combat timer |
 | **<font color="#ffd54f">Assisted Highlight</font>** | Highlight mode and target settings |
 | **<font color="#4fc3f7">Action Tracker</font>** | Full layout and visual control |
-| **<font color="#b0bec5">Adaptive Icon borders</font>** | Adaptive borders across the Action Tracker, Player Tracker, and Assisted Highlight |
+| **<font color="#b0bec5">Adaptive Icon borders</font>** | Adaptive borders across the Action Tracker, Center Marker, and Assisted Highlight |
 | **<font color="#ba68c8">Fonts</font>** | Sequence, Modifier, and Keybind fonts _(SharedMedia supported)_ |
 
 ---
@@ -106,18 +105,17 @@ Tracks the spells your sequence/macro fires and shows them as a clean, fully-con
 | Feature | Description |
 |---|---|
 | **<font color="#90a4ae">QoL extras</font>** | Mute spell-fizzle sounds, hide red error text, account-wide or per-character settings |
-| **<font color="#90a4ae">Rotation Matching System</font>** | Shows "PROC Type" Icon Center of Action Icons Scroll |
-| | "Assisted Highlight Match % - Additionally Shows what % of those matchs came fomr the SBAssist | 
-| | "Optional Audublie Alert when Matched - for Visually impaired Users |
-| **<font color="#90a4ae">Pressed Indicator</font>** | customizable shape (crosshairs, dots, faction icons, or your own image) |
-| | **pulses in sync with how fast you're pressing.** (Choose **None** to hide it.) |
+| **<font color="#90a4ae">Rotation Matching System</font>** | A **proc-style glow** flashes on the centre of the action-icon scroll when your cast matches the Assisted Highlight suggestion |
+| | **AH Match %** readout — plus what share of those matches came from the **Single-Button Assistant** |
+| | Optional **audible alert** on a match — for visually-impaired users |
+| **<font color="#90a4ae">Pressed Indicator</font>** | Customizable shape (crosshairs, dots, faction icons, or your own image) that **pulses in sync with how fast you're pressing** (choose **None** to hide it) |
 
 ---
 
 ## <font color="#ffb74d">Compatibility</font>
 
-All Versions of World of Warcraft
-Note: Some Features maybe Greyed out due to not being Avaible in your current version of the game.
+**All versions of World of Warcraft** — Retail and Classic (Mists of Pandaria, Burning Crusade, and Era).
+Note: some features may be greyed out if they aren't available in your current game version.
 
 ---
 
