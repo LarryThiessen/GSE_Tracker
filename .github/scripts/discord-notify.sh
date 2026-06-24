@@ -59,15 +59,17 @@ NOTES=$(awk -v ver="## $VERSION" '$0==ver{f=1;next} /^## /{f=0} f' "$NOTES_FILE"
       -e 's/Blizzard/**Blizzard**/g')
 
 # Closing signature block, appended to the bottom of the embed description.
-# NOTE: emoji must be real unicode — webhooks do NOT expand :shortcodes:.
+# NOTE: standard emoji must be real unicode (webhooks don't expand :shortcodes:).
+# Custom server emoji use <:name:ID> and only render where the webhook's server
+# has that emoji. IDs are recorded in memory (slg-discord-server-emoji).
 FOOTER_BLOCK=$(cat <<'EOF'
 > 📥 **Download**
 > **[CurseForge](https://www.curseforge.com/wow/addons/gse-tracker)**
 
 Enjoy,
 **ScaryLarryGames!**
-> 💖 **[Patreon](https://www.patreon.com/ScaryLarryGames646)** | ☕ **[Ko-Fi!](https://ko-fi.com/scarylarrygames)** | 🔗 **[SLG-Zygor's Affiliate!](https://zygorguides.com/ref/ScaryLarryGames/)** | 🪙 **Donations@Thrall**
-> 💻 **[GitHub](https://github.com/LarryThiessen/GSE_Tracker)** | 🐞 **[Bug Reports](https://github.com/LarryThiessen/GSE_Tracker/issues)**
+> <:patreon:1267928494726447177> **[Patreon](https://www.patreon.com/ScaryLarryGames646)** | <:kofi:1274519101879881900> **[Ko-Fi!](https://ko-fi.com/scarylarrygames)** | <:Zygor:1276556758344532159> **[SLG-Zygor's Affiliate!](https://zygorguides.com/ref/ScaryLarryGames/)** | 🪙 **Donations@Thrall**
+> <:GitHub:1282517945381032079> **[GitHub](https://github.com/LarryThiessen/GSE_Tracker)** | 🐞 **[Bug Reports](https://github.com/LarryThiessen/GSE_Tracker/issues)**
 EOF
 )
 
