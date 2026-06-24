@@ -59,11 +59,27 @@ NOTES=$(awk -v ver="## $VERSION" '$0==ver{f=1;next} /^## /{f=0} f' "$NOTES_FILE"
       -e 's/Blizzard/**Blizzard**/g' \
   | sed '$!G')   # blank line between bullets for breathing room
 
+# Closing signature block, appended to the bottom of the embed description.
+# NOTE: standard emoji must be real unicode (webhooks don't expand :shortcodes:).
+# Custom server emoji must be <:name:ID>; the three below use temporary unicode
+# placeholders until the real IDs are dropped in.
+FOOTER_BLOCK=$(cat <<'EOF'
+Enjoy,
+**ScaryLarryGames!**
+> 📥 **[Download](https://www.curseforge.com/wow/addons/gse-tracker)** | 💻 **[GitHub](https://github.com/LarryThiessen/GSE_Tracker)** | 🐞 **[Bug Reports](https://github.com/LarryThiessen/GSE_Tracker/issues)**
+> 🧡 **[Patreon](https://www.patreon.com/ScaryLarryGames646)** | ☕ **[Ko-Fi!](https://ko-fi.com/scarylarrygames)** | 📕 **[SLG-Zygor's Affiliate!](https://zygorguides.com/ref/ScaryLarryGames/)** | 🪙 **Donations@Thrall**
+EOF
+)
+
+DESCRIPTION="${NOTES}
+
+${FOOTER_BLOCK}"
+
 # Gold #FFD100 = 16760576
 PAYLOAD=$(jq -n \
   --arg  version "$VERSION" \
   --arg  type    "$TYPE" \
-  --arg  notes   "$NOTES" \
+  --arg  notes   "$DESCRIPTION" \
   --arg  cf_url  "$CF_URL" \
   --arg  gh_url  "$GH_URL" \
   --argjson color 16760576 \
@@ -76,13 +92,6 @@ PAYLOAD=$(jq -n \
       color:  $color,
       thumbnail: { url: "https://raw.githubusercontent.com/LarryThiessen/GSE_Tracker/main/media/GSE_Tracker_Round.png" },
       description: $notes,
-      fields: [
-        {
-          name:   "📥  Download",
-          value:  ("**[CurseForge](" + $cf_url + ")**   •   [GitHub Release](" + $gh_url + ")"),
-          inline: false
-        }
-      ],
       footer:    { text: "World of Warcraft · GSE: Tracker" },
       timestamp: (now | todate)
     }]
