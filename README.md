@@ -38,19 +38,19 @@ Integrates natively with **[GSE](https://www.curseforge.com/wow/addons/gse-gnome
 
 | Option Group | Description |
 |---|---|
-| **<font color="#ba68c8">Unlocking</font>** | Shows Example **live previews** |
+| **<font color="#ba68c8">Unlocking</font>** | Native **Edit Mode** integration with example **live previews** (drag or arrow-key nudge) |
 | **<font color="#ef5350">Performance mode</font>** | Drops visual effects &amp; animations for maximum FPS |
-| **<font color="#f06292">Meters</font>** | Details window, DPS/HPS/GCD readouts, combat timer |
-| **<font color="#ffd54f">Assisted Highlight</font>** | Highlight mode and target settings |
-| **<font color="#4fc3f7">Action Tracker</font>** | Full layout and visual control |
+| **<font color="#f06292">Meters</font>** | Details window, DPS/HPS/GCD readouts, Center Marker, combat timer |
+| **<font color="#ffd54f">Assisted Highlight</font>** | Highlight mode, anchor, and target settings |
+| **<font color="#4fc3f7">Action Tracker</font>** | Full layout, scaling, and visual control |
 | **<font color="#b0bec5">Adaptive Icon borders</font>** | Adaptive borders across the Action Tracker, Center Marker, and Assisted Highlight |
-| **<font color="#ba68c8">Fonts</font>** | Sequence, Modifier, and Keybind fonts _(SharedMedia supported)_ |
+| **<font color="#ba68c8">Fonts</font>** | Sequence, Modifier, and Keybind fonts, with outline _(SharedMedia supported)_ |
 
 ---
 
 ## <font color="#64b5f6">Looks Like *Your* UI</font>
 
-The tracker **adopts your action-bar skin automatically** — borders, masks, and fonts are pulled **live** from your skinner, so it never looks bolted-on:
+The tracker **adopts your action-bar skin automatically** — borders, masks, and fonts are pulled **live** from your skinner, so it never looks bolted-on (or force Blizzard-native):
 
 ![Blizzard](https://img.shields.io/badge/Blizzard%20Default-2a2a2a?style=flat-square)
 ![ActionBarsEnhanced](https://img.shields.io/badge/ActionBarsEnhanced-2a2a2a?style=flat-square)
@@ -68,19 +68,20 @@ The tracker **adopts your action-bar skin automatically** — borders, masks, an
 
 A self-contained damage/utility meter set — no second meters addon required.
 
-| Meter | What it shows |
-|-------|---------------|
-| **Live readouts** | Lightweight **DPS**, **HPS**, **GCD**, and Single-Button Assistant-usage values |
-| **Details Window** | **Damage / Healing / Dispels / Interrupts** tabs, expandable pet &amp; spell grouping |
-| | **Combat-session paging** | Step back through your **last 10 fights** with the title-bar arrows |
-| | **Combat timer** | Docked fight timer |
-| **Center Marker** | Find your character during busy, movement-heavy encounters - with selectable symbols, size, color (incl. class color), and show-when rules. |
+| Feature | What it shows |
+|---|---|
+| **Live readouts** | Lightweight **DPS**, **HPS**, **GCD swipe**, and **Single-Button Assistant** usage — with an adjustable refresh rate |
+| **Details window** | **Damage / Healing / Dispels / Interrupts** tabs, expandable **pet &amp; spell grouping**, **last-10-fights** session paging (title-bar arrows), and a docked **combat timer** |
+| **Drill-down** | **Right-click any row** to break down that specific combatant |
+| **Skinned breakdown** | Class-coloured bars with your **font** (SharedMedia) and **bar texture**; the window is **resizable, movable, and pinnable** |
+| **Meter source** | Use the built-in **GSE: Tracker Skinner**, **Details!**, or **Blizzard's** meter details |
+| **Center Marker** | Find your character during busy, movement-heavy encounters — selectable symbols (crosshairs, faction, class/spec, or your own image), size, colour (incl. class colour), show-when rules, and **Press Detection** that pulses on input |
 
 ### <font color="#ffd54f">Assisted Highlight</font>
 
 <font color="#4fc3f7">Anchor Points:</font> Screen | Mouse Cursor | Target Portrait
 
-A flexible rotation-assist highlight that mirrors your suggested next ability **wherever you want it** - anchored to the **screen**, following the **mouse cursor**, or shown over the **target's portrait** (auto-sized and rounded to match). Optional **keybind + stack/charge count**, **range checking** (red-tints when out of range), and a **GCD swipe**.
+A flexible rotation-assist highlight that mirrors your suggested next ability **wherever you want it** - anchored to the **screen**, following the **mouse cursor**, or shown over the **target's portrait** (auto-sized and rounded to match). Optional **keybind + stack/charge count**, **range checking** (red-tints when out of range), and a **GCD swipe** — plus adjustable **size, opacity, border**, and **class / custom colour**.
 
 ### <font color="#4fc3f7">Action Tracker</font>
 
@@ -89,10 +90,12 @@ Tracks the spells your sequence/macro fires and shows them as a clean, fully-con
 | Option | Description |
 |--------|-------------|
 | **Live preview** | See every change instantly while you configure |
-| **Independent elements** | The **Sequence / Macro / Spell** name, **modifier keys**, text can each be toggled, resized, and repositioned on their own |
+| **Independent elements** | The **Sequence / Macro / Spell** name, **modifier keys**, and **keybind** can each be toggled, resized, and repositioned on their own (incl. **Swap Name ⇄ ModKeys**) |
 | **Free movement** | Drag any element anywhere, or set precise **X / Y** values |
-| **Layouts** | Horizontal or vertical, with adjustable icon count, spacing |
+| **Layouts** | Horizontal or vertical — vertical adds **per-icon spell names** beside each icon (class-coloured) — with adjustable icon count and spacing |
 | **Scroll Direction** | Left, Right, Up, or Down |
+| **Scale** | Scale the whole tracker (icons + text); matches your action bar at **1.00** |
+| **Auto-fade** | Names fade out a few seconds after you stop casting — **in or out of combat** |
 
 ### <font color="#9575cd">Input &amp; Sequence Awareness</font>
 
