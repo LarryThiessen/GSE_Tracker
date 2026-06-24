@@ -92,7 +92,7 @@ PAYLOAD=$(jq -n \
   '{
     username: "GSE: Tracker",
     embeds: [{
-      title:  ("v" + $version + " — Now Live"),
+      title:  ("GSE: Tracker v" + $version + " - Now Live!"),
       url:    $cf_url,
       color:  $color,
       thumbnail: { url: "https://raw.githubusercontent.com/LarryThiessen/GSE_Tracker/main/media/GSE_Tracker_Round.png" },
