@@ -75,6 +75,11 @@ DESCRIPTION="${NOTES}
 
 ${FOOTER_BLOCK}"
 
+# Header line — rendered as an H1 in the message content, above the embed card.
+# :GSE_Tracker: is a custom server emoji; swap to <:GSE_Tracker:ID> once known.
+POST_DATE=$(date -u +'%B %-d, %Y')
+HEADER="# Update: ${POST_DATE} :GSE_Tracker: GSE: Tracker v${VERSION}"
+
 # Gold #FFD100 = 16760576
 PAYLOAD=$(jq -n \
   --arg  version "$VERSION" \
@@ -83,8 +88,10 @@ PAYLOAD=$(jq -n \
   --arg  cf_url  "$CF_URL" \
   --arg  gh_url  "$GH_URL" \
   --argjson color 16760576 \
+  --arg  header  "$HEADER" \
   '{
     username: "GSE: Tracker",
+    content: $header,
     embeds: [{
       author: { name: "🔑  New Update Available" },
       title:  ("v" + $version + " — Now Live"),
