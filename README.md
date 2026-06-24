@@ -8,7 +8,7 @@
 
 [![Version](https://img.shields.io/badge/Version-1.5.0-4fc3f7?style=for-the-badge&logoColor=white)](https://www.curseforge.com/wow/addons/gse-tracker)
 [![WoW](https://img.shields.io/badge/WoW-All%20Versions-00b4d8?style=for-the-badge)](https://www.curseforge.com/wow/addons/gse-tracker)
-[![License](https://img.shields.io/badge/License-MIT-ffd54f?style=for-the-badge)](License)
+[![License](https://img.shields.io/badge/License-All%20Rights%20Reserved-ffd54f?style=for-the-badge)](License)
 [![CurseForge](https://img.shields.io/badge/CurseForge-Download-f16436?style=for-the-badge&logo=curseforge&logoColor=white)](https://www.curseforge.com/wow/addons/gse-tracker)
 
 <br>
