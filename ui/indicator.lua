@@ -332,12 +332,9 @@ function UI:RefreshPressedIndicator(force)
   elseif defaults and defaults.enabled ~= nil then
     enabled = defaults.enabled and true or false
   end
-  -- The indicator is now parented to UIParent (independent of the tracker frame's
-  -- visibility) so a left-on spammer shows even when the tracker is hidden. But it
-  -- must still respect the addon being turned off entirely.
-  if enabled and self.IsEnabled and not self:IsEnabled() then
-    enabled = false
-  end
+  -- The Pressed Indicator is its OWN element, SEPARATE from the Action Tracker. It is governed solely by
+  -- its own enable (above) -- NOT by the Action Tracker's enable (IsEnabled). It's parented to UIParent,
+  -- so it shows even when the tracker frame is hidden or the Action Tracker is disabled.
 
   local inCombat = (API.InCombatLockdown and API.InCombatLockdown()) and true or false
   local editing = addon._editingOptions or (self.IsEditModePreviewActive and self:IsEditModePreviewActive()) or false

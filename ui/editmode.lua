@@ -395,9 +395,14 @@ local function ShowBoxes(show)
         -- nudge => which element the arrow keys move when this box is selected.
         -- padVHorizontal: in HORIZONTAL layout the Sequence/Spell name rows sit above & below the icon
         -- row, outside the frame bounds, so SetAllPoints clipped them -- grow the box 10px top & bottom.
-        { frame = _G.GSE_TrackerFrame or (UI and UI.ui), label = "Action Tracker",     tab = 2, nudge = "actiontracker", padVHorizontal = 20 },
-        { frame = _G.MetersAnchor,                       label = "Meters",             tab = 1, fit = "meters", nudge = "meters" },
-        { frame = addon.assistedHighlightFrame,          label = "Assisted Highlight", tab = 3, nudge = "ah" },
+        -- enabledGet => a box is shown in Edit Mode ONLY while its element's Enable checkbox (General tab)
+        -- is ticked. A disabled element shows no example AND no selection box.
+        { frame = _G.GSE_TrackerFrame or (UI and UI.ui), label = "Action Tracker",     tab = 2, nudge = "actiontracker", padVHorizontal = 20,
+          enabledGet = function() return (addon.IsEnabled and addon:IsEnabled()) and true or false end },
+        { frame = _G.MetersAnchor,                       label = "Meters",             tab = 1, fit = "meters", nudge = "meters",
+          enabledGet = function() return (_G.MetersSavedVars == nil) or (_G.MetersSavedVars.enabled ~= false) end },
+        { frame = addon.assistedHighlightFrame,          label = "Assisted Highlight", tab = 3, nudge = "ah",
+          enabledGet = function() return (addon.IsAssistedHighlightMirrorEnabled and addon:IsAssistedHighlightMirrorEnabled()) and true or false end },
         -- Pressed Indicator: its own element now (tab 4). The box drag saves an ELEMENT offset (saveDrag),
         -- since the indicator is positioned relative to the Action Tracker, not by its own OnDragStop.
         -- The indicator frame is tiny (the symbol is only a few px) and it sits OVER the Action Tracker
@@ -406,6 +411,11 @@ local function ShowBoxes(show)
         -- overlapping box can't swallow its clicks/mouseover.
         { frame = (UI and UI.ui and UI.ui.pressedIndicator), label = "Pressed Indicator", tab = 4, nudge = "pressedindicator",
           minBox = 48, raise = true,
+          enabledGet = function()
+            local cfg = addon.GetElementLayout and addon:GetElementLayout("pressedIndicator")
+            if type(cfg) == "table" and cfg.enabled ~= nil then return cfg.enabled and true or false end
+            return true
+          end,
           saveDrag = function()
             if addon.StorePressedIndicatorDragOffset_Internal then addon:StorePressedIndicatorDragOffset_Internal() end
             if addon.ApplyElementPosition then addon:ApplyElementPosition("pressedIndicator") end
@@ -415,7 +425,8 @@ local function ShowBoxes(show)
         local box = EnsureBox(t.frame, t.label, t.tab, t.saveDrag)
         if box then
             box._nudgeKind = t.nudge
-            if show then
+            -- Disabled element -> no Edit Mode box (treated exactly like Edit Mode being closed for it).
+            if show and (not t.enabledGet or t.enabledGet()) then
                 box:Show()
                 -- Start every non-selected box with keyboard OFF so no stray box (esp. the DIALOG-strata
                 -- Pressed Indicator box) holds arrow-key focus before the user clicks one.
@@ -473,7 +484,8 @@ local function ShowBoxes(show)
                 end
             else
                 box:Hide(); box.isSelected = false
-                box:EnableKeyboard(false)  -- release arrow-key capture when Edit Mode closes
+                box:EnableKeyboard(false)  -- release arrow-key capture when Edit Mode closes / element disabled
+                if selectedBox == box then selectedBox = nil end  -- don't keep a hidden box selected
             end
         end
     end
@@ -492,6 +504,19 @@ local function ShowBoxes(show)
             mon:EnableKeyboard(true)
         end
     end
+end
+
+-- Live box refresh: re-run ShowBoxes while Edit Mode is open so toggling an element's enable in the
+-- options shows/hides its selection box immediately. Called from the options panel's RunRefreshers.
+function _G.GSETracker_RefreshEditModeBoxes()
+    if not addon._editingOptions then return end
+    ShowBoxes(true)
+    -- Re-apply tracker visibility so enabling/disabling the Action Tracker shows/hides its frame +
+    -- examples live (ApplyVisibility now hides a disabled tracker even in Edit Mode).
+    if addon.ApplyVisibility then pcall(addon.ApplyVisibility, addon) end
+    -- Re-evaluate the Center Marker so disabling Meters hides it live (it lives in the Meters cluster).
+    if addon.RefreshCenterMarker then pcall(addon.RefreshCenterMarker, addon)
+    elseif addon.RefreshCombatMarker then pcall(addon.RefreshCombatMarker, addon) end
 end
 
 -- Lock/unlock ALL GSE_Tracker frames at once (was the removed "Lock All" option). Lock state is now

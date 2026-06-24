@@ -656,6 +656,12 @@ function UI:ShouldShowCombatMarker(forceOverride)
   if _G.MetersSavedVars and _G.MetersSavedVars.markerHidden then
     return false
   end
+  -- Meters DISABLED in the options = the Center Marker (it lives in the Meters cluster) is off too,
+  -- EVERYWHERE -- including Edit Mode / preview and Press Detection. Checked before the forceOverride /
+  -- editing-tab path below, which would otherwise force it visible while Meters is turned off.
+  if _G.MetersSavedVars and _G.MetersSavedVars.enabled == false then
+    return false
+  end
   -- The Center Marker is pinned to the Meters readout's centre and has NO independent
   -- enable/show of its own -- it simply follows the Meters frame's visibility: shown when
   -- the Meters readout is shown, hidden otherwise. (forceOverride / editing-tab preview

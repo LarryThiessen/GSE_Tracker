@@ -495,6 +495,12 @@ local function ApplyUnlockedPreviewDisplay()
     if MetersSavedVars.locked or InCombatLock() then
         return false
     end
+    -- Meters disabled in the options = no Edit Mode preview either (hide the whole cluster). Without this,
+    -- the unlocked preview would re-show the example readouts even when Meters is turned off.
+    if MetersSavedVars.enabled == false then
+        anchor:Hide()
+        return false
+    end
 
     ApplyEffectiveOpacity()
     anchor:Show()

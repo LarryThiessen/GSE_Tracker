@@ -1,3 +1,10 @@
+## 1.5.1
+
+### Fixed
+- **Disabled elements no longer show in Edit Mode.** Turning off **Meters**, **Action Tracker**, **Assisted Highlight**, or the **Pressed Indicator** in the Enable list now removes its example *and* its selection box, and greys out that row's **Edit Mode** button. The **Center Marker** (part of Meters) hides with Meters too.
+- **Pressed Indicator is fully independent of the Action Tracker** — enabling it shows it (in Edit Mode and in play) even when the Action Tracker is disabled.
+- **Minimap button:** right-click no longer hides it (a one-misclick footgun — use Options → **Show Minimap Button** to toggle), and it now sits tighter on the ring edge.
+
 ## 1.5.0
 
 ### ⚠ Heads up

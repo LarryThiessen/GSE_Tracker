@@ -27,6 +27,9 @@ local function RunRefreshers()
     local ok = pcall(fn)
     if not ok then end -- a stale control (pane rebuilt) just no-ops
   end
+  -- If Edit Mode is open, re-evaluate the selection boxes so toggling an element on/off in the options
+  -- shows/hides its Edit Mode box live (not only on the next Edit Mode open).
+  if _G.GSETracker_RefreshEditModeBoxes then pcall(_G.GSETracker_RefreshEditModeBoxes) end
 end
 
 local refreshPending = false
@@ -490,6 +493,22 @@ local function MakeButton(pane, y, desc)
     hdr:SetPoint("BOTTOMLEFT", b, "TOPLEFT", 5, 5)
     hdr:SetText(desc.spanHeader)
     hdr:SetTextColor(1, 1, 1)
+  end
+  -- Grey the button out (and block the click) when its element is disabled. A disabled button takes no
+  -- clicks, so the secure macro can't fire either. Re-evaluated on every settings change (RunRefreshers).
+  if desc.disableGet then
+    local disableGet = ResolveGet(desc.disableGet)
+    local function applyDisabled()
+      if disableGet() then
+        if b.Disable then b:Disable() end
+        b:SetAlpha(0.4)
+      else
+        if b.Enable then b:Enable() end
+        b:SetAlpha(1)
+      end
+    end
+    applyDisabled()
+    activeRefreshers[#activeRefreshers + 1] = applyDisabled
   end
   if desc.spanRight then return 0 end  -- overlays the rows beside it; takes no vertical space
   if desc.center then CenterPaneRow(pane, { b }, 16, desc.width or 150) end
@@ -1896,6 +1915,19 @@ local function PopulateNative(pane, rows)
   RunRefreshers()
 end
 
+-- Per-tab "is this element DISABLED?" check -- greys out the row's Edit Mode button so you can't enter
+-- Edit Mode for an element that won't show anything. (1=Meters, 2=Action Tracker, 3=Assisted Highlight,
+-- 4=Pressed Indicator -- same enable sources as the Enable checkboxes + ui/editmode.lua box gating.)
+local EDITMODE_DISABLE = {
+  [1] = function() return _G.MetersSavedVars and _G.MetersSavedVars.enabled == false end,
+  [2] = function() return addon.IsEnabled and not addon:IsEnabled() end,
+  [3] = function() return addon.IsAssistedHighlightMirrorEnabled and not addon:IsAssistedHighlightMirrorEnabled() end,
+  [4] = function()
+    local cfg = addon.GetElementLayout and addon:GetElementLayout("pressedIndicator")
+    return type(cfg) == "table" and cfg.enabled == false
+  end,
+}
+
 -- A small "Edit Mode" button pinned to the RIGHT of an enable/show row (spanRight -> overlays the row,
 -- takes no height). Enters Edit Mode via the secure /editmode macro, then opens that element's options
 -- panel (tabIdx into EDITMODE_TABS: Meters=1, Action Tracker=2, Assisted Highlight=3). See ui/editmode.lua.
@@ -1903,6 +1935,7 @@ local function EditModeButtonDesc(tabIdx, headerText)
   return {
     type = "button", label = "Edit Mode", red = true, spanRight = true, width = 92, height = 24, rightInset = 16,
     spanHeader = headerText,  -- white column label drawn above this button (set only on the top row)
+    disableGet = tabIdx and EDITMODE_DISABLE[tabIdx] or nil,  -- grey out when the element is disabled
     tooltip = "Enter Edit Mode and open this element's options. (Can't be entered during combat.)",
     secureMacro = function()
       if _G.SlashCmdList and _G.SlashCmdList.EDITMODE and _G.SLASH_EDITMODE1 then return _G.SLASH_EDITMODE1 end

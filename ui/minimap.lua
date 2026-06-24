@@ -83,11 +83,11 @@ local function SaveAngle(value)
 end
 
 local function GetRadius(minimap)
-  -- Match LibDBIcon: (minimap width / 2) + 5 so the button sits ON the ring edge.
-  -- The old (width/2 - 10) pulled it 15px too far inward.
+  -- (minimap width / 2) + 3 so the button hugs the ring edge. (LibDBIcon uses +5, which sat 2px too
+  -- far out on this minimap; +3 pulls it onto the ring. Old (width/2 - 10) was 15px too far inward.)
   local width = minimap and minimap.GetWidth and minimap:GetWidth() or 140
   local size = tonumber(width) or 140
-  return (size * 0.5) + 5
+  return (size * 0.5) + 3
 end
 
 local function ApplyPosition(button, angle)
@@ -157,7 +157,6 @@ local function UpdateTooltip(button)
   GameTooltip:SetText(title)
   GameTooltip:AddLine("Left Click: |cffffff00Open settings|r", 0.85, 0.85, 0.85)
   GameTooltip:AddLine("Left Drag: |cffffff00Move button|r", 0.85, 0.85, 0.85)
-  GameTooltip:AddLine("Right Click: |cffffff00Hide button|r", 0.85, 0.85, 0.85)
   GameTooltip:Show()
 end
 
@@ -252,13 +251,9 @@ function UI:EnsureMinimapButton()
         elseif addon.ToggleSettingsWindow then
           addon:ToggleSettingsWindow()
         end
-      elseif mouseButton == "RightButton" then
-        if addon.SetMinimapHidden then
-          addon:SetMinimapHidden(true)
-        end
-        if GameTooltip then GameTooltip:Hide() end
-        selfButton:Hide()
       end
+      -- Right-click no longer hides the button (it was a one-misclick footgun). Hide/show it from
+      -- Options > General > "Show Minimap Button".
     end)
 
     button:SetScript("OnDragStart", function(selfButton)

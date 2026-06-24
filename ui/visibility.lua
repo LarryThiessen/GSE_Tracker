@@ -276,7 +276,9 @@ function UI:ApplyVisibility()
     editingOverride = true
   end
   local actionTrackerEnabled = not (self.IsEnabled and not self:IsEnabled())
-  if not actionTrackerEnabled and not editingOverride then
+  if not actionTrackerEnabled then
+    -- Disabled in the options = hidden EVERYWHERE, including Edit Mode. editingOverride no longer
+    -- force-shows a disabled Action Tracker, so a turned-off element shows no frame/example/box.
     show = false
   elseif self.EvaluateVisibilityMode then
     show = self:EvaluateVisibilityMode(mode, inCombat, hasTarget, editingOverride)

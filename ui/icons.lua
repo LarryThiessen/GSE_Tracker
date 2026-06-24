@@ -1378,6 +1378,11 @@ function UI:IsEditModePreviewActive()
   end
   if not editing then return false end
 
+  -- The Action Tracker is DISABLED in the options -> no example icons/name/keybind/modkeys in Edit Mode
+  -- (its selection box is gated separately in ui/editmode.lua). Every AT preview element gates on this
+  -- one signal, so this hides the whole Action Tracker preview when it's turned off.
+  if self.IsEnabled and not self:IsEnabled() then return false end
+
   -- Read combat LIVE, not from the cached ui._combatState. A stale/stuck cached flag (e.g. a missed
   -- PLAYER_REGEN_ENABLED leaving _combatState == true) would make this return false and silently hide
   -- the ENTIRE Edit Mode preview -- every example icon, name, keybind and modkey -- even though Edit
