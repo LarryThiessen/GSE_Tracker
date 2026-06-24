@@ -71,14 +71,17 @@ Enjoy,
 EOF
 )
 
-DESCRIPTION="${NOTES}
+# Header line — sits at the TOP of the embed description as a heading.
+# (Custom emoji like :GSE_Tracker: only render in the description, never in the
+# embed title/author — so this lives here. Swap to <:GSE_Tracker:ID> once known.)
+POST_DATE=$(date -u +'%B %-d, %Y')
+HEADER="## Update: ${POST_DATE} :GSE_Tracker: GSE: Tracker v${VERSION}"
+
+DESCRIPTION="${HEADER}
+
+${NOTES}
 
 ${FOOTER_BLOCK}"
-
-# Header line — rendered as an H1 in the message content, above the embed card.
-# :GSE_Tracker: is a custom server emoji; swap to <:GSE_Tracker:ID> once known.
-POST_DATE=$(date -u +'%B %-d, %Y')
-HEADER="# Update: ${POST_DATE} :GSE_Tracker: GSE: Tracker v${VERSION}"
 
 # Gold #FFD100 = 16760576
 PAYLOAD=$(jq -n \
@@ -88,14 +91,10 @@ PAYLOAD=$(jq -n \
   --arg  cf_url  "$CF_URL" \
   --arg  gh_url  "$GH_URL" \
   --argjson color 16760576 \
-  --arg  header  "$HEADER" \
   '{
     username: "GSE: Tracker",
-    content: $header,
     embeds: [{
       author: { name: "🔑  New Update Available" },
-      title:  ("v" + $version + " — Now Live"),
-      url:    $cf_url,
       color:  $color,
       thumbnail: { url: "https://raw.githubusercontent.com/LarryThiessen/GSE_Tracker/main/media/GSE_Tracker_Round.png" },
       description: $notes,
