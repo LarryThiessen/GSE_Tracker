@@ -47,8 +47,10 @@ else
 fi
 GH_URL="https://github.com/${GITHUB_REPOSITORY:-LarryThiessen/GSE_Tracker}/releases/tag/v${VERSION}"
 
-# Format notes: bullets, auto-bold key terms
-NOTES=$(grep "^- " "$NOTES_FILE" \
+# Format notes: pull ONLY the current version's section (between "## $VERSION"
+# and the next "## " heading), then its bullets — auto-bold key terms.
+NOTES=$(awk -v ver="## $VERSION" '$0==ver{f=1;next} /^## /{f=0} f' "$NOTES_FILE" \
+  | grep "^- " \
   | sed \
       -e 's/^- /• /' \
       -e 's/GSE/**GSE**/g' \
@@ -57,7 +59,7 @@ NOTES=$(grep "^- " "$NOTES_FILE" \
       -e 's/Blizzard/**Blizzard**/g')
 
 # Gold #FFD100 = 16760576
-jq -n \
+PAYLOAD=$(jq -n \
   --arg  version "$VERSION" \
   --arg  type    "$TYPE" \
   --arg  notes   "$NOTES" \
@@ -84,7 +86,20 @@ jq -n \
       footer:    { text: "World of Warcraft · GSE: Tracker" },
       timestamp: (now | todate)
     }]
-  }' \
-| curl -s -X POST "$DISCORD_WEBHOOK" \
-    -H "Content-Type: application/json" \
-    -d @-
+  }')
+
+# POST, capture HTTP status + body so failures are visible (curl -s alone
+# returns exit 0 even on HTTP 4xx, which previously masked rejected embeds).
+HTTP_CODE=$(printf '%s' "$PAYLOAD" \
+  | curl -s -o /tmp/discord_resp.txt -w "%{http_code}" \
+      -X POST "$DISCORD_WEBHOOK" \
+      -H "Content-Type: application/json" \
+      -d @-)
+
+echo "Discord responded HTTP $HTTP_CODE"
+echo "Response body: $(cat /tmp/discord_resp.txt)"
+
+if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+    echo "::error::Discord rejected the notification (HTTP $HTTP_CODE)"
+    exit 1
+fi
