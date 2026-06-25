@@ -230,7 +230,16 @@ local function GetActiveActionIconMask()
       local atlas = mask.GetAtlas and mask:GetAtlas()
       local file = (mask.GetTextureFilePath and mask:GetTextureFilePath())
         or (mask.GetTexture and mask:GetTexture())
-      if (atlas and atlas ~= "") or (file and file ~= "") then
+      -- GetTexture() returns a NEGATIVE fileDataID for atlas-backed masks (and 0 / ""
+      -- for none). SetTexture can't store a negative id -> "integer overflow attempting
+      -- to store 4294966418" (-878 as uint32). Only keep a non-empty string path or a
+      -- positive fileDataID; anything else falls through to the next button / no mask.
+      if type(file) == "number" then
+        if file <= 0 then file = nil end
+      elseif type(file) ~= "string" or file == "" then
+        file = nil
+      end
+      if (atlas and atlas ~= "") or file then
         -- Real mask:icon ratio when readable; otherwise the Blizzard mask's intrinsic
         -- 64:45 (some buttons report a ~0 width even with an active rounding mask) so
         -- the opaque centre still covers the icon.

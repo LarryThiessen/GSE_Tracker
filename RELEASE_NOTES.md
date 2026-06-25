@@ -1,3 +1,9 @@
+## 1.5.2
+
+### Fixed
+- **Fixed a Lua error on login** ("integer overflow attempting to store…") that came from adopting an action bar's icon mask. The error aborted the UI rebuild partway through.
+- **Pressed Indicator no longer resets to centre after a reload/relog.** That was a side effect of the error above — the aborted rebuild never re-applied the indicator's saved position. Your saved position is now restored correctly.
+
 ## 1.5.1
 
 ### Fixed
