@@ -337,6 +337,12 @@ local function SoundOptionsShort()
       if id then list[#list + 1] = { value = "kit:" .. id, text = e.text } end
     end
   end
+  -- Bundled custom sounds (media/bloop.mp3 + media/sounds/*), registered with LSM in ui/modkey_stack.lua.
+  if _G.GSETracker_BundledSounds then
+    for _, s in ipairs(_G.GSETracker_BundledSounds) do list[#list + 1] = s end
+  end
+  -- Alphabetical (case-insensitive) so the list is easy to scan -- kits + custom sounds intermixed.
+  table.sort(list, function(a, b) return tostring(a.text):lower() < tostring(b.text):lower() end)
   return list
 end
 
@@ -1858,13 +1864,21 @@ local function PopulateNative(pane, rows)
       local row1 = NRow(pane, y)
       local cb1, lbl1 = NCheck(row1, r.label, ResolveGet(r.get), ResolveSet(r.set), nil, r.tooltip)
       adv()
+      -- AH Animated -- sits directly BELOW AH Match %% (above Match Audible).
+      local cbA, lblA, rowA
+      if r.animGet then
+        rowA = NRow(pane, y)
+        cbA, lblA = NCheck(rowA, r.animLabel, ResolveGet(r.animGet), ResolveSet(r.animSet), nil, r.animTooltip)
+        adv()
+      end
       local row2 = NRow(pane, y)
       local cb2, lbl2 = NCheck(row2, r.label2, ResolveGet(r.audGet), ResolveSet(r.audSet), nil, r.tooltip2)
       local dd = NDropdown(row2, r.ddoptions, ResolveGet(r.ddget), ResolveSet(r.ddset), r.tooltip2, r.label2)
       adv()
-      -- Shift BOTH checkbox+label groups right 10px (move the checkboxes; their labels are anchored off
+      -- Shift the checkbox+label groups right 10px (move the checkboxes; their labels are anchored off
       -- them so they follow). The dropdown is anchored to the row, so it stays put.
       if cb1 then cb1:ClearAllPoints(); cb1:SetPoint("LEFT", row1, "LEFT", 10, 0) end
+      if cbA then cbA:ClearAllPoints(); cbA:SetPoint("LEFT", rowA, "LEFT", 10, 0) end
       if cb2 then cb2:ClearAllPoints(); cb2:SetPoint("LEFT", row2, "LEFT", 10, 0) end
       -- Live enable/disable based on Rotation Matching System (the master switch for match tracking).
       local function setOn(w, on, lbl)
@@ -1877,6 +1891,9 @@ local function PopulateNative(pane, rows)
         local on = (addon.GetProcGlowEnabled and addon:GetProcGlowEnabled()) and true or false
         setOn(cb1, on, lbl1)
         setOn(cb2, on, lbl2)
+        -- AH Animated also needs the AH Match %% readout itself on (nothing to animate otherwise).
+        local animOn = on and (addon.GetAHMatchPercentEnabled and addon:GetAHMatchPercentEnabled()) and true or false
+        setOn(cbA, animOn, lblA)
         -- The sound dropdown also needs Match Audible itself enabled.
         local ddOn = on and (addon.GetAHMatchAudibleEnabled and addon:GetAHMatchAudibleEnabled()) and true or false
         setOn(dd, ddOn)
@@ -2277,7 +2294,11 @@ local function AssistedHighlightRows()
         if addon.SetAHMatchSound then addon:SetAHMatchSound(v) end
         if addon.PlayAHMatchSound then addon:PlayAHMatchSound(true) end -- preview the pick
       end,
-      ddoptions = SoundOptionsShort },
+      ddoptions = SoundOptionsShort,
+      -- AH Animated row -- rendered BETWEEN AH Match %% (row1) and Match Audible (row2). Colour+pulse the
+      -- readout; off = plain white. Greyed unless AH Match %% is on (nothing to animate otherwise).
+      animLabel = "AH Animated", animGet = "GetAHMatchAnimated", animSet = "SetAHMatchAnimated",
+      animTooltip = "Animate the AH Match readout: colour it red\226\134\146green by %% and pulse at 50%%+. Unchecked = plain white text." },
     -- Border options removed: the icon border now always adopts the player's
     -- action-bar frame art (Blizzard default or skinner), like the rest of the UI.
     { type = "header", text = "Keybind" },

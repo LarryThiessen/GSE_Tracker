@@ -1521,6 +1521,29 @@ function UI:EndAssistedHighlightDrag(commitPosition)
   return true
 end
 
+-- Persist the Assisted Highlight position after a MOUSE drag through its Edit Mode box. The box
+-- moves the frame with StartMoving (it bypasses the native Begin/EndAssistedHighlightDrag cursor
+-- cycle, so EndAssistedHighlightDrag no-ops -- _isDragging was never set). So derive the dropped
+-- offset from the frame's final geometry and store it, mirroring how the arrow-key nudge persists
+-- (SetAssistedHighlightOffset). Only meaningful in Screen mode -- the only draggable anchor mode.
+function UI:StoreAssistedHighlightDragOffset()
+  local frame = addon.assistedHighlightFrame
+  if not (frame and addon.SetAssistedHighlightOffset and frame.GetCenter) then return end
+  local mode = (addon.GetAssistedHighlightAnchorTarget and addon:GetAssistedHighlightAnchorTarget()) or "Screen"
+  if mode ~= "Screen" then return end  -- pinned modes (Target Nameplate / Mouse Cursor) aren't free-dragged
+  local fx, fy = frame:GetCenter()
+  local ux, uy = UIParent:GetCenter()
+  if not (fx and fy and ux and uy) then return end
+  local fs = (frame.GetEffectiveScale and frame:GetEffectiveScale()) or 1
+  local ue = (UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()) or 1
+  if not ue or ue == 0 then ue = 1 end
+  -- Frame centre relative to UIParent centre, in UIParent units, then to canonical pixels (the unit
+  -- the stored offset uses -- ApplyResolvedAnchor divides it back out via CanonicalPixelsToParentUnits).
+  local offX = ParentUnitsToCanonicalPixels((fx * fs - ux * ue) / ue, UIParent)
+  local offY = ParentUnitsToCanonicalPixels((fy * fs - uy * ue) / ue, UIParent)
+  addon:SetAssistedHighlightOffset(offX, offY)
+end
+
 function Display:ApplyLiveStrata(frame)
   frame = frame or addon.assistedHighlightFrame
   if not frame or frame.isPreview then return end

@@ -1,3 +1,21 @@
+## 1.5.3
+
+### New
+- **Shorter DPS/HPS numbers.** Big numbers now abbreviate (e.g. `242.3K`, `1.23M`) using Blizzard's number formatter — works live in combat on Retail; uses Details! data on Classic.
+- **AH Match % is now configurable and fun:**
+  - **Colour gradient** — the readout shades red → yellow → green by your match rate.
+  - **Pulse** — it pulses at 50%+, faster the higher it climbs.
+  - **AH Animated** toggle (Assisted Highlight tab, under AH Match %): turn the colour + pulse on/off (off = plain white).
+  - **Add it to the Meters Layout Control** — place "AH %" on the grid and it moves into the Meters HUD (and stops showing under the Action Tracker).
+- **Custom Match-Audible sounds.** A pack of bundled sounds (Bloop, Clap, Drum, Kick, Snare, Swoosh, Success, and more) is selectable for the AH Match audible cue; the sound list is now sorted A→Z.
+
+### Changed
+- **AH Match % stays put** — it no longer drifts when you reposition the MODKEYS element, and it shows an example in Edit Mode so you can see where it sits.
+- **Readout fade-outs are snappier** — the name/keybind and meter readouts now fade on combat-end as fast as the action icons.
+
+### Fixed
+- **`/gsetracker` no longer errors in combat** — the meters debug dump was tripping on a taint-protected value.
+
 ## 1.5.2
 
 ### Fixed

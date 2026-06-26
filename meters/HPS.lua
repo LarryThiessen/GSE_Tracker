@@ -31,6 +31,37 @@ local function InitializeRefreshRate()
     return r
 end
 
+-- Abbreviate large meter values so the readout stays short: 12345 -> "12.34K",
+-- 1234567 -> "1.23M", 2.0e9 -> "2.00B". Below 1000 shows the whole number.
+-- KEY: live C_DamageMeter values are "secret" (taint-protected) in combat -- we cannot read or
+-- COMPARE them in Lua (it throws). Blizzard's own AbbreviateNumbers() is secret-safe (it formats
+-- engine-side), which is how lightweight meters abbreviate live combat numbers. Build the config
+-- once; fall back to the plain full number (string.format is permitted on secret values) if the
+-- API is missing (older Classic).
+local abbrevSettings
+do
+    if CreateAbbreviateConfig and AbbreviateNumbers then
+        local ok, cfg = pcall(CreateAbbreviateConfig, {
+            { breakpoint = 1000000000, abbreviation = "B", significandDivisor = 10000000, fractionDivisor = 100, abbreviationIsGlobal = false },
+            { breakpoint = 1000000,    abbreviation = "M", significandDivisor = 10000,    fractionDivisor = 100, abbreviationIsGlobal = false },
+            { breakpoint = 1000,       abbreviation = "K", significandDivisor = 10,       fractionDivisor = 100, abbreviationIsGlobal = false },
+            { breakpoint = 1,          abbreviation = "",  significandDivisor = 1,        fractionDivisor = 1,   abbreviationIsGlobal = false },
+        })
+        if ok and cfg then abbrevSettings = { config = cfg } end
+    end
+end
+
+local function FormatMeterValue(n)
+    if n == nil then return "" end
+    if abbrevSettings then
+        local ok, s = pcall(AbbreviateNumbers, n, abbrevSettings)
+        if ok and s then return s end
+    end
+    local ok, s = pcall(string.format, "%.0f", n)
+    if ok then return s end
+    return ""
+end
+
 -- ─── Frame ────────────────────────────────────────────────────────────────────
 local frame = CreateFrame("Frame", "HPSFrame", UIParent)
 frame:SetSize(180, 64)
@@ -58,12 +89,12 @@ local function RefreshFromMeter()
         return
     end
     -- Retail: Blizzard's real-time C_DamageMeter -- a live session tied to GAME combat, so the
-    -- number stays current right through damage lulls. Classic flavors have no functional
-    -- C_DamageMeter (the table can be a non-functional stub), so read HPS from the Details! addon
-    -- there instead. Gate on the capability flag, not bare existence.
+    -- number stays current right through damage lulls. Its values are taint-"secret" but
+    -- FormatMeterValue uses Blizzard's secret-safe AbbreviateNumbers, so they still abbreviate.
+    -- Classic flavors have no functional C_DamageMeter, so read HPS from the Details! addon there.
     if not _G.GSETracker_MetersCapable then
         local hps = _G.GSETracker_DetailsPerSecond and _G.GSETracker_DetailsPerSecond(2)
-        if hps then hpsText:SetText(string.format("%.0f", hps)) end
+        if hps then hpsText:SetText(FormatMeterValue(hps)) end
         return
     end
     local sessions = C_DamageMeter.GetAvailableCombatSessions()
@@ -76,7 +107,7 @@ local function RefreshFromMeter()
         if src.isLocalPlayer then
             local hps = tonumber(src.amountPerSecond)
             if hps then
-                hpsText:SetText(string.format("%.0f", hps))
+                hpsText:SetText(FormatMeterValue(hps))
             end
             return
         end
@@ -145,19 +176,18 @@ function HPS_ControllerEvent(event)
     elseif event == "PLAYER_REGEN_ENABLED" then
         StopTicker()
         if MetersSavedVars.locked then
-            -- Locked: re-read the final value, then smoothly fade the readout out over 3s
-            -- (it stays readable while it ramps) and hide. GSETracker_CancelFade restores
-            -- alpha if combat restarts before the fade completes.
+            -- Locked: re-read the final value, then snap the readout out over 0.12s (matches the icon
+            -- flow fade-out) and hide. GSETracker_CancelFade restores alpha if combat restarts first.
             C_Timer.After(0.3, function() RefreshFromMeterProtected(true) end)
             if GSETracker_SmoothFadeOut then
-                GSETracker_SmoothFadeOut(frame, 3.0, function()
+                GSETracker_SmoothFadeOut(frame, 0.12, function()
                     if MetersSavedVars.locked and not UnitAffectingCombat("player") then frame:Hide() end
                     -- The fade left the frame at ~0 alpha; restore it (while hidden) so the next
                     -- show -- combat OR the unlocked example preview -- isn't invisible.
                     frame:SetAlpha(1)
                 end)
             else
-                C_Timer.After(3.0, function()
+                C_Timer.After(0.12, function()
                     if MetersSavedVars.locked and not UnitAffectingCombat("player") then frame:Hide() end
                 end)
             end

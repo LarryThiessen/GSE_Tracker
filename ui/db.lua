@@ -1467,6 +1467,20 @@ function Utils:SetAHMatchPercentEnabled(enabled)
   PersistRuntimeChange(db)
 end
 
+-- AH match readout animation: colour gradient (red->green) + pulse at 50%+. Default ON; when OFF the
+-- readout is plain white static text. Applies wherever the AH %% shows (under the tracker OR in the grid).
+function Utils:GetAHMatchAnimated()
+  local db = GetRuntimeDB()
+  return db.ahMatchAnimated ~= false   -- default ON
+end
+
+function Utils:SetAHMatchAnimated(enabled)
+  local db = GetRuntimeDB()
+  db.ahMatchAnimated = not not enabled
+  PersistRuntimeChange(db)
+  if addon.UpdateAHMatchReadout then addon:UpdateAHMatchReadout() end
+end
+
 -- AH match audible alert + chosen LibSharedMedia sound name. Default OFF.
 function Utils:GetAHMatchAudibleEnabled()
   local db = GetRuntimeDB()

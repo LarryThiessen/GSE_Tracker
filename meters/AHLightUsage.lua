@@ -1,6 +1,6 @@
 -- Modules/Meters/AHLightUsage.lua
 
-local FADE_DELAY = 3   -- seconds the SBAssist % lingers after combat (matches DPS/HPS' 3s hold)
+local FADE_DELAY = 0.12   -- seconds the SBAssist % lingers/fades after combat (matches the icon flow fade-out)
 local AHLIGHT_MATCH_WINDOW = 0.35
 local DEFAULT_REFRESH_RATE = 0.10
 local MIN_REFRESH_RATE = 0.05

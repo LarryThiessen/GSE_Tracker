@@ -402,7 +402,13 @@ local function ShowBoxes(show)
         { frame = _G.MetersAnchor,                       label = "Meters",             tab = 1, fit = "meters", nudge = "meters",
           enabledGet = function() return (_G.MetersSavedVars == nil) or (_G.MetersSavedVars.enabled ~= false) end },
         { frame = addon.assistedHighlightFrame,          label = "Assisted Highlight", tab = 3, nudge = "ah",
-          enabledGet = function() return (addon.IsAssistedHighlightMirrorEnabled and addon:IsAssistedHighlightMirrorEnabled()) and true or false end },
+          enabledGet = function() return (addon.IsAssistedHighlightMirrorEnabled and addon:IsAssistedHighlightMirrorEnabled()) and true or false end,
+          -- Box drag moves the frame via StartMoving; persist the dropped offset (mouse drag used to
+          -- not save -- only the arrow-key nudge did). Mirrors the Pressed Indicator's saveDrag.
+          saveDrag = function()
+              if addon.StoreAssistedHighlightDragOffset then addon:StoreAssistedHighlightDragOffset() end
+              if addon.ApplyAssistedHighlightLayout then pcall(addon.ApplyAssistedHighlightLayout, addon, true) end
+          end },
         -- Pressed Indicator: its own element now (tab 4). The box drag saves an ELEMENT offset (saveDrag),
         -- since the indicator is positioned relative to the Action Tracker, not by its own OnDragStop.
         -- The indicator frame is tiny (the symbol is only a few px) and it sits OVER the Action Tracker

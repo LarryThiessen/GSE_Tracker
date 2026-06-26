@@ -4,7 +4,7 @@ local UI = ns.UI
 local API = (ns.Utils and ns.Utils.API) or {}
 local uiShared = addon._ui or {}
 
-local NAME_FADE = 3       -- seconds for the name/keybind fade-out ramp
+local NAME_FADE = 0.12    -- seconds for the name/keybind fade-out ramp (matches the icon flow fade-out)
 local NAME_IDLE_HOLD = 3  -- seconds of no casting (OUT of combat) before the names fade
 
 -- Smoothly fade the top-row names + keybind out, then clear. Shared by the post-combat fade AND the

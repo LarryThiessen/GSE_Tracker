@@ -525,7 +525,7 @@ local function ApplyUnlockedPreviewDisplay()
             -- Stop any in-flight post-combat fade and restore full opacity, or the example
             -- preview would show at the fade's leftover (possibly zero) alpha.
             if GSETracker_CancelFade then GSETracker_CancelFade(DPSFrame) end
-            DPSFrame.dpsText:SetText("12345")
+            DPSFrame.dpsText:SetText((_G.GSETracker_FormatMeterValue and _G.GSETracker_FormatMeterValue(12345)) or "12345")
             DPSFrame:Show()
         else
             DPSFrame.dpsText:SetText("")
@@ -536,7 +536,7 @@ local function ApplyUnlockedPreviewDisplay()
     if HPSFrame and HPSFrame.hpsText then
         if DPSHPSOK() and MetersSavedVars.showHPS ~= false then
             if GSETracker_CancelFade then GSETracker_CancelFade(HPSFrame) end
-            HPSFrame.hpsText:SetText("6789")
+            HPSFrame.hpsText:SetText((_G.GSETracker_FormatMeterValue and _G.GSETracker_FormatMeterValue(6789)) or "6789")
             HPSFrame:Show()
         else
             HPSFrame.hpsText:SetText("")
@@ -689,7 +689,11 @@ local ROW_MULT = { TT = 2, T = 1, M = 0, B = -1, XB = -2 }
 local LEGACY_SLOT_MAP = { TOP = "T", BOTTOM = "B", LEFT = "L", RIGHT = "R" }
 
 -- Marker = the centre icon; it follows the same drag/swap rules as the readouts.
-local METER_SLOT_DEFAULTS = { DPS = "L", HPS = "R", GCD = "T", Marker = "C" }
+-- AHMatch (the "AH %" readout) is a fixed element that DEFAULTS OFF: it lives under the Action Tracker
+-- until the user adds it to the grid (FixedElementOn special-cases it to off-by-default). Its default
+-- cell (B) is only used once it's added. When ON the grid, the under-AT readout stands down (see
+-- ui/modkey_stack.lua UpdateAHMatchReadout, gated on GSETracker_IsAHMatchSlotted).
+local METER_SLOT_DEFAULTS = { DPS = "L", HPS = "R", GCD = "T", Marker = "C", AHMatch = "B" }
 
 -- id -> (global frame name created by its module, text fontstring field on that frame). The Marker is NOT
 -- here -- it isn't a text readout placed by PlaceMeterElement; it has its own markerCell positioning.
@@ -697,6 +701,7 @@ local METER_ELEMENTS = {
     { id = "DPS", frame = "DPSFrame", text = "dpsText" },
     { id = "HPS", frame = "HPSFrame", text = "hpsText" },
     { id = "GCD", frame = "GCDFrame", text = "gcdText" },
+    { id = "AHMatch", frame = "AHMatchFrame", text = "matchText" },
 }
 
 -- Offset (from iconCenter) where the centre ICON sits for a given grid cell: centred, COL_MULT/ROW_MULT
@@ -772,7 +777,7 @@ end
 -- Concatenate the assignments -- folded into the layout cache key so a swap forces a re-layout.
 function Meter_SlotKey()
     local s = MeterSlots()
-    return (s.DPS or "") .. (s.HPS or "") .. (s.GCD or "") .. (s.Marker or "")
+    return (s.DPS or "") .. (s.HPS or "") .. (s.GCD or "") .. (s.Marker or "") .. (s.AHMatch or "")
 end
 
 local function MeterTextHeight(fs)
@@ -838,14 +843,21 @@ end
 -- their show flag (so the Readouts dropdown stays in sync), the Marker follows markerHidden (gated in
 -- ui/player_tracker.lua ShouldShowCombatMarker). They keep their saved cell while hidden, so re-adding
 -- restores the spot.
-local FIXED_SHOW_KEY = { DPS = "showDPS", HPS = "showHPS", GCD = "showGCD" }
-local FIXED_ORDER    = { "GCD", "DPS", "HPS", "Marker" }
+local FIXED_SHOW_KEY = { DPS = "showDPS", HPS = "showHPS", GCD = "showGCD", AHMatch = "showAHMatch" }
+local FIXED_ORDER    = { "GCD", "DPS", "HPS", "AHMatch", "Marker" }
 
 local function FixedElementOn(id)
     if id == "Marker" then return not MetersSavedVars.markerHidden end
+    -- AHMatch is the only fixed element that DEFAULTS OFF (it shows under the Action Tracker until added).
+    if id == "AHMatch" then return MetersSavedVars.showAHMatch == true end
     local k = FIXED_SHOW_KEY[id]
     if k then return MetersSavedVars[k] ~= false end
     return true
+end
+
+-- True when "AH %" has been placed on the Layout Control grid (so the under-AT readout stands down).
+function _G.GSETracker_IsAHMatchSlotted()
+    return MetersSavedVars.showAHMatch == true
 end
 
 local function SetFixedElementOn(id, on)
@@ -865,6 +877,8 @@ local function AfterGridChange()
     if ApplyUnlockedPreviewDisplay then ApplyUnlockedPreviewDisplay() end
     if _G.Meters_ApplyDisplayToggles then _G.Meters_ApplyDisplayToggles() end
     if _G.GSETracker_RefitMetersBox then _G.GSETracker_RefitMetersBox() end
+    -- AH %% toggles between its grid slot and the under-Action-Tracker spot -- refresh it on any grid change.
+    if _G.GSETracker_UpdateAHMatchReadout then _G.GSETracker_UpdateAHMatchReadout() end
 end
 
 -- Assign `id` to a 3x3 grid `slot` (TL/T/TR/L/C/R/BL/B/BR), swapping any occupant. Placing a fixed element
@@ -915,6 +929,7 @@ function Meter_IsOptionalElement(id) return not METER_SLOT_DEFAULTS[id] end
 
 -- Display label for any element id (readout labels are literal; optional elements come from the registry).
 function Meter_ElementLabel(id)
+    if id == "AHMatch" then return "AH %" end
     if METER_SLOT_DEFAULTS[id] then return id end
     return (_G.GSETracker_CooldownElements_Label and _G.GSETracker_CooldownElements_Label(id)) or id
 end
@@ -1310,6 +1325,10 @@ function Meter_ApplyFont(fontName, size)
     end
     if HPSFrame and HPSFrame.hpsText then
         HPSFrame.hpsText:SetFont(fontPath, resolvedSize, outline)
+    end
+    if AHMatchFrame and AHMatchFrame.matchText then
+        -- AH %% in the Meters HUD renders 8pt smaller than the other readouts (floored at 8), like GCD's -2.
+        AHMatchFrame.matchText:SetFont(fontPath, math.max(resolvedSize - 8, 8), outline)
     end
     if GCD_ApplyFont then
         GCD_ApplyFont(selectedFontName, resolvedSize, outline)

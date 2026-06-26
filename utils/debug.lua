@@ -11,14 +11,20 @@ local DebugModule = Utils.DebugModule or {}
 Utils.DebugModule = DebugModule
 
 local function PrintChat(message)
-  if not message or message == "" then
-    return
-  end
-
-  if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-    DEFAULT_CHAT_FRAME:AddMessage(PREFIX .. " " .. message)
-  elseif print then
-    print("GSE Tracker", message)
+  -- NOTE: only a nil guard here. Do NOT compare message to "" -- a debug line can carry a
+  -- "secret" (taint-protected) value, e.g. a meter readout's FontString:GetText() pulled in
+  -- combat, and `secret == ""` THROWS, aborting the dump mid-way. The whole emit is pcall'd
+  -- for the same reason (concatenating/printing a secret can also raise).
+  if message == nil then return end
+  local ok = pcall(function()
+    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+      DEFAULT_CHAT_FRAME:AddMessage(PREFIX .. " " .. message)
+    elseif print then
+      print("GSE Tracker", message)
+    end
+  end)
+  if not ok and DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+    DEFAULT_CHAT_FRAME:AddMessage(PREFIX .. " <unprintable secret/tainted value>")
   end
 end
 

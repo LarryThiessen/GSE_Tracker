@@ -205,12 +205,12 @@ local function ApplyTestDisplay()
     end
 
     if DPSFrame and DPSFrame.dpsText then
-        if showDPS then DPSFrame.dpsText:SetText("12345"); DPSFrame:Show()
+        if showDPS then DPSFrame.dpsText:SetText((_G.GSETracker_FormatMeterValue and _G.GSETracker_FormatMeterValue(12345)) or "12345"); DPSFrame:Show()
         else            DPSFrame.dpsText:SetText("");      DPSFrame:Hide() end
     end
 
     if HPSFrame and HPSFrame.hpsText then
-        if showHPS then HPSFrame.hpsText:SetText("6789"); HPSFrame:Show()
+        if showHPS then HPSFrame.hpsText:SetText((_G.GSETracker_FormatMeterValue and _G.GSETracker_FormatMeterValue(6789)) or "6789"); HPSFrame:Show()
         else            HPSFrame.hpsText:SetText("");     HPSFrame:Hide() end
     end
 
