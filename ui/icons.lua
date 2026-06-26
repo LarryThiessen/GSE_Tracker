@@ -230,13 +230,22 @@ local function GetActiveActionIconMask()
       local atlas = mask.GetAtlas and mask:GetAtlas()
       local file = (mask.GetTextureFilePath and mask:GetTextureFilePath())
         or (mask.GetTexture and mask:GetTexture())
-      -- GetTexture() returns a NEGATIVE fileDataID for atlas-backed masks (and 0 / ""
-      -- for none). SetTexture can't store a negative id -> "integer overflow attempting
-      -- to store 4294966418" (-878 as uint32). Only keep a non-empty string path or a
-      -- positive fileDataID; anything else falls through to the next button / no mask.
+      -- GetTexture()/GetTextureFilePath() can return a NEGATIVE fileDataID for atlas-backed masks --
+      -- as a NUMBER (-878) OR as its uint32 STRING ("4294966418"). SetTexture can store neither
+      -- (integer overflow). Keep ONLY a real path string or a positive, in-range fileDataID. A
+      -- purely-numeric string is a fileDataID (reject if non-positive or > int32); real texture
+      -- PATHS aren't fully numeric, so they pass. Anything else -> no mask (next button / square icon).
+      local MAX_FILE_ID = 2147483647  -- INT32_MAX; ids above this are the wrapped-negative atlas ids
       if type(file) == "number" then
-        if file <= 0 then file = nil end
-      elseif type(file) ~= "string" or file == "" then
+        if file <= 0 or file > MAX_FILE_ID then file = nil end
+      elseif type(file) == "string" then
+        if file == "" then
+          file = nil
+        else
+          local n = tonumber(file)
+          if n and (n <= 0 or n > MAX_FILE_ID) then file = nil end
+        end
+      else
         file = nil
       end
       if (atlas and atlas ~= "") or file then
@@ -328,7 +337,11 @@ local function ApplyIconMask(b)
       -- false = keep our full-icon size; don't shrink the mask to the atlas size.
       b._iconMask:SetAtlas(atlas, false)
     else
-      b._iconMask:SetTexture(file, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+      -- Backstop: even though GetActiveActionIconMask filters bad ids, pcall SetTexture so any
+      -- future unusable value (overflow/secret) degrades to an empty mask instead of erroring.
+      if not pcall(b._iconMask.SetTexture, b._iconMask, file, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE") then
+        b._iconMask:Hide()
+      end
     end
     SizeIconMask(b)
     b.tex:AddMaskTexture(b._iconMask)

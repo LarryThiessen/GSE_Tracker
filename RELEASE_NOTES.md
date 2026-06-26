@@ -1,3 +1,8 @@
+## 1.5.4
+
+### Fixed
+- **Fixed a recurring "integer overflow" Lua error** when adopting an action bar's icon mask (it could fire on login / in Edit Mode). The mask's file id came back as an out-of-range value the game can't store; it's now rejected (the icon just renders square) instead of erroring, with a safety net so it can't throw again.
+
 ## 1.5.3
 
 ### New
