@@ -398,7 +398,12 @@ local function ShowBoxes(show)
         -- enabledGet => a box is shown in Edit Mode ONLY while its element's Enable checkbox (General tab)
         -- is ticked. A disabled element shows no example AND no selection box.
         { frame = _G.GSE_TrackerFrame or (UI and UI.ui), label = "Action Tracker",     tab = 2, nudge = "actiontracker", padVHorizontal = 20,
-          enabledGet = function() return (addon.IsEnabled and addon:IsEnabled()) and true or false end },
+          enabledGet = function() return (addon.IsEnabled and addon:IsEnabled()) and true or false end,
+          -- Box drag moves the frame via StartMoving; persist the dropped position (mouse drag used to
+          -- not save -- the tracker reset to its last saved spot on reload). Mirrors the AH/PI saveDrag.
+          saveDrag = function()
+              if addon.CommitActionTrackerDragPosition then addon:CommitActionTrackerDragPosition() end
+          end },
         { frame = _G.MetersAnchor,                       label = "Meters",             tab = 1, fit = "meters", nudge = "meters",
           enabledGet = function() return (_G.MetersSavedVars == nil) or (_G.MetersSavedVars.enabled ~= false) end },
         { frame = addon.assistedHighlightFrame,          label = "Assisted Highlight", tab = 3, nudge = "ah",

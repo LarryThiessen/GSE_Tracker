@@ -727,6 +727,21 @@ function UI:EndActionTrackerDrag(commitPosition)
   return true
 end
 
+-- Commit the Action Tracker position after a MOUSE drag via its Edit Mode box. The box moves the frame
+-- with StartMoving and bypasses Begin/EndActionTrackerDrag (so _isDragging is never set and the move
+-- never saved -- the tracker "reset" to the last saved spot on reload). Read the dropped frame's centre
+-- -> canonical offset and persist it. Mirrors the AH box saveDrag fix.
+function UI:CommitActionTrackerDragPosition()
+  local frame = self.ui
+  if not frame then return end
+  local x, y = GetCenteredOffsets(frame, UIParent)
+  x, y = ClampCenteredOffsetsToScreen(frame, UIParent, x, y)
+  self:SetActionTrackerPoint(C.ANCHOR_CENTER or "CENTER", C.UI_PARENT_NAME or "UIParent", C.ANCHOR_CENTER or "CENTER", x, y)
+  ApplyCenteredOffsets(frame, UIParent, x, y)
+  self:RefreshSettingsPositionDisplay()
+  self:UpdateActionTrackerMoveMarker()
+end
+
 function UI:CanDragActionTracker()
   local ui = self.ui
   if not ui then return false end

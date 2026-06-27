@@ -1,3 +1,8 @@
+## 1.5.5
+
+### Fixed
+- **Action Tracker position no longer resets on reload.** Moving the tracker in Edit Mode wasn't saving (it reverted to its last saved spot on the next load); the drag now persists, like the other elements.
+
 ## 1.5.4
 
 ### Fixed
