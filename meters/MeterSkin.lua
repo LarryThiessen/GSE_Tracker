@@ -209,15 +209,3 @@ function _G.GSETracker_MeterSkin_Refresh()
   EnsureHooks()
   ApplySkin()
 end
-
--- /run GSETracker_MeterSkin_Debug() -- prints what the walk found, for tuning the bar/font pass.
-function _G.GSETracker_MeterSkin_Debug()
-  local meter = BlizzMeter()
-  local p = (_G.DEFAULT_CHAT_FRAME and function(msg) _G.DEFAULT_CHAT_FRAME:AddMessage(msg) end) or print
-  if not meter then p("DamageMeter Skinner: frame not found (enable the Blizzard meter in Settings).") return end
-  fontCount, barCount = 0, 0
-  local fontPath, fontFlags = ResolveFont()
-  Walk(meter, fontPath, fontFlags, 0)
-  p(string.format("DamageMeter Skinner: eligible=%s  fonts=%d  bars=%d  font=%s",
-    tostring(Eligible()), fontCount, barCount, tostring(fontPath)))
-end

@@ -49,7 +49,7 @@ local function BarList()
 end
 
 -- ── The companion window ──────────────────────────────────────────────────────────────────────────
-local win, fontDD, barDD
+local win, barDD
 
 local function MakeDropdown(parent, w)
   local ok, dd = pcall(CreateFrame, "DropdownButton", nil, parent, "WowStyle1DropdownTemplate")
@@ -371,9 +371,3 @@ local ev = CreateFrame("Frame")
 ev:RegisterEvent("PLAYER_ENTERING_WORLD")
 ev:RegisterEvent("ADDON_LOADED")
 ev:SetScript("OnEvent", function() Setup() end)
-
-function _G.GSETracker_MeterEditMode_Debug()
-  local p = (_G.DEFAULT_CHAT_FRAME and function(m) _G.DEFAULT_CHAT_FRAME:AddMessage(m) end) or print
-  p(("Meter Skin window: built=%s  fontDD=%s  barDD=%s")
-    :format(tostring(win ~= nil), tostring(fontDD ~= nil), tostring(barDD ~= nil)))
-end
