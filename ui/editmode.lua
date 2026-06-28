@@ -524,10 +524,21 @@ local function ShowBoxes(show)
                 box._nativeLabel = box._nativeLabel or FindSelectionLabel(box)
                 if box._nativeLabel then box._nativeLabel:Hide() end
                 -- Meters: shrink the box to the readout cluster. Deferred a tick so the preview layout
-                -- (examples shown when unlocked) has settled and the child rects are final.
-                if t.fit == "meters" and C_Timer and C_Timer.After then
+                -- (examples shown when unlocked) has settled and the child rects are final, THEN keep
+                -- re-fitting on a light throttle while the box is shown so the overlay tracks the live
+                -- cluster dynamically (content/layout/size changes) instead of holding the first measure.
+                if t.fit == "meters" then
                     local f = t.frame
-                    C_Timer.After(0.05, function() if box:IsShown() then FitMetersBox(box, f) end end)
+                    if C_Timer and C_Timer.After then
+                        C_Timer.After(0.05, function() if box:IsShown() then FitMetersBox(box, f) end end)
+                    end
+                    box._fitElapsed = 0
+                    box:SetScript("OnUpdate", function(self, e)
+                        self._fitElapsed = (self._fitElapsed or 0) + (e or 0)
+                        if self._fitElapsed < 0.1 then return end
+                        self._fitElapsed = 0
+                        if self:IsShown() then FitMetersBox(self, f) end
+                    end)
                 end
                 -- Grow the box vertically in HORIZONTAL layout so the name rows above/below the icon row
                 -- (which sit outside the frame bounds) are enclosed. Vertical layout puts the names in
