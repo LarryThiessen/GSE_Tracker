@@ -567,11 +567,7 @@ function UI:ApplyGlobalScale()
 end
 
 local function GetCursorPositionInParentSpace(parent)
-  parent = parent or UIParent
-  local scale = (parent.GetEffectiveScale and parent:GetEffectiveScale()) or 1
-  if not scale or scale == 0 then scale = 1 end
-  local cursorX, cursorY = API.GetCursorPosition()
-  return (tonumber(cursorX) or 0) / scale, (tonumber(cursorY) or 0) / scale
+  return uiShared.GetCursorPositionInParentSpace(parent)
 end
 
 local function SyncRuntimeActionTrackerPointCache(ui, x, y)

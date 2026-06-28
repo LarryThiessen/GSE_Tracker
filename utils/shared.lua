@@ -105,6 +105,17 @@ local function PixelSnap(v, frame)
   return math.floor((v * scale) + 0.5) / scale
 end
 
+-- Cursor position in a parent frame's coordinate space (raw cursor / parent effective scale). Shared so
+-- frame.lua / player_tracker.lua / assisted_highlight.lua (and the minimap / breakdown) don't each keep
+-- their own identical copy. utils/shared.lua loads before every consumer, so this is always available.
+function uiShared.GetCursorPositionInParentSpace(parent)
+  parent = parent or UIParent
+  local scale = (parent.GetEffectiveScale and parent:GetEffectiveScale()) or 1
+  if not scale or scale == 0 then scale = 1 end
+  local cursorX, cursorY = API.GetCursorPosition()
+  return (tonumber(cursorX) or 0) / scale, (tonumber(cursorY) or 0) / scale
+end
+
 local function IconRowWidth(count)
   count = Clamp(count or 4, 4, 8)
   -- Effective gap = setting - 1 so the slider's 0 = visually flush (the frame art
