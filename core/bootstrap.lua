@@ -67,9 +67,6 @@ function Core:ApplyDB()
   if self.RefreshDragMouseState then
     self:RefreshDragMouseState()
   end
-  if self.UpdateActionTrackerMoveMarker then
-    self:UpdateActionTrackerMoveMarker()
-  end
   if self.RefreshCenterMarker then
     self:RefreshCenterMarker()
   elseif self.RefreshCombatMarker then

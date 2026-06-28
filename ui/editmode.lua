@@ -61,7 +61,6 @@ local function RefreshEditing()
     if UI.ApplyVisibility               then pcall(UI.ApplyVisibility, UI) end             -- show/hide (honors editing preview)
     if UI.RefreshDragMouseState         then pcall(UI.RefreshDragMouseState, UI) end       -- Action Tracker drag
     if UI.ApplyEditModeIconPreview      then pcall(UI.ApplyEditModeIconPreview, UI, true) end
-    if UI.UpdateActionTrackerMoveMarker then pcall(UI.UpdateActionTrackerMoveMarker, UI) end
     if UI.RefreshAssistedHighlight      then pcall(UI.RefreshAssistedHighlight, UI, true) end
     if UI.RefreshPressedIndicator       then pcall(UI.RefreshPressedIndicator, UI, true) end
     RefreshVerticalEditModeNames(UI)

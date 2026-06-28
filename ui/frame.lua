@@ -180,50 +180,8 @@ function UI:GetClassColorRGB()
   return uiShared.GetPlayerClassColorRGB(C.CLASS_FALLBACK_R or 0.20, C.CLASS_FALLBACK_G or 0.60, C.CLASS_FALLBACK_B or 1.00)
 end
 
-function UI:EnsureActionTrackerMoveMarker()
-  if self._actionTrackerMoveMarker then return self._actionTrackerMoveMarker end
-  local marker = API.CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
-  marker:SetSize(C.ACTION_TRACKER_MARKER_BASE_SIZE or 48, C.ACTION_TRACKER_MARKER_BASE_SIZE or 48)
-  marker:SetFrameStrata(C.STRATA_TOOLTIP or "TOOLTIP")
-  marker:SetFrameLevel(C.ACTION_TRACKER_MARKER_FRAME_LEVEL or 50)
-  marker:SetBackdrop({
-    bgFile = WHITE8X8,
-    edgeFile = WHITE8X8,
-    edgeSize = 2,
-    insets = { left = 0, right = 0, top = 0, bottom = 0 },
-  })
-  local glow = marker:CreateTexture(nil, "BACKGROUND")
-  glow:SetPoint("TOPLEFT", marker, "TOPLEFT", -6, 6)
-  glow:SetPoint("BOTTOMRIGHT", marker, "BOTTOMRIGHT", 6, -6)
-  glow:SetTexture(WHITE8X8)
-  marker.glow = glow
-  local crossH = marker:CreateTexture(nil, "ARTWORK")
-  crossH:SetTexture(WHITE8X8)
-  crossH:SetHeight(2)
-  crossH:SetPoint("LEFT", marker, "LEFT", 6, 0)
-  crossH:SetPoint("RIGHT", marker, "RIGHT", -6, 0)
-  marker.crossH = crossH
-  local crossV = marker:CreateTexture(nil, "ARTWORK")
-  crossV:SetTexture(WHITE8X8)
-  crossV:SetWidth(2)
-  crossV:SetPoint("TOP", marker, "TOP", 0, -6)
-  crossV:SetPoint("BOTTOM", marker, "BOTTOM", 0, 6)
-  marker.crossV = crossV
-  marker:Hide()
-  self._actionTrackerMoveMarker = marker
-  return marker
-end
-
-function UI:UpdateActionTrackerMoveMarker()
-  -- The old class-coloured centering marker (box + crosshair lines) is superseded by the native Edit
-  -- Mode selection box drawn around the Action Tracker (ui/editmode.lua). Keep it permanently hidden so
-  -- there's no duplicate green-lined guide. (Function kept as a harmless no-op for its many call sites.)
-  if self._actionTrackerMoveMarker then self._actionTrackerMoveMarker:Hide() end
-end
-
-function UI:HideActionTrackerMoveMarker()
-  if self._actionTrackerMoveMarker then self._actionTrackerMoveMarker:Hide() end
-end
+-- (The old class-coloured Action Tracker centering marker was removed -- the native Edit Mode selection
+-- box around the Action Tracker, ui/editmode.lua, supersedes it. Stray call sites were dropped too.)
 
 function UI:UpdateActionTrackerIconRowAnchor()
   UpdateActionTrackerIconRowAnchor(self.ui)
@@ -279,7 +237,6 @@ function UI:ApplyActionTrackerPosition()
   EnsureDB()
   local x, y = ResolveActionTrackerCenteredOffsets(self)
   ApplyCenteredOffsets(self.ui, UIParent, x, y)
-  self:UpdateActionTrackerMoveMarker()
 end
 
 function UI:SetActionTrackerOffset(x, y)
@@ -291,7 +248,6 @@ function UI:SetActionTrackerOffset(x, y)
   self:SetActionTrackerPoint(C.ANCHOR_CENTER or "CENTER", C.UI_PARENT_NAME or "UIParent", C.ANCHOR_CENTER or "CENTER", nx, ny)
   self:ApplyActionTrackerPosition()
   self:RefreshSettingsPositionDisplay()
-  self:UpdateActionTrackerMoveMarker()
 end
 
 function UI:ApplyStrata()
@@ -587,7 +543,6 @@ function UI:ApplyScale()
   self:ApplyGlobalScale()                   -- the other root frames aren't children of self.ui
   self:_ResizeToContent()
   self:_AlignModsToIcons()
-  self:UpdateActionTrackerMoveMarker()
 end
 
 -- Apply the master (overall) addon scale to the root frames that are NOT children of the Action
@@ -674,7 +629,6 @@ function UI:SyncActiveActionTrackerDragPosition()
   ApplyCenteredOffsets(frame, UIParent, x, y)
   SyncRuntimeActionTrackerPointCache(frame, x, y)
   self:RefreshSettingsPositionDisplay()
-  self:UpdateActionTrackerMoveMarker()
   return true
 end
 
@@ -691,7 +645,6 @@ function UI:BeginActionTrackerDrag(frame)
   ApplyCenteredOffsets(frame, UIParent, x, y)
   SyncRuntimeActionTrackerPointCache(frame, x, y)
   self:SyncActiveActionTrackerDragPosition()
-  self:UpdateActionTrackerMoveMarker()
   return true
 end
 
@@ -723,7 +676,6 @@ function UI:EndActionTrackerDrag(commitPosition)
   self._actionTrackerDragCursorOriginX = nil
   self._actionTrackerDragCursorOriginY = nil
   self:RefreshDragMouseState()
-  self:UpdateActionTrackerMoveMarker()
   return true
 end
 
@@ -739,7 +691,6 @@ function UI:CommitActionTrackerDragPosition()
   self:SetActionTrackerPoint(C.ANCHOR_CENTER or "CENTER", C.UI_PARENT_NAME or "UIParent", C.ANCHOR_CENTER or "CENTER", x, y)
   ApplyCenteredOffsets(frame, UIParent, x, y)
   self:RefreshSettingsPositionDisplay()
-  self:UpdateActionTrackerMoveMarker()
 end
 
 function UI:CanDragActionTracker()
@@ -785,7 +736,6 @@ function UI:Lock(locked)
   if self.ApplyEditModeIconPreview then
     self:ApplyEditModeIconPreview(true)
   end
-  self:UpdateActionTrackerMoveMarker()
 end
 
 local STRUCTURAL_REBUILD_REASONS = {
@@ -902,7 +852,6 @@ function UI:ResetToDefaults()
   self:ApplyVisibility()
   self:ClearSpellHistory()
   self:RefreshDragMouseState()
-  self:UpdateActionTrackerMoveMarker()
   if self.RefreshMinimapButton then
     self:RefreshMinimapButton()
   end
@@ -969,7 +918,6 @@ function UI:_ResizeToContent()
       ui:SetSize(frameW, frameH)
       UpdateActionTrackerContentFrame(ui)
       self:ApplyAllElementPositions()
-      self:UpdateActionTrackerMoveMarker()
     else
       UpdateActionTrackerIconRowAnchor(ui)
     end
@@ -1006,7 +954,6 @@ function UI:_ResizeToContent()
 
   if changed then
     self:ApplyAllElementPositions()
-    self:UpdateActionTrackerMoveMarker()
   end
 end
 
@@ -1184,5 +1131,4 @@ function UI:BuildMainFrame()
   self:UpdateModifiers()
   self:Lock(self:IsLocked())
   self:ApplyVisibility()
-  self:UpdateActionTrackerMoveMarker()
 end
