@@ -677,6 +677,13 @@ function UI:ShouldShowCombatMarker(forceOverride)
     local _, recentlyUsed = GetMarkerPressedState()
     return recentlyUsed and true or false
   end
+  -- A CHOSEN Center Marker symbol stays on screen regardless of the Meters readout's combat visibility --
+  -- it does NOT fade out of combat (it's a persistent centre reticle). "None"/"AHLight" aren't standalone
+  -- symbols, so they fall through to the Meters-follow behaviour below.
+  local symbol = addon.GetCombatMarkerSymbol and addon:GetCombatMarkerSymbol()
+  if symbol and symbol ~= "None" and symbol ~= "none" and symbol ~= "AHLight" then
+    return true
+  end
   local anchor = _G.MetersAnchor
   if anchor and anchor.IsShown then
     return anchor:IsShown() and true or false

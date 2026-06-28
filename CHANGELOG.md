@@ -6,6 +6,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.5.6] - 2026-06-28
+
+### Added
+- Cooldowns bar (Meters HUD): place a side-by-side row of tracked cooldowns. Each slot is picked from a menu of your spells and trinkets; duplicates are blocked across both the bar and the standalone grid elements.
+- Trinkets (Trinket 1 / Trinket 2 / Healthstone) can be added to the Cooldowns bar alongside spells.
+- Cooldown spell discovery: the picker lists your current spec's spells with a 6s+ cooldown, rebuilt automatically on login, spec change, talent swap, and spellbook changes.
+
+### Changed
+- Cooldown spell filter: General-tab junk (Mobile Banking, Revive Battle Pets, profession/utility items) is excluded; racials and class/spec defensives are kept; passives are always excluded.
+- Cooldowns now count down live in combat. The swipe and number are driven by your cast time + the spell's base cooldown (engine-rendered), so nothing stalls until combat ends.
+- Layout Control padding (X / Y) now defaults to 0; any value you set persists in your saved variables.
+
+### Fixed
+- Mouse Cursor Assisted Highlight stuttered while the options panel was open; it now follows the pointer every frame whenever it's visible.
+
 ## [1.3.3] - 2026-06-19
 
 ### Added

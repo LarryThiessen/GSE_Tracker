@@ -424,6 +424,62 @@ function uiShared.ApplyActionMaskTo(holder, iconTex, explicitW, explicitH)
   return masked
 end
 
+-- Skin an EXTERNAL icon frame (e.g. the Meters cooldown elements: Trinkets / Healthstone) to match the
+-- Action Tracker + Assisted Highlight icons -- adopt the player's action-bar frame ART (Blizzard default /
+-- ABE / a skinner), the action-button MASK + crop, and (for thin-border skins like ElvUI) a thin accent
+-- border. The frame just needs a `.icon` texture. Mirrors assisted_highlight Display:ApplyIconSkin's
+-- non-portrait path; safe to call repeatedly (re-applies on layout/skin changes).
+function _G.GSETracker_SkinAdoptedIcon(frame)
+  if not (frame and frame.icon) then return end
+  local skin = uiShared.GetActionButtonBorder and uiShared.GetActionButtonBorder() or nil
+  local artActive = (skin and (skin.atlas or skin.file)) and true or false
+  local fw = (frame.GetWidth and frame:GetWidth()) or 0
+  local fh = (frame.GetHeight and frame:GetHeight()) or 0
+  if fw <= 0 then fw = uiShared.ICON_SIZE or 45 end
+  if fh <= 0 then fh = fw end
+
+  if artActive then
+    -- Icon tucks just inside the frame art's inner edge; the art (sb) is drawn at the skin's real ratio.
+    frame.icon:ClearAllPoints()
+    frame.icon:SetPoint("TOPLEFT", frame, "TOPLEFT", 0.5, -0.5)
+    frame.icon:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -0.5, 0.5)
+    if not frame._skinBorder then frame._skinBorder = frame:CreateTexture(nil, "OVERLAY") end
+    local sb = frame._skinBorder
+    if skin.atlas then
+      sb:SetAtlas(skin.atlas, false)
+    else
+      sb:SetTexture(skin.file)
+      if skin.coords then sb:SetTexCoord(unpack(skin.coords)) end
+    end
+    sb:ClearAllPoints()
+    sb:SetSize(fw * (skin.wRatio or 1), fh * (skin.hRatio or 1))
+    sb:SetPoint("CENTER", frame, "CENTER", 0, 0)
+    sb:Show()
+  else
+    frame.icon:ClearAllPoints(); frame.icon:SetAllPoints(frame)
+    if frame._skinBorder then frame._skinBorder:Hide() end
+  end
+
+  -- Thin-border skin (no frame art): draw a thin accent border so it matches the main tracker icons.
+  if skin and skin.thin and not artActive then
+    if not frame._thinBorder then
+      local ok, bf = pcall(API.CreateFrame or CreateFrame, "Frame", nil, frame, "BackdropTemplate")
+      if ok and bf then frame._thinBorder = bf; bf:SetAllPoints(frame) end
+    end
+    local bf = frame._thinBorder
+    if bf and bf.SetBackdrop then
+      local th = (skin.thickness and skin.thickness > 0) and skin.thickness or 1
+      bf:SetBackdrop({ edgeFile = C.TEXTURE_WHITE8X8 or "Interface/Buttons/WHITE8x8", edgeSize = th })
+      bf:SetBackdropBorderColor(skin.r or 0, skin.g or 0, skin.b or 0, 1)
+      bf:Show()
+    end
+  elseif frame._thinBorder then
+    frame._thinBorder:Hide()
+  end
+
+  if uiShared.ApplyActionMaskTo then uiShared.ApplyActionMaskTo(frame, frame.icon, fw, fh) end
+end
+
 -- Per-icon keybind placement model (matches the Assisted Highlight keybind anchors):
 -- corner/centre + inset direction + justification.
 local ICON_KB_ANCHORS = {

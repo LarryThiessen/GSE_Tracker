@@ -221,8 +221,15 @@ local function EnsureBox(frame, label, tabIndex, saveDrag)
         -- whenever its options are open (Meters.lua "optionsOpen and LOW or HIGH"), but the readout frames
         -- keep their explicit HIGH -- so an inheriting box sinks below the numbers when the dialog opens.
         -- HIGH sits above all that content yet still below the option dialogs (DIALOG), which is what we want.
-        box:SetFrameStrata("HIGH")
-        box:SetFrameLevel((frame.GetFrameLevel and frame:GetFrameLevel() or 1) + 20)  -- above the element's own children (icons, numbers)
+        -- Peer of Blizzard's selections at MEDIUM, BUT with toplevel OFF (the template inherits toplevel=true,
+        -- so we must explicitly clear it). toplevel raises a frame to the top of its strata on click -- fine
+        -- for Blizzard's non-nested systems, but here a small Blizzard overlay (PRD) sits fully INSIDE our
+        -- large Meters box; with toplevel, clicking the big box would bury the PRD. With it OFF, the static
+        -- smaller-on-top depth levels set in RestackEditModeBoxes hold, so the higher-level PRD stays
+        -- clickable in its own rectangle. (Blizzard keeps its own toplevel; we never touch theirs.)
+        box:SetFrameStrata("MEDIUM")
+        box:SetFrameLevel(1000)
+        if box.SetToplevel then box:SetToplevel(false) end
         box.parent = frame
         editBoxes[#editBoxes + 1] = box  -- register for SelectBox's exclusive-keyboard sweep
         -- Native selection label text = "Click to Edit". The template draws it centered + always-on; we
@@ -292,7 +299,9 @@ end
 -- the full anchor if the children's screen rects aren't readable.
 local function FitMetersBox(box, anchor)
     if not (box and anchor and anchor.GetLeft) then return end
-    box:ClearAllPoints()
+    -- NOTE: do NOT ClearAllPoints here -- only clear+re-anchor on a SUCCESSFUL measurement (inside the
+    -- pcall, just before SetPoint). If the measurement fails (secret geometry post-combat) we must leave the
+    -- box's existing points intact, or it'd be left unanchored and vanish.
     -- The DPS/HPS readout geometry is a "secret" value (driven by C_DamageMeter); arithmetic/compares on
     -- it THROW while our (tainted) code runs. So do ALL the measurement inside pcall -- if it trips the
     -- secret-value guard, fall back to a fixed inset that approximates the cluster (NOT the full anchor).
@@ -302,21 +311,33 @@ local function FitMetersBox(box, anchor)
         local minL, maxR, maxT, minB
         local function add(c)
             if not (c and c.IsShown and c:IsShown() and c.GetLeft) then return end
-            local w = c.GetWidth and c:GetWidth()
-            if not w or w <= 1 then return end           -- (may throw on secret geometry -> pcall catches)
-            local l, r, t, b = c:GetLeft(), c:GetRight(), c:GetTop(), c:GetBottom()
-            if not (l and r and t and b) then return end
-            minL = minL and math.min(minL, l) or l
-            maxR = maxR and math.max(maxR, r) or r
-            maxT = maxT and math.max(maxT, t) or t
-            minB = minB and math.min(minB, b) or b
+            -- Per-element pcall: DPS/HPS text geometry is "secret" and THROWS on read while tainted; wrapping
+            -- each one means a secret readout just skips itself instead of aborting the whole measurement, so
+            -- the box still wraps everything else (items, PRD, Player Name, marker).
+            pcall(function()
+                local w = c:GetWidth()
+                if not w or w <= 1 then return end
+                local l, r, t, b = c:GetLeft(), c:GetRight(), c:GetTop(), c:GetBottom()
+                if not (l and r and t and b) then return end
+                minL = minL and math.min(minL, l) or l
+                maxR = maxR and math.max(maxR, r) or r
+                maxT = maxT and math.max(maxT, t) or t
+                minB = minB and math.min(minB, b) or b
+            end)
         end
-        -- Measure the VISIBLE TEXT (tight to glyphs) + the centre icon, NOT the wide readout frames.
+        -- Measure every placed cluster element so the box wraps the whole grid, not just the readouts.
         add(_G.GCDFrame and _G.GCDFrame.gcdText)
         add(_G.DPSFrame and _G.DPSFrame.dpsText)
         add(_G.HPSFrame and _G.HPSFrame.hpsText)
+        add(_G.AHMatchFrame and _G.AHMatchFrame.matchText)   -- AH % (slotted in the grid)
+        add(_G.PlayerNameFrame and _G.PlayerNameFrame.nameText)
         add(_G.AHLightFrame)   -- centre icon (Assisted Highlight mirror)
         add(_G.MarkerFrame)    -- centre icon (combat marker)
+        -- NOTE: the PRD is deliberately NOT measured -- it's its own Edit Mode system with its own selection
+        -- box, and (being a protected nameplate) can sit far from the cluster, which would balloon this box.
+        if _G.GSETracker_CooldownElements_ForEachShown then  -- placed Trinkets / Healthstone / cooldowns
+            _G.GSETracker_CooldownElements_ForEachShown(add)
+        end
         if not minL then error("nokids") end
         local pad = 8
         -- Symmetric around the marker centre (= the anchor centre) on BOTH axes: centre->left == centre->
@@ -327,16 +348,21 @@ local function FitMetersBox(box, anchor)
         -- +20 to the half-height -> the box grows 20px UP and 20px DOWN (40 taller overall), for headroom
         -- around the top/bottom readouts now that elements can sit in the corner cells.
         local halfH = math.max((maxT + pad) - centreY, centreY - (minB - pad)) + 20
+        box:ClearAllPoints()   -- only now (all measurements succeeded) do we re-anchor
         box:SetPoint("TOPLEFT",     anchor, "TOPLEFT",     (centreX - halfW) - aL, (centreY + halfH) - aT)
         box:SetPoint("BOTTOMRIGHT", anchor, "BOTTOMRIGHT", (centreX + halfW) - aR, (centreY - halfH) - aB)
     end)
-    if not ok then
-        -- Secret/unreadable geometry: a fixed inset that roughly hugs the readout cluster (the anchor is
-        -- 320x120; the cluster is ~180x70 centred). Insets reduced 20 top/bottom to match the +40 height.
+    if ok then
+        box._fittedOnce = true   -- remember we got a clean measurement
+    elseif not box._fittedOnce then
+        -- Never measured cleanly yet (e.g. Edit Mode opened mid-combat -- DPS/HPS geometry is "secret").
+        -- Approximate with a fixed inset (anchor is 320x120; cluster ~180x70 centred).
         box:ClearAllPoints()
         box:SetPoint("TOPLEFT",     anchor, "TOPLEFT",      70, -5)
         box:SetPoint("BOTTOMRIGHT", anchor, "BOTTOMRIGHT", -70,  5)
     end
+    -- else: measurement failed but we already have a good fit (combat made the readout geometry secret) --
+    -- KEEP the last good fit instead of snapping to the fallback. That's the "box resets after combat" bug.
 end
 
 -- Fit the Action Tracker box (VERTICAL layout) around the ACTUAL rendered content + 5px on every side:
@@ -385,6 +411,34 @@ function _G.GSETracker_RefitMetersBox()
     end
 end
 
+-- Drop each GSE selection box to the size-correct depth in Blizzard's selection stack. Blizzard assigns its
+-- own selection frames unique levels 1000..~1044 (mostly smaller-on-top) and re-asserts them, so we DON'T
+-- touch theirs -- we just place each of ours at level = 1000 + (count of shown Blizzard selections LARGER
+-- than it). A large GSE box (Meters/Action Tracker) thus sinks BELOW small Blizzard overlays like the PRD
+-- (200x26) and Encounter Bar (230x30) -- making them clickable -- while staying above larger frames.
+-- (Also orders our own boxes smaller-on-top, since a smaller box has more Blizzard frames larger than it.)
+local function RestackEditModeBoxes()
+    local blizAreas = {}
+    local emm = _G.EditModeManagerFrame
+    if emm and emm.registeredSystemFrames then
+        for _, sys in ipairs(emm.registeredSystemFrames) do
+            local sel = sys and sys.Selection
+            if sel and sel.IsShown and sel:IsShown() and sel.GetWidth then
+                blizAreas[#blizAreas + 1] = (sel:GetWidth() or 0) * (sel:GetHeight() or 0)
+            end
+        end
+    end
+    for _, b in ipairs(editBoxes) do
+        if b.IsShown and b:IsShown() and not b._topmost then   -- topmost boxes (AH) stay at HIGH; don't sink them
+            local area = (b:GetWidth() or 0) * (b:GetHeight() or 0)
+            local larger = 0
+            for _, ba in ipairs(blizAreas) do if ba > area then larger = larger + 1 end end
+            b:SetFrameStrata("MEDIUM")
+            b:SetFrameLevel(1000 + larger)
+        end
+    end
+end
+
 local function ShowBoxes(show)
     local UI = ns  -- finalized addon (ns:FinalizeAPI merges all modules); ns.UI alone lacks cross-module
                    -- methods like GetActionTrackerLayout (ns.Utils) -- driving off ns.UI made the vertical
@@ -406,7 +460,10 @@ local function ShowBoxes(show)
           end },
         { frame = _G.MetersAnchor,                       label = "Meters",             tab = 1, fit = "meters", nudge = "meters",
           enabledGet = function() return (_G.MetersSavedVars == nil) or (_G.MetersSavedVars.enabled ~= false) end },
-        { frame = addon.assistedHighlightFrame,          label = "Assisted Highlight", tab = 3, nudge = "ah",
+        { frame = addon.assistedHighlightFrame,          label = "Assisted Highlight", tab = 3, nudge = "ah", topmost = true,
+          -- topmost: in Target-Portrait mode the AH overlay deliberately sits ON the Blizzard Target Frame
+          -- (a MEDIUM selection). One-off: keep this box at HIGH so it stays clickable over the Target Frame
+          -- (it's small -- only the portrait area -- so it barely covers anything else).
           enabledGet = function() return (addon.IsAssistedHighlightMirrorEnabled and addon:IsAssistedHighlightMirrorEnabled()) and true or false end,
           -- Box drag moves the frame via StartMoving; persist the dropped offset (mouse drag used to
           -- not save -- only the arrow-key nudge did). Mirrors the Pressed Indicator's saveDrag.
@@ -485,13 +542,15 @@ local function ShowBoxes(show)
                     box:SetPoint("CENTER", f, "CENTER", 0, 0)
                     box:SetSize(mw, mh)
                 end
-                -- Raise above overlapping selection boxes -- including BLIZZARD'S own edit-mode systems
-                -- (e.g. the Possess Bar the indicator may sit over), which park their selections above
-                -- HIGH. DIALOG wins that, but we keep the level (150) BELOW our own option pop-up window
-                -- (GSETrackerEditWin, DIALOG level 200) so clicking the box still opens the panel on top.
-                if t.raise then
-                    box:SetFrameStrata("DIALOG")
-                    box:SetFrameLevel(150)
+                -- Peer of Blizzard's selection frames at MEDIUM; RestackEditModeBoxes sets the level by size.
+                -- EXCEPT topmost boxes (the AH Target-Portrait overlay) which sit at HIGH so they stay
+                -- clickable over the Blizzard Target Frame they deliberately overlap.
+                box._topmost = t.topmost and true or false
+                if box._topmost then
+                    box:SetFrameStrata("HIGH")
+                    box:SetFrameLevel(1000)
+                else
+                    box:SetFrameStrata("MEDIUM")
                 end
             else
                 box:Hide(); box.isSelected = false
@@ -501,6 +560,14 @@ local function ShowBoxes(show)
         end
     end
     if not show then selectedBox = nil end
+
+    -- Depth-sort our boxes into Blizzard's selection stack so small Blizzard overlays (PRD, Encounter Bar)
+    -- aren't buried. Run now, and again a tick later so Blizzard's frames have finished laying out/sizing
+    -- (and our deferred FitMetersBox has run) before we measure them.
+    RestackEditModeBoxes()
+    if show and C_Timer and C_Timer.After then
+        C_Timer.After(0.1, function() if _G.GSETracker_EditModeActive then RestackEditModeBoxes() end end)
+    end
 
     -- While Edit Mode is open, silence the Pressed Indicator's GLOBAL key monitor (ui/indicator.lua's
     -- addon._inputMonitor: EnableKeyboard(true) + propagating). Otherwise it competes for arrow-key focus
@@ -515,6 +582,12 @@ local function ShowBoxes(show)
             mon:EnableKeyboard(true)
         end
     end
+
+    -- The Meters selection box now sits at MEDIUM (Blizzard's layer). The Meters anchor is mouse-enabled at
+    -- HIGH while unlocked, which would swallow the MEDIUM box's clicks -- so while Edit Mode boxes are up,
+    -- have the anchor yield the mouse to its box (it stays movable; the box drags it). Restored on hide.
+    _G.GSETracker_EditModeActive = show and true or false
+    if _G.Meters_UpdateAnchorInteractivity then _G.Meters_UpdateAnchorInteractivity() end
 end
 
 -- Live box refresh: re-run ShowBoxes while Edit Mode is open so toggling an element's enable in the

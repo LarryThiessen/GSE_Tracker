@@ -71,7 +71,7 @@ end
 -- OPTIMISATION: clamp is inlined; no rounding needed beyond min/max clamp.
 local function ClampRefreshRateValue(value)
     value = tonumber(value) or 0.10
-    if value < 0.05 then return 0.05 end
+    if value < 0.02 then return 0.02 end
     if value > 0.15 then return 0.15 end
     return value
 end
@@ -247,6 +247,13 @@ iconCenter:SetSize(1, 1)
 local markerCell = CreateFrame("Frame", nil, anchor)
 markerCell:SetPoint("CENTER", iconCenter, "CENTER", 0, 0)
 markerCell:SetSize(1, 1)
+
+-- 1x1 anchor parked at the "Personal Resource Bar" grid cell. The PRD lock (ui/personal_resource.lua)
+-- reads this frame's screen centre to position Blizzard's protected PRD nameplate. Named so the lock
+-- module can find it; SetupFrames re-parks it on every layout.
+local prdCell = CreateFrame("Frame", "GSETracker_PRDCell", anchor)
+prdCell:SetPoint("CENTER", iconCenter, "CENTER", 0, 0)
+prdCell:SetSize(1, 1)
 
 local CENTER_GCD_SPELL_ID   = 61304
 local BULLSEYE_SWIPE_TEXTURE = "Interface\\AddOns\\GSE_Tracker\\media\\marker-images\\Crosshairs001.png"
@@ -578,7 +585,15 @@ end
 
 UpdateAnchorInteractivity = function()
     local locked = IsFramePositionLocked()
-    if locked then
+    if _G.GSETracker_EditModeActive then
+        -- Edit Mode: the selection box (at MEDIUM, Blizzard's layer) is the interaction surface and drags
+        -- the anchor via StartMoving -- so keep the anchor MOVABLE but give up the MOUSE, otherwise the
+        -- HIGH mouse-enabled anchor would swallow the MEDIUM box's clicks.
+        anchor:SetMovable(true)
+        anchor:EnableMouse(false)
+        if anchor.SetMouseClickEnabled  then anchor:SetMouseClickEnabled(false)  end
+        if anchor.SetMouseMotionEnabled then anchor:SetMouseMotionEnabled(false) end
+    elseif locked then
         anchor:StopMovingOrSizing()
         anchor:SetMovable(false)
         anchor:EnableMouse(false)
@@ -598,12 +613,28 @@ UpdateAnchorInteractivity = function()
     ApplyEffectiveOpacity()
 end
 
+-- Let ui/editmode.lua re-apply anchor interactivity when Edit Mode boxes show/hide (so the anchor yields
+-- the mouse to its MEDIUM selection box while editing).
+function _G.Meters_UpdateAnchorInteractivity() UpdateAnchorInteractivity() end
+
 -- ─── Saved position ───────────────────────────────────────────────────────────
 -- SetPoint offsets live in the anchor's OWN (scaled) coordinate space, so a scaled anchor would
 -- MULTIPLY the offset and drift the whole cluster (e.g. the default y = -15 doubles at scale 2,
 -- pushing it down). Store x/y in UIParent units (scale-independent) and divide by the anchor's
 -- scale when applying, so the cluster keeps its screen position and grows about its own centre.
 local function ApplySavedPosition()
+    -- Player-Tracked HUD: anchor the whole cluster to the player's personal nameplate so it follows the
+    -- character. Only works while that nameplate exists (needs nameplateShowSelf -- the toggle enables it);
+    -- if it isn't there (no nameplate, vehicle, cinematic, ...) we fall through to the fixed screen spot.
+    -- Anchoring our own (unprotected) frame to the nameplate is allowed even in combat.
+    if MetersSavedVars.playerTracked then
+        local np = C_NamePlate and C_NamePlate.GetNamePlateForUnit and C_NamePlate.GetNamePlateForUnit("player")
+        if np then
+            anchor:ClearAllPoints()
+            anchor:SetPoint("CENTER", np, "CENTER", 0, 0)
+            return
+        end
+    end
     local x = RoundToNearest(MetersSavedVars.x or 0)
     local y = RoundToNearest(MetersSavedVars.y or -15)
     MetersSavedVars.x = x
@@ -612,6 +643,25 @@ local function ApplySavedPosition()
     if not s or s == 0 then s = 1 end
     anchor:ClearAllPoints()
     anchor:SetPoint("CENTER", UIParent, "CENTER", x / s, y / s)
+end
+
+-- Re-apply the anchor when the player nameplate appears/disappears, so Player-Tracked mode latches onto it
+-- (ADDED) and falls back to the fixed spot when it's gone (REMOVED).
+local npTrackFrame = CreateFrame("Frame")
+npTrackFrame:RegisterEvent("NAME_PLATE_UNIT_ADDED")
+npTrackFrame:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
+npTrackFrame:SetScript("OnEvent", function(_, _, unit)
+    if unit == "player" and MetersSavedVars.playerTracked then ApplySavedPosition() end
+end)
+
+-- Player-Tracked HUD toggle. Needs the personal nameplate present to follow, so enabling it also turns on
+-- nameplateShowSelf (which also shows Blizzard's PRD bar -- they share the one CVar). Combat-protected CVar,
+-- so only set out of combat (the options panel can't be changed in combat anyway).
+function _G.Meters_GetPlayerTracked() return MetersSavedVars.playerTracked == true end
+function _G.Meters_SetPlayerTracked(on)
+    MetersSavedVars.playerTracked = on and true or nil
+    if on and not InCombatLockdown() then pcall(SetCVar, "nameplateShowSelf", "1") end
+    ApplySavedPosition()
 end
 
 local function SaveAnchorPosition()
@@ -655,36 +705,42 @@ end
 -- Highlight element positioned at the cluster bottom (see its own block in SetupFrames), so it is NOT in
 -- this slot system. The centre Marker icon, however, IS arrangeable -- it's slot id "Marker" (default "C").
 --
--- 25 cells: 5 columns (LL/L/C/R/RR) x 5 rows (TT/T/M/B/XB). The inner 9 keep their ORIGINAL names
--- (TL/T/.../BR) so saved arrangements survive with no migration; the far columns (LL/RR) and the extra
--- top/bottom rows (TT/XB) are added. 5 rows = odd, so M is the TRUE centre row. Each cell decomposes into
--- a column + a row, each with a position multiplier from centre.
+-- 35 cells: 5 columns (LL/L/C/R/RR) x 7 rows (TTT/TT/T/M/B/XB/XXB). The inner 9 keep their ORIGINAL names
+-- (TL/T/.../BR) so saved arrangements survive with no migration; the far columns (LL/RR), the extra
+-- top/bottom rows (TT/XB) and now a 3rd top/bottom pair (TTT/XXB) are added. 7 rows = odd, so M is still
+-- the TRUE centre row. Each cell decomposes into a column + a row, each with a position multiplier from centre.
 local METER_SLOTS = {
+    "TTTLL","TTTL","TTTC","TTTR","TTTRR",
     "TTLL", "TTL", "TTC", "TTR", "TTRR",
     "LLT",  "TL",  "T",   "TR",  "RRT",
     "LL",   "L",   "C",   "R",   "RR",
     "LLB",  "BL",  "B",   "BR",  "RRB",
     "XBLL", "XBL", "XBC", "XBR", "XBRR",
+    "XXBLL","XXBL","XXBC","XXBR","XXBRR",
 }
 local METER_SLOT_SET = {}
 for _, s in ipairs(METER_SLOTS) do METER_SLOT_SET[s] = true end
 local SLOT_COL = {
+    TTTLL="LL",TTTL="L",TTTC="C",TTTR="R",TTTRR="RR",
     TTLL= "LL", TTL= "L", TTC="C", TTR= "R", TTRR= "RR",
     LLT = "LL", TL = "L", T = "C", TR = "R", RRT = "RR",
     LL  = "LL", L  = "L", C = "C", R  = "R", RR  = "RR",
     LLB = "LL", BL = "L", B = "C", BR = "R", RRB = "RR",
     XBLL= "LL", XBL= "L", XBC="C", XBR= "R", XBRR= "RR",
+    XXBLL="LL",XXBL="L",XXBC="C",XXBR="R",XXBRR="RR",
 }
 local SLOT_ROW = {
+    TTTLL="TTT",TTTL="TTT",TTTC="TTT",TTTR="TTT",TTTRR="TTT",
     TTLL= "TT", TTL= "TT",TTC="TT",TTR= "TT",TTRR= "TT",
     LLT = "T",  TL = "T", T = "T", TR = "T", RRT = "T",
     LL  = "M",  L  = "M", C = "M", R  = "M", RR  = "M",
     LLB = "B",  BL = "B", B = "B", BR = "B", RRB = "B",
     XBLL= "XB", XBL= "XB",XBC="XB",XBR= "XB",XBRR= "XB",
+    XXBLL="XXB",XXBL="XXB",XXBC="XXB",XXBR="XXB",XXBRR="XXB",
 }
 -- Position multipliers from centre (in "steps"). The HUD geometry below turns these into pixel offsets.
 local COL_MULT = { LL = -2, L = -1, C = 0, R = 1, RR = 2 }
-local ROW_MULT = { TT = 2, T = 1, M = 0, B = -1, XB = -2 }
+local ROW_MULT = { TTT = 3, TT = 2, T = 1, M = 0, B = -1, XB = -2, XXB = -3 }
 -- Migrate the old 4-name scheme (pre-9-grid) so saved arrangements survive.
 local LEGACY_SLOT_MAP = { TOP = "T", BOTTOM = "B", LEFT = "L", RIGHT = "R" }
 
@@ -693,7 +749,10 @@ local LEGACY_SLOT_MAP = { TOP = "T", BOTTOM = "B", LEFT = "L", RIGHT = "R" }
 -- until the user adds it to the grid (FixedElementOn special-cases it to off-by-default). Its default
 -- cell (B) is only used once it's added. When ON the grid, the under-AT readout stands down (see
 -- ui/modkey_stack.lua UpdateAHMatchReadout, gated on GSETracker_IsAHMatchSlotted).
-local METER_SLOT_DEFAULTS = { DPS = "L", HPS = "R", GCD = "T", Marker = "C", AHMatch = "B" }
+-- PersonalResource is positional like Marker (no text frame): it locks Blizzard's protected PRD nameplate
+-- to its cell at safe moments (see ui/personal_resource.lua). Default cell XBC (bottom row, centre).
+-- TrackedBuffs is the "Cooldowns" bar (up to 5 chosen 30s+ spells, side by side); positional, no text frame.
+local METER_SLOT_DEFAULTS = { DPS = "L", HPS = "R", GCD = "T", Marker = "C", AHMatch = "B", PlayerName = "TTC", PersonalResource = "XBC", TrackedBuffs = "XXBC" }
 
 -- id -> (global frame name created by its module, text fontstring field on that frame). The Marker is NOT
 -- here -- it isn't a text readout placed by PlaceMeterElement; it has its own markerCell positioning.
@@ -702,7 +761,24 @@ local METER_ELEMENTS = {
     { id = "HPS", frame = "HPSFrame", text = "hpsText" },
     { id = "GCD", frame = "GCDFrame", text = "gcdText" },
     { id = "AHMatch", frame = "AHMatchFrame", text = "matchText" },
+    { id = "PlayerName", frame = "PlayerNameFrame", text = "nameText" },
 }
+
+-- "Player Name" grid element -- a static, class-coloured readout of the player's name. Default OFF
+-- (off the grid) like AHMatch; placed by the same machinery when added. UpdatePlayerNameText refreshes
+-- the text/colour (name only changes on rename/transfer -> a /reload, so refreshing in SetupFrames is fine).
+local PlayerNameFrame = CreateFrame("Frame", "PlayerNameFrame", UIParent)
+PlayerNameFrame:SetSize(120, 20)
+PlayerNameFrame:Hide()
+PlayerNameFrame.nameText = PlayerNameFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+PlayerNameFrame.nameText:SetPoint("CENTER", PlayerNameFrame, "CENTER", 0, 0)
+local function UpdatePlayerNameText()
+    PlayerNameFrame.nameText:SetText(UnitName("player") or "")
+    local _, classFile = UnitClass("player")
+    local colors = CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS
+    local c = classFile and colors and colors[classFile]
+    if c then PlayerNameFrame.nameText:SetTextColor(c.r, c.g, c.b) else PlayerNameFrame.nameText:SetTextColor(1, 1, 1) end
+end
 
 -- Offset (from iconCenter) where the centre ICON sits for a given grid cell: centred, COL_MULT/ROW_MULT
 -- steps of one icon + gap out per direction (so it lines up with the readout columns/rows).
@@ -710,6 +786,50 @@ local function MarkerCellOffset(slot, iconWidth, iconHeight, gap)
     local cm = COL_MULT[SLOT_COL[slot] or "C"] or 0
     local rm = ROW_MULT[SLOT_ROW[slot] or "M"] or 0
     return cm * ((iconWidth or 0) + gap), rm * ((iconHeight or 0) + gap)
+end
+
+-- Centre offset (from iconCenter) for a non-text positional element (the PRD bar) that must line up with
+-- the TEXT readouts. Mirrors PlaceMeterElement's row/column step (first step = half-icon + half-font + gap,
+-- each further step = one base-font line) -- NOT MarkerCellOffset's icon step, which is ~twice as large and
+-- makes the element over/undershoot the readouts the further it sits from centre.
+local function MeterTextCellOffset(slot, iconWidth, iconHeight, gap)
+    local cm = COL_MULT[SLOT_COL[slot] or "C"] or 0
+    local rm = ROW_MULT[SLOT_ROW[slot] or "M"] or 0
+    local fontSize = MetersSavedVars.fontSize or 18
+    local x = 0
+    if cm ~= 0 then
+        local edgeX = (iconWidth > 0) and ((iconWidth / 2) + gap) or 0
+        local COL_W = (fontSize * 4) + gap
+        local mag = edgeX + (math.abs(cm) - 1) * COL_W
+        x = (cm > 0) and mag or -mag
+    end
+    local y = 0
+    if rm ~= 0 then
+        local th = fontSize
+        local mag = (iconHeight > 0) and ((iconHeight / 2) + (th / 2) + gap) or ((th / 2) + gap)
+        mag = math.floor((mag + (math.abs(rm) - 1) * (th + gap)) + 0.5)
+        y = (rm > 0) and mag or -mag
+    end
+    return x, y
+end
+
+-- Centre offset for ICON elements (cooldown items). Y matches the TEXT rows (MeterTextCellOffset) so items
+-- sit at the cluster's row heights and don't shoot far above/below it; X is a symmetric step with a one-icon
+-- MINIMUM so side-by-side items never overlap. (A pure icon-sized grid flew items way out; the tight text
+-- columns let them overlap -- this hybrid keeps them aligned vertically and spread horizontally.)
+local function MeterIconCellOffset(slot, iconWidth, iconHeight, gap)
+    local cm = COL_MULT[SLOT_COL[slot] or "C"] or 0
+    local rm = ROW_MULT[SLOT_ROW[slot] or "M"] or 0
+    local fontSize = MetersSavedVars.fontSize or 18
+    local y = 0
+    if rm ~= 0 then
+        local th = fontSize
+        local mag = (iconHeight > 0) and ((iconHeight / 2) + (th / 2) + gap) or ((th / 2) + gap)
+        mag = math.floor((mag + (math.abs(rm) - 1) * (th + gap)) + 0.5)
+        y = (rm > 0) and mag or -mag
+    end
+    local stepX = math.max((fontSize * 2) + gap, (iconWidth or 0) + gap)
+    return cm * stepX, y
 end
 
 -- Optional cooldown elements (Trinkets, Healthstone, ...) live in the slot map ONLY when placed, keyed by
@@ -777,7 +897,7 @@ end
 -- Concatenate the assignments -- folded into the layout cache key so a swap forces a re-layout.
 function Meter_SlotKey()
     local s = MeterSlots()
-    return (s.DPS or "") .. (s.HPS or "") .. (s.GCD or "") .. (s.Marker or "") .. (s.AHMatch or "")
+    return (s.DPS or "") .. (s.HPS or "") .. (s.GCD or "") .. (s.Marker or "") .. (s.AHMatch or "") .. (s.PlayerName or "")
 end
 
 local function MeterTextHeight(fs)
@@ -791,49 +911,20 @@ local function MeterTextHeight(fs)
     return (ok and tonumber(size)) or fallback
 end
 
--- Place ONE readout at its assigned grid cell relative to iconCenter. The cell decomposes into a column
--- (LL/L/C/R/RR via COL_MULT) and row (T/M/B/XB via ROW_MULT). The first step out from centre hugs the icon
--- (edge-anchored, text justified outward); each FURTHER column/row step adds a fixed COL_W / ROW_H. The
--- fontstring hugs the frame's matching edge so it travels with the frame. gap/iconWidth/iconHeight come
--- from SetupFrames. (COL_W / ROW_H are font-derived estimates for the outer cells -- tune if spacing is off.)
-local function PlaceMeterElement(frame, textField, slot, iconWidth, iconHeight, gap)
+-- Place ONE readout, centred at the (x, y) centre of its grid cell. The content-aware grid (ComputeMeterGrid)
+-- has already sized every column/row to its widest/tallest member, so cells never overlap and centring the
+-- text is safe. (x, y) come from CellXY(grid, slot) in SetupFrames.
+local function PlaceMeterElement(frame, textField, x, y)
     if not frame then return end
     frame:SetParent(anchor)
     frame:SetFrameLevel(11)
     frame:ClearAllPoints()
-    local fs  = frame[textField]
-    local cm  = COL_MULT[SLOT_COL[slot] or "C"] or 0
-    local rm  = ROW_MULT[SLOT_ROW[slot] or "M"] or 0
-    local fontSize = MetersSavedVars.fontSize or 18
-    local edgeX = (iconWidth > 0) and ((iconWidth / 2) + gap) or 0
-    local COL_W = (fontSize * 4) + gap   -- horizontal spacing per outer column
-
-    -- Horizontal: centre column -> centre-anchored; left columns -> right-edge anchored (justify RIGHT),
-    -- right columns -> left-edge anchored (justify LEFT). |cm| > 1 adds COL_W per extra column out.
-    local point, x, justify
-    if cm == 0 then
-        point, x, justify = "CENTER", 0, "CENTER"
-    elseif cm < 0 then
-        point, x, justify = "RIGHT", -(edgeX + (-cm - 1) * COL_W), "RIGHT"
-    else
-        point, x, justify = "LEFT",   (edgeX + ( cm - 1) * COL_W), "LEFT"
-    end
-
-    -- Vertical: first row step = half the icon + half this readout's text + gap; each further step = one
-    -- text line (ROW_H).
-    local y = 0
-    if rm ~= 0 then
-        local th = MeterTextHeight(fs)
-        local mag = (iconHeight > 0) and ((iconHeight / 2) + (th / 2) + gap) or ((th / 2) + gap)
-        mag = math.floor((mag + (math.abs(rm) - 1) * (th + gap)) + 0.5)
-        y = (rm > 0) and mag or -mag
-    end
-
-    frame:SetPoint(point, iconCenter, "CENTER", x, y)
+    frame:SetPoint("CENTER", iconCenter, "CENTER", x, y)
+    local fs = frame[textField]
     if fs then
         fs:ClearAllPoints()
-        fs:SetPoint(point, frame, point, 0, 0)  -- hug the same edge the frame is anchored by
-        fs:SetJustifyH(justify)
+        fs:SetPoint("CENTER", frame, "CENTER", 0, 0)
+        fs:SetJustifyH("CENTER")
     end
 end
 
@@ -843,13 +934,16 @@ end
 -- their show flag (so the Readouts dropdown stays in sync), the Marker follows markerHidden (gated in
 -- ui/player_tracker.lua ShouldShowCombatMarker). They keep their saved cell while hidden, so re-adding
 -- restores the spot.
-local FIXED_SHOW_KEY = { DPS = "showDPS", HPS = "showHPS", GCD = "showGCD", AHMatch = "showAHMatch" }
-local FIXED_ORDER    = { "GCD", "DPS", "HPS", "AHMatch", "Marker" }
+local FIXED_SHOW_KEY = { DPS = "showDPS", HPS = "showHPS", GCD = "showGCD", AHMatch = "showAHMatch", PlayerName = "showPlayerName", PersonalResource = "showPRD", TrackedBuffs = "showTrackedBuffs" }
+local FIXED_ORDER    = { "GCD", "DPS", "HPS", "AHMatch", "PlayerName", "PersonalResource", "TrackedBuffs", "Marker" }
 
 local function FixedElementOn(id)
     if id == "Marker" then return not MetersSavedVars.markerHidden end
-    -- AHMatch is the only fixed element that DEFAULTS OFF (it shows under the Action Tracker until added).
+    -- These fixed elements DEFAULT OFF (off the grid until the user adds them).
     if id == "AHMatch" then return MetersSavedVars.showAHMatch == true end
+    if id == "PlayerName" then return MetersSavedVars.showPlayerName == true end
+    if id == "PersonalResource" then return MetersSavedVars.showPRD == true end
+    if id == "TrackedBuffs" then return MetersSavedVars.showTrackedBuffs == true end
     local k = FIXED_SHOW_KEY[id]
     if k then return MetersSavedVars[k] ~= false end
     return true
@@ -858,6 +952,24 @@ end
 -- True when "AH %" has been placed on the Layout Control grid (so the under-AT readout stands down).
 function _G.GSETracker_IsAHMatchSlotted()
     return MetersSavedVars.showAHMatch == true
+end
+
+-- The Player Name element duplicates Blizzard's "My Name" nameplate option (CVar UnitNameOwn) shown on the
+-- personal nameplate. So while our Player Name is on the grid, turn UnitNameOwn OFF (no doubled name) and
+-- restore the player's original setting when it's removed. We capture the original ONCE (persisted in the SV
+-- so a reload doesn't capture our own "0"). The CVar is nameplate-protected -> only set out of combat (grid
+-- edits happen in the options panel, which is out of combat).
+local function ApplyPlayerNameCVar()
+    if InCombatLockdown() then return end
+    if MetersSavedVars.showPlayerName == true then
+        if MetersSavedVars.nameOwnSaved == nil then
+            MetersSavedVars.nameOwnSaved = GetCVar("UnitNameOwn") or "1"   -- the player's real setting, once
+        end
+        pcall(SetCVar, "UnitNameOwn", "0")
+    elseif MetersSavedVars.nameOwnSaved ~= nil then
+        pcall(SetCVar, "UnitNameOwn", MetersSavedVars.nameOwnSaved)
+        MetersSavedVars.nameOwnSaved = nil
+    end
 end
 
 local function SetFixedElementOn(id, on)
@@ -879,6 +991,13 @@ local function AfterGridChange()
     if _G.GSETracker_RefitMetersBox then _G.GSETracker_RefitMetersBox() end
     -- AH %% toggles between its grid slot and the under-Action-Tracker spot -- refresh it on any grid change.
     if _G.GSETracker_UpdateAHMatchReadout then _G.GSETracker_UpdateAHMatchReadout() end
+    -- Re-lock the protected PRD nameplate to its cell (no-op if not slotted / out of combat handled there).
+    if _G.GSETracker_LockPersonalResource then _G.GSETracker_LockPersonalResource() end
+end
+
+-- True when "Personal Resource Bar" is on the Layout Control grid (the PRD lock module gates on this).
+function _G.GSETracker_IsPRDSlotted()
+    return MetersSavedVars.showPRD == true
 end
 
 -- Assign `id` to a 3x3 grid `slot` (TL/T/TR/L/C/R/BL/B/BR), swapping any occupant. Placing a fixed element
@@ -889,6 +1008,8 @@ function Meter_SetElementSlot(id, slot)
     end
     if METER_SLOT_DEFAULTS[id] then SetFixedElementOn(id, true) end
     MeterAssignSlot(id, slot)
+    if id == "PersonalResource" and _G.GSETracker_SetPRDEnabled then _G.GSETracker_SetPRDEnabled(true) end
+    if id == "PlayerName" then ApplyPlayerNameCVar() end   -- hide Blizzard's "My Name" so it's not doubled
     AfterGridChange()
     return MeterSlots()
 end
@@ -898,6 +1019,8 @@ end
 function Meter_RemoveElement(id)
     if METER_SLOT_DEFAULTS[id] then
         SetFixedElementOn(id, false)
+        if id == "PersonalResource" and _G.GSETracker_SetPRDEnabled then _G.GSETracker_SetPRDEnabled(false) end
+        if id == "PlayerName" then ApplyPlayerNameCVar() end   -- restore the player's "My Name" setting
     elseif OptionalElementValid(id) then
         local s = MeterSlots()
         if s[id] == nil then return s end
@@ -919,7 +1042,9 @@ function Meter_GetAvailableElements()
     end
     if _G.GSETracker_CooldownElements_List then
         for _, e in ipairs(_G.GSETracker_CooldownElements_List()) do
-            if s[e.id] == nil then out[#out + 1] = e end
+            -- Hide it if already on the grid OR already in the Cooldowns bar (no duplicate display).
+            local inBar = _G.GSETracker_TrackedCooldowns_IsAssigned and _G.GSETracker_TrackedCooldowns_IsAssigned(e.id)
+            if s[e.id] == nil and not inBar then out[#out + 1] = e end
         end
     end
     return out
@@ -927,9 +1052,18 @@ end
 
 function Meter_IsOptionalElement(id) return not METER_SLOT_DEFAULTS[id] end
 
+-- True if an optional element id is currently placed as a standalone cell on the grid (used by the Cooldowns
+-- bar picker to avoid offering an element that's already shown elsewhere).
+function _G.Meter_IsOptionalPlaced(id)
+    return (not METER_SLOT_DEFAULTS[id]) and MeterSlots()[id] ~= nil
+end
+
 -- Display label for any element id (readout labels are literal; optional elements come from the registry).
 function Meter_ElementLabel(id)
     if id == "AHMatch" then return "AH %" end
+    if id == "PlayerName" then return "Player Name" end
+    if id == "PersonalResource" then return "PRD" end
+    if id == "TrackedBuffs" then return "Cooldowns" end
     if METER_SLOT_DEFAULTS[id] then return id end
     return (_G.GSETracker_CooldownElements_Label and _G.GSETracker_CooldownElements_Label(id)) or id
 end
@@ -945,14 +1079,102 @@ function Meter_GetElementSlots()
     return out
 end
 
--- The (x, y) the centre marker should shift by for its assigned grid cell, in cluster units. The visible
--- centre marker is usually the COMBAT marker (ui/player_tracker.lua, anchored to UIParent centre), not the
--- meters MarkerFrame -- so ApplyCombatMarkerPosition adds this so the "Marker" chip moves the real marker.
--- (0,0) for the default centre cell = no shift. Uses the same icon size as the readout cells so it lands
--- on the same grid.
+-- ── Layout padding (X/Y gap between grid cells) ──────────────────────────────
+-- User-tunable horizontal/vertical gap added between grid cells (Meters HUD panel). Clamped 0..10; default 0
+-- (no extra gap) -- the player bumps it up in the Meters panel if they want spacing, and the change saves to SV.
+local function PaddingX()
+    local v = tonumber(MetersSavedVars.paddingX); if not v then return 0 end
+    return math.max(0, math.min(10, v))
+end
+local function PaddingY()
+    local v = tonumber(MetersSavedVars.paddingY); if not v then return 0 end
+    return math.max(0, math.min(10, v))
+end
+function _G.Meter_GetPaddingX() return PaddingX() end
+function _G.Meter_GetPaddingY() return PaddingY() end
+local function ApplyPaddingChange()
+    Meter_InvalidateLayout()
+    if SetupFrames then SetupFrames() end
+    if _G.GSETracker_RefitMetersBox then _G.GSETracker_RefitMetersBox() end
+    if addon and addon.RefreshCombatMarker then pcall(addon.RefreshCombatMarker, addon, false) end
+end
+function _G.Meter_SetPaddingX(v)
+    MetersSavedVars.paddingX = math.max(0, math.min(10, tonumber(v) or 0)); ApplyPaddingChange()
+end
+function _G.Meter_SetPaddingY(v)
+    MetersSavedVars.paddingY = math.max(0, math.min(10, tonumber(v) or 0)); ApplyPaddingChange()
+end
+
+-- ── Content-aware grid ──────────────────────────────────────────────────────
+-- Each COLUMN's width = its widest member, each ROW's height = its tallest; cells are laid out cumulatively
+-- out from the centre cell (C/M); every element is centred in its cell. So big items (icons) make their
+-- row/column bigger and smaller items just sit centred inside -- no overlap, no flying out. Footprints are
+-- font/icon estimates (never measured: DPS/HPS width+height are "secret" and throw on read while tainted).
+-- gapX/gapY (PaddingX/PaddingY) are added between cells. Returns colX[cm] / rowY[rm] centre-offset tables.
+local function ComputeMeterGrid(slots, iconSize, fontSize, gap)
+    -- Every column/row starts at a MINIMUM size (not 0) so EMPTY cells still occupy their slot -- otherwise
+    -- empty interior rows/columns collapse and the HUD drifts out of sync with the Layout Control schematic
+    -- (which shows every cell). Content (icons/text) expands a cell beyond the minimum via note().
+    local minColW = fontSize * 3
+    local minRowH = fontSize
+    local colW, rowH = {}, {}
+    for c = -2, 2 do colW[c] = minColW end
+    for r = -3, 3 do rowH[r] = minRowH end
+    local function note(slot, w, h)
+        local c = COL_MULT[SLOT_COL[slot] or "C"] or 0
+        local r = ROW_MULT[SLOT_ROW[slot] or "M"] or 0
+        if w > colW[c] then colW[c] = w end
+        if h > rowH[r] then rowH[r] = h end
+    end
+    -- Footprints are FIXED font-based estimates (never the live text width -- DPS/HPS width is "secret", and
+    -- a measured width would shuffle the grid as the numbers change in combat). DPS/HPS get extra headroom so
+    -- the biggest abbreviated number (e.g. "999.9K") fits the fixed cell without overflowing into neighbours.
+    local th = fontSize                                   -- text line height
+    if FixedElementOn("DPS")              then note(slots.DPS,        fontSize * 4, th) end
+    if FixedElementOn("HPS")              then note(slots.HPS,        fontSize * 4, th) end
+    if FixedElementOn("GCD")              then note(slots.GCD,        fontSize * 3, th) end
+    if FixedElementOn("AHMatch")          then note(slots.AHMatch,    fontSize * 4, th) end
+    if FixedElementOn("PlayerName")       then note(slots.PlayerName, fontSize * 4, th) end
+    if FixedElementOn("PersonalResource") then
+        -- Use the PRD bar's REAL height (it's a thin bar, not a full icon) so its row isn't over-tall.
+        local prd = _G.PersonalResourceDisplayFrame
+        local ph = (prd and prd.GetHeight and prd:GetHeight()) or 0
+        if ph <= 1 then ph = iconSize end
+        note(slots.PersonalResource, iconSize * 2, ph)
+    end
+    -- TrackedBuffs (the Cooldowns bar) contributes only ROW HEIGHT, not column width: the bar spans the row
+    -- centred on its cell and should NOT widen the column (it overflows the cell horizontally by design).
+    -- Width 0 = no column impact.
+    if FixedElementOn("TrackedBuffs") then
+        note(slots.TrackedBuffs, 0, iconSize)
+    end
+    note(slots.Marker, iconSize, iconSize)               -- centre icon always occupies its cell
+    for _, id in ipairs(PlacedOptionalIds()) do note(slots[id], iconSize, iconSize) end
+
+    local gapX = PaddingX()
+    local gapY = PaddingY()
+    local colX, rowY = { [0] = 0 }, { [0] = 0 }
+    for c = 1, 2       do colX[c] = colX[c - 1] + (colW[c - 1] + colW[c]) / 2 + gapX end
+    for c = -1, -2, -1 do colX[c] = colX[c + 1] - (colW[c + 1] + colW[c]) / 2 - gapX end
+    for r = 1, 3       do rowY[r] = rowY[r - 1] + (rowH[r - 1] + rowH[r]) / 2 + gapY end
+    for r = -1, -3, -1 do rowY[r] = rowY[r + 1] - (rowH[r + 1] + rowH[r]) / 2 - gapY end
+    return colX, rowY
+end
+
+local function CellXY(colX, rowY, slot)
+    local c = COL_MULT[SLOT_COL[slot] or "C"] or 0
+    local r = ROW_MULT[SLOT_ROW[slot] or "M"] or 0
+    return colX[c] or 0, rowY[r] or 0
+end
+
+-- The (x, y) the centre marker should shift by for its assigned grid cell. The visible centre marker is
+-- usually the COMBAT marker (ui/player_tracker.lua); ApplyCombatMarkerPosition adds this so the "Marker"
+-- chip moves the real marker. Uses the same content grid as SetupFrames so it lands on the same spot.
 function Meter_GetMarkerCellOffset()
-    local w, h = GetCenterFrameSize()
-    return MarkerCellOffset(MeterSlots().Marker, w, h, 3)
+    local w = GetCenterFrameSize()
+    local isize = math.max(16, math.floor(((w and w > 0 and w) or 24) + 0.5))
+    local colX, rowY = ComputeMeterGrid(MeterSlots(), isize, MetersSavedVars.fontSize or 18, 3)
+    return CellXY(colX, rowY, MeterSlots().Marker)
 end
 
 function SetupFrames()
@@ -1008,11 +1230,21 @@ function SetupFrames()
 
     local slots = MeterSlots()
 
+    -- Build the content-aware grid once: columns/rows sized to their widest/tallest member; everything is
+    -- placed at its cell centre via CellXY. iconSize = the centre icon footprint (also used for placed items).
+    local isize = math.max(16, math.floor((iconWidth > 0 and iconWidth or GetCenterFrameSize()) + 0.5))
+    local colX, rowY = ComputeMeterGrid(slots, isize, MetersSavedVars.fontSize or 18, gap)
+
     -- Move the centre-icon cell to the Marker's assigned grid cell. The icon (AHLight/Marker) and its GCD
     -- swipe all anchor to markerCell, so they follow it together.
-    local mcx, mcy = MarkerCellOffset(slots.Marker, iconWidth, iconHeight, gap)
+    local mcx, mcy = CellXY(colX, rowY, slots.Marker)
     markerCell:ClearAllPoints()
     markerCell:SetPoint("CENTER", iconCenter, "CENTER", mcx, mcy)
+
+    -- Park the PRD lock anchor at its cell so the lock module can read the cell's screen position.
+    local pcx, pcy = CellXY(colX, rowY, slots.PersonalResource)
+    prdCell:ClearAllPoints()
+    prdCell:SetPoint("CENTER", iconCenter, "CENTER", pcx, pcy)
 
     if AHLightFrame then
         AHLightFrame:SetParent(anchor)
@@ -1031,17 +1263,20 @@ function SetupFrames()
         MarkerFrame:SetAlpha(1)
     end
 
-    -- Place the three readouts (DPS/HPS/GCD) at their assigned 3x3 grid cells (arranged from the Meters
-    -- edit panel; see PlaceMeterElement). They anchor to iconCenter (the fixed geometric centre).
+    -- Place the readouts (DPS/HPS/GCD/AH%/Player Name) at their grid-cell centres.
     for _, e in ipairs(METER_ELEMENTS) do
-        PlaceMeterElement(_G[e.frame], e.text, slots[e.id], iconWidth, iconHeight, gap)
+        local ex, ey = CellXY(colX, rowY, slots[e.id])
+        PlaceMeterElement(_G[e.frame], e.text, ex, ey)
     end
 
-    -- Place any optional cooldown elements (Trinkets, Healthstone, ...). They're icons, so they centre in
-    -- their cell like the marker (one icon + gap out). Sized to the centre-frame size; updated by the
-    -- CooldownElements ticker.
+    -- Player Name is static: refresh its text/colour and show it only while it's on the grid. (AH% owns
+    -- its own show/value via UpdateAHMatchReadout; DPS/HPS/GCD are shown by their modules + Meter_SetDisplay.)
+    UpdatePlayerNameText()
+    PlayerNameFrame:SetShown(FixedElementOn("PlayerName"))
+
+    -- Place any optional cooldown elements (Trinkets, Healthstone, ...) at their grid-cell centres. Their
+    -- icon footprint sized the row/column (in ComputeMeterGrid), so they sit centred without overlapping.
     if _G.GSETracker_CooldownElements_Ensure then
-        local isize = math.max(16, math.floor((iconWidth > 0 and iconWidth or GetCenterFrameSize()) + 0.5))
         for _, id in ipairs(PlacedOptionalIds()) do
             local f = _G.GSETracker_CooldownElements_Ensure(id, anchor)
             if f then
@@ -1049,12 +1284,36 @@ function SetupFrames()
                 f:SetFrameLevel(12)
                 f:SetSize(isize, isize)
                 f:ClearAllPoints()
-                local ox, oy = MarkerCellOffset(slots[id], iconWidth, iconHeight, gap)
+                local ox, oy = CellXY(colX, rowY, slots[id])
                 f:SetPoint("CENTER", iconCenter, "CENTER", ox, oy)
+                -- Adopt the action-bar skin (frame art + mask + crop) so items match the rest of the UI.
+                if _G.GSETracker_SkinAdoptedIcon then _G.GSETracker_SkinAdoptedIcon(f) end
                 f:Show()
                 if _G.GSETracker_CooldownElements_Update then _G.GSETracker_CooldownElements_Update(id) end
             end
         end
+    end
+
+    -- Cooldowns bar (TrackedBuffs): render up to N chosen 30s+ spells side by side, NO horizontal padding,
+    -- centred at the cell. The cooldown swipe + countdown number are engine-drawn (secret-value safe).
+    -- Hidden (and its widgets parked) when not slotted.
+    if _G.GSETracker_TrackedCooldowns_Ensure and FixedElementOn("TrackedBuffs") then
+        local n  = (_G.GSETracker_TrackedCooldowns_Count and _G.GSETracker_TrackedCooldowns_Count()) or 5
+        local bx, by = CellXY(colX, rowY, slots.TrackedBuffs)
+        local startX = bx - (n * isize) / 2 + isize / 2     -- centre of the first icon
+        for i = 1, n do
+            local f = _G.GSETracker_TrackedCooldowns_Ensure(i, anchor)
+            if f then
+                f:SetParent(anchor); f:SetFrameLevel(12); f:SetSize(isize, isize)
+                f:ClearAllPoints()
+                f:SetPoint("CENTER", iconCenter, "CENTER", startX + (i - 1) * isize, by)   -- side by side, no gap
+                if _G.GSETracker_SkinAdoptedIcon then _G.GSETracker_SkinAdoptedIcon(f) end
+                f:Show()
+                _G.GSETracker_TrackedCooldowns_Update(i)
+            end
+        end
+    elseif _G.GSETracker_TrackedCooldowns_HideAll then
+        _G.GSETracker_TrackedCooldowns_HideAll()
     end
 
     -- AHLightUsage is NOT a meters readout (it's an Assisted Highlight element); it keeps its own fixed
@@ -1146,6 +1405,9 @@ function Meter_UpdateVisibility()
     end
     UpdateCenterGCDSwipe()
     UpdateAnchorInteractivity()
+    -- If the PRD is slotted in the Meters HUD, mirror the HUD's visibility onto it (alpha lever -- works in
+    -- combat too, unlike Hide on a protected nameplate frame).
+    if _G.GSETracker_SyncPRDVisibility then _G.GSETracker_SyncPRDVisibility() end
 end
 
 -- ─── Apply functions ──────────────────────────────────────────────────────────
@@ -1329,6 +1591,9 @@ function Meter_ApplyFont(fontName, size)
     if AHMatchFrame and AHMatchFrame.matchText then
         -- AH %% in the Meters HUD renders 8pt smaller than the other readouts (floored at 8), like GCD's -2.
         AHMatchFrame.matchText:SetFont(fontPath, math.max(resolvedSize - 8, 8), outline)
+    end
+    if PlayerNameFrame and PlayerNameFrame.nameText then
+        PlayerNameFrame.nameText:SetFont(fontPath, resolvedSize, outline)
     end
     if GCD_ApplyFont then
         GCD_ApplyFont(selectedFontName, resolvedSize, outline)
@@ -1602,6 +1867,7 @@ local function FullInit()
     )
     Meter_SetLocked(MetersSavedVars.locked)
     Meter_UpdateVisibility()
+    ApplyPlayerNameCVar()  -- on load: if Player Name is slotted, ensure Blizzard's "My Name" is OFF (no double)
     if not lastMountedState then
         if UsingAHLight() then UpdateAHLightFrame(true) else UpdateMarkerFrame() end
         if IsFramePositionLocked() and GCD_UpdateNow then GCD_UpdateNow() end

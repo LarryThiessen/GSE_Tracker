@@ -430,7 +430,11 @@ local function MakeHeader(pane, y, desc)
   -- first row (the tab title, y == -12) so the top of the pane isn't pushed down.
   local topPad = (y < -12) and 10 or 0
   local fs = pane:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-  fs:SetPoint("TOPLEFT", pane, "TOPLEFT", 12, y - topPad)
+  if desc.center then
+    fs:SetPoint("TOP", pane, "TOP", 0, y - topPad)
+  else
+    fs:SetPoint("TOPLEFT", pane, "TOPLEFT", 12, y - topPad)
+  end
   fs:SetText(desc.text)
   return 30 + topPad
 end
@@ -1285,8 +1289,13 @@ end
 -- function returning true) greys out the FIRST slider when its value is controlled
 -- automatically (e.g. AH Scale while Target Portrait auto-sizes to the portrait).
 local function MakeDualSlider(pane, y, desc)
-  local s1, v1, t1 = CreateSliderAt(pane, 20, y, 150, desc.label, ResolveGet(desc.get), ResolveSet(desc.set), desc.min, desc.max, desc.step, desc.float)
-  local s2, v2 = CreateSliderAt(pane, 300, y, 150, desc.label2, ResolveGet(desc.get2), ResolveSet(desc.set2), desc.min2, desc.max2, desc.step2, desc.float2)
+  -- x1/x2/sliderWidth default to the wide General-tab layout, but narrow windows (the 490px Meters dialog)
+  -- pass smaller values so the 2nd slider doesn't overflow off the edge.
+  local w  = desc.sliderWidth or 150
+  local x1 = desc.x1 or 20
+  local x2 = desc.x2 or 300
+  local s1, v1, t1 = CreateSliderAt(pane, x1, y, w, desc.label, ResolveGet(desc.get), ResolveSet(desc.set), desc.min, desc.max, desc.step, desc.float)
+  local s2, v2 = CreateSliderAt(pane, x2, y, w, desc.label2, ResolveGet(desc.get2), ResolveSet(desc.set2), desc.min2, desc.max2, desc.step2, desc.float2)
   AttachTooltip(s1, desc.label, desc.tooltip)
   AttachTooltip(s2, desc.label2, desc.tooltip2)
   if desc.disableGet then
@@ -1295,7 +1304,7 @@ local function MakeDualSlider(pane, y, desc)
       SetSliderEnabled(s1, v1, t1, not (disableGet() and true or false))
     end
   end
-  if desc.center then CenterPaneRow(pane, { s1, s2 }, 20, 300 + 150 + 8 + ((v2 and v2:GetStringWidth()) or 0)) end
+  if desc.center then CenterPaneRow(pane, { s1, s2 }, x1, x2 + w + 8 + ((v2 and v2:GetStringWidth()) or 0)) end
   return RH_LINE + ROW_PAD
 end
 
@@ -1356,8 +1365,10 @@ end
 -- onto an occupied cell to swap; the "+" cells add optional elements. Writes through Meter_SetElementSlot so
 -- the live HUD mirrors every change instantly, and reads Meter_GetElementSlots as the source of truth.
 local function MakeMeterSlots(pane, y, desc)
-  local topPad = 8
-  local BOX_W, BOX_H = 440, 150
+  -- topPad pulls the whole block UP toward the dialog title so the title->"Layout Control" gap matches the
+  -- "Layout Control"->first-chip gap (was 8, which left the heading sitting too far below the title).
+  local topPad = -6
+  local BOX_W, BOX_H = 440, 200   -- 200 fits 7 rows (was 150 for 5)
   local CHIP_W, CHIP_H = 82, 24
   local HGAP, VGAP = CHIP_W, CHIP_H     -- 0px gap (cells flush)
   local GRID_CY = -8                     -- grid sits just under the gold heading (tight vertical padding)
@@ -1372,30 +1383,36 @@ local function MakeMeterSlots(pane, y, desc)
   heading:SetText("Layout Control")
   heading:SetTextColor(1, 0.82, 0)  -- WoW gold
 
-  -- 25 cells: 5 columns (LL/L/C/R/RR) x 5 rows (TT/T/M/B/XB) -- MUST match Meters.lua's slot model.
-  -- 5 rows = odd, so M is the true centre row.
+  -- 35 cells: 5 columns (LL/L/C/R/RR) x 7 rows (TTT/TT/T/M/B/XB/XXB) -- MUST match Meters.lua's slot model.
+  -- 7 rows = odd, so M is the true centre row.
   local SLOTS = {
+    "TTTLL","TTTL","TTTC","TTTR","TTTRR",
     "TTLL", "TTL", "TTC", "TTR", "TTRR",
     "LLT",  "TL",  "T",   "TR",  "RRT",
     "LL",   "L",   "C",   "R",   "RR",
     "LLB",  "BL",  "B",   "BR",  "RRB",
     "XBLL", "XBL", "XBC", "XBR", "XBRR",
+    "XXBLL","XXBL","XXBC","XXBR","XXBRR",
   }
   local COLX = { LL = -2 * HGAP, L = -HGAP, C = 0, R = HGAP, RR = 2 * HGAP }
-  local ROWY = { TT = 2 * VGAP, T = VGAP, M = 0, B = -VGAP, XB = -2 * VGAP }
+  local ROWY = { TTT = 3 * VGAP, TT = 2 * VGAP, T = VGAP, M = 0, B = -VGAP, XB = -2 * VGAP, XXB = -3 * VGAP }
   local COL  = {
+    TTTLL="LL",TTTL="L",TTTC="C",TTTR="R",TTTRR="RR",
     TTLL= "LL", TTL= "L", TTC="C", TTR= "R", TTRR= "RR",
     LLT = "LL", TL = "L", T = "C", TR = "R", RRT = "RR",
     LL  = "LL", L  = "L", C = "C", R  = "R", RR  = "RR",
     LLB = "LL", BL = "L", B = "C", BR = "R", RRB = "RR",
     XBLL= "LL", XBL= "L", XBC="C", XBR= "R", XBRR= "RR",
+    XXBLL="LL",XXBL="L",XXBC="C",XXBR="R",XXBRR="RR",
   }
   local ROW  = {
+    TTTLL="TTT",TTTL="TTT",TTTC="TTT",TTTR="TTT",TTTRR="TTT",
     TTLL= "TT", TTL= "TT",TTC="TT",TTR= "TT",TTRR= "TT",
     LLT = "T",  TL = "T", T = "T", TR = "T", RRT = "T",
     LL  = "M",  L  = "M", C = "M", R  = "M", RR  = "M",
     LLB = "B",  BL = "B", B = "B", BR = "B", RRB = "B",
     XBLL= "XB", XBL= "XB",XBC="XB",XBR= "XB",XBRR= "XB",
+    XXBLL="XXB",XXBL="XXB",XXBC="XXB",XXBR="XXB",XXBRR="XXB",
   }
 
   -- Build the 9 drop-zones (faint target; a thin border if BackdropTemplate is available).
@@ -1441,7 +1458,7 @@ local function MakeMeterSlots(pane, y, desc)
     end
     if MenuUtil and MenuUtil.CreateContextMenu then
       MenuUtil.CreateContextMenu(anchorBtn, function(_, root)
-        root:CreateTitle("Add element")
+        root:CreateTitle("Add Element")
         for _, e in ipairs(items) do root:CreateButton(e.label, function() pick(e.id) end) end
       end)
     elseif EasyMenu then
@@ -1458,6 +1475,7 @@ local function MakeMeterSlots(pane, y, desc)
     local zone = zones[slot]
 
     local chip = CreateFrame("Button", nil, container, "UIPanelButtonTemplate")
+    chip:SetNormalFontObject(GameFontNormalSmall)   -- 10pt gold (was GameFontNormal 12pt)
     chip:SetSize(CHIP_W, CHIP_H)
     chip:SetPoint("CENTER", zone, "CENTER", 0, 0)
     chip:SetMovable(true)
@@ -1662,6 +1680,23 @@ local function NSlider(row, get, set, minV, maxV, step, percent, float, tip, tip
   return s
 end
 
+-- Init a bare MinimalSliderWithSteppersTemplate (caller sizes/anchors it) -- used by the inline dual slider.
+local function InitMiniSlider(s, get, set, minV, maxV, step, float)
+  minV, maxV, step = minV or 0, maxV or 1, step or 1
+  s:SetHeight(20)
+  local function fmt(v) v = float and (v or 0) or math.floor((v or 0) + 0.5); return float and string.format("%.2f", v) or tostring(v) end
+  local steps = math.max(1, math.floor((maxV - minV) / step + 0.5))
+  local formatters
+  if MinimalSliderWithSteppersMixin and CreateMinimalSliderFormatter then
+    formatters = { [MinimalSliderWithSteppersMixin.Label.Right] =
+      CreateMinimalSliderFormatter(MinimalSliderWithSteppersMixin.Label.Right, function(v) return fmt(v) end) }
+  end
+  s:Init(tonumber(get()) or minV, minV, maxV, steps, formatters)
+  s:RegisterCallback(MinimalSliderWithSteppersMixin.Event.OnValueChanged, function(_, v)
+    set(float and v or math.floor((v or 0) + 0.5))
+  end)
+end
+
 -- Checkbox row: native 28px UICheckButton on the left, label to its right.
 local function NCheck(row, label, get, set, disableGet, tip)
   local cb = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
@@ -1757,6 +1792,96 @@ local function PopulateNative(pane, rows)
           end
         end
       end
+    elseif t == "dualslider" then
+      -- Single inline row, all anchored to the row's vertical mid-line (y = 0):  X [slider]  <header>  [slider] Y
+      local row = NRow(pane, y)
+      local w = r.sliderWidth or 110
+      -- Left: slider pinned near the left, X label just to its left.
+      local s1 = CreateFrame("Slider", nil, row, "MinimalSliderWithSteppersTemplate")
+      s1:SetWidth(w); s1:SetPoint("LEFT", row, "LEFT", 30, 0)
+      InitMiniSlider(s1, ResolveGet(r.get), ResolveSet(r.set), r.min, r.max, r.step, r.float)
+      AttachTooltip(s1, r.label, r.tooltip)
+      local xl = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightMedium")
+      xl:SetPoint("RIGHT", s1, "LEFT", -6, 0); xl:SetText(r.label or "X"); xl:SetTextColor(1, 1, 1)
+      -- Right: Y label pinned at the right, slider to its left (with room for the slider's value between them).
+      local yl = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightMedium")
+      yl:SetPoint("RIGHT", row, "RIGHT", -6, 0); yl:SetText(r.label2 or "Y"); yl:SetTextColor(1, 1, 1)
+      local s2 = CreateFrame("Slider", nil, row, "MinimalSliderWithSteppersTemplate")
+      s2:SetWidth(w); s2:SetPoint("RIGHT", yl, "LEFT", -35, 0)
+      InitMiniSlider(s2, ResolveGet(r.get2), ResolveSet(r.set2), r.min2, r.max2, r.step2, r.float2)
+      AttachTooltip(s2, r.label2, r.tooltip2)
+      if r.header then
+        local hl = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightMedium")
+        hl:SetPoint("CENTER", row, "CENTER", 0, 0); hl:SetText(r.header); hl:SetTextColor(1, 1, 1)
+      end
+      adv()
+    elseif t == "trackedcooldowns" then
+      -- Gold header + a 1xN row of icon cells. Each cell: assigned spell icon, or "+". Left-click opens a
+      -- menu of the player's 30s+ cooldown spells; right-click clears. Stored via the TrackedCooldowns API.
+      local rowH = NRow(pane, y)
+      local hl = rowH:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+      hl:SetPoint("TOP", rowH, "TOP", 0, 0); hl:SetText(r.label or "Cooldowns"); hl:SetTextColor(1, 0.82, 0)
+      adv(24)
+      local row = NRow(pane, y)
+      local n = (_G.GSETracker_TrackedCooldowns_Count and _G.GSETracker_TrackedCooldowns_Count()) or 5
+      local cell, cgap = 34, 8
+      local totalW = n * cell + (n - 1) * cgap
+      local startX = math.floor(((pane:GetWidth() or 446) - totalW) / 2 + 0.5) - NATIVE_MARGIN
+      local cells, Redraw = {}, nil
+      local function afterChange()
+        if Redraw then Redraw() end
+        if _G.Meter_InvalidateLayout then _G.Meter_InvalidateLayout() end
+        if _G.SetupFrames then _G.SetupFrames() end
+        if _G.GSETracker_RefitMetersBox then _G.GSETracker_RefitMetersBox() end
+      end
+      local function openMenu(btn, slot)
+        local items = (_G.GSETracker_TrackedCooldowns_SpellList and _G.GSETracker_TrackedCooldowns_SpellList()) or {}
+        if MenuUtil and MenuUtil.CreateContextMenu then
+          MenuUtil.CreateContextMenu(btn, function(_, root)
+            root:CreateTitle("Add Cooldown")
+            for _, e in ipairs(items) do
+              -- No duplicates: skip elements already in another bar slot OR already placed standalone on the grid.
+              local dup = (_G.GSETracker_TrackedCooldowns_IsAssigned and _G.GSETracker_TrackedCooldowns_IsAssigned(e.id, slot))
+                       or (_G.Meter_IsOptionalPlaced and _G.Meter_IsOptionalPlaced(e.id))
+              if not dup then
+                root:CreateButton(e.label, function() _G.GSETracker_TrackedCooldowns_SetSpell(slot, e.id); afterChange() end)
+              end
+            end
+          end)
+        end
+      end
+      for i = 1, n do
+        local ok, b = pcall(CreateFrame, "Button", nil, row, "BackdropTemplate")
+        if not ok or not b then b = CreateFrame("Button", nil, row) end
+        b:SetSize(cell, cell)
+        b:SetPoint("LEFT", row, "LEFT", startX + (i - 1) * (cell + cgap), 0)
+        if b.SetBackdrop then
+          b:SetBackdrop({ bgFile = "Interface/Buttons/WHITE8x8", edgeFile = "Interface/Buttons/WHITE8x8", edgeSize = 1 })
+          b:SetBackdropColor(0, 0, 0, 0.4); b:SetBackdropBorderColor(0.5, 0.45, 0.35, 1)
+        end
+        b.icon = b:CreateTexture(nil, "ARTWORK")
+        b.icon:SetPoint("TOPLEFT", b, "TOPLEFT", 2, -2); b.icon:SetPoint("BOTTOMRIGHT", b, "BOTTOMRIGHT", -2, 2)
+        b.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        b.plus = b:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        b.plus:SetPoint("CENTER", b, "CENTER", 0, 0); b.plus:SetText("+"); b.plus:SetTextColor(1, 0.82, 0)
+        b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        b:SetScript("OnClick", function(self, mb)
+          if mb == "RightButton" then _G.GSETracker_TrackedCooldowns_SetSpell(i, nil); afterChange()
+          else openMenu(self, i) end
+        end)
+        AttachTooltip(b, "Cooldown " .. i, "Left-click: pick a trinket or 6s+ cooldown spell. Right-click: clear.")
+        cells[i] = b
+      end
+      Redraw = function()
+        for i = 1, n do
+          local sid = _G.GSETracker_TrackedCooldowns_SpellAt and _G.GSETracker_TrackedCooldowns_SpellAt(i)
+          local tex = sid and _G.GSETracker_TrackedCooldowns_SpellTexture and _G.GSETracker_TrackedCooldowns_SpellTexture(sid)
+          if tex then cells[i].icon:SetTexture(tex); cells[i].icon:Show(); cells[i].plus:Hide()
+          else cells[i].icon:Hide(); cells[i].plus:Show() end
+        end
+      end
+      Redraw()
+      adv(cell + 10)
     elseif t == "tricolor" then
       -- Lead toggle (e.g. "Press Detection") on its own row, then Class/Custom + colour swatch on the next.
       if r.leadLabel then
@@ -2373,16 +2498,14 @@ local TABS = {
 -- meters/MetersOptions.lua (Meters_ApplyDisplayToggles / _ApplyOpacity / _ApplyRefreshRate).
 local function MetersReadoutRows()
   -- "Show SBAssist %" was moved out to the standalone SLG-SBA Monitor addon (personal GSE testing tool).
+  -- The Layout editor (meterslots) is rendered at the TOP of the Meters dialog (see the tab rows below);
+  -- right-click a chip to remove it, "+" to add it back. (No separate "Show" dropdown needed.)
   return {
-    -- Readout visibility (GCD/DPS/HPS) + the centre Marker are managed in the Layout editor below:
-    -- right-click a chip to remove it, "+" to add it back. (No separate "Show" dropdown needed.)
-    { type = "meterslots" },
     { type = "slider", label = "Refresh Rate", float = true, min = 0.02, max = 0.15, step = 0.01,
       get = function() return (_G.Meters_GetRefreshRate and _G.Meters_GetRefreshRate()) or 0.10 end,
-      set = function(v)
-        if MetersSavedVars then MetersSavedVars.refreshRate = v end
-        if _G.Meters_ApplyRefreshRate then _G.Meters_ApplyRefreshRate() end
-      end,
+      -- Meter_ApplyRefreshRate clamps + saves + applies to every readout module (the old code called a
+      -- non-existent "Meters_ApplyRefreshRate" and wrote the SV raw, so it never really applied).
+      set = function(v) if _G.Meter_ApplyRefreshRate then _G.Meter_ApplyRefreshRate(tonumber(v) or 0.10) end end,
       tooltip = "How often the readouts refresh (seconds)." },
     { type = "slider", label = "Opacity", percent = true, min = 25, max = 100, step = 1,
       get = function() return (MetersSavedVars and MetersSavedVars.opacity) or 100 end,
@@ -2398,8 +2521,24 @@ local EDITMODE_TABS = {
   { key = "Meters", text = "Meters", titleName = "Meters HUD", centerContent = true, winWidth = 490,
     rows = function()
       local r = {}
+      r[#r + 1] = { type = "meterslots" }                               -- Layout Control at the very top
+      -- Layout padding: X [slider] Padding [slider] Y on one row.
+      r[#r + 1] = { type = "dualslider", header = "Padding", sliderWidth = 110,
+        label  = "X", min  = 0, max  = 10, step  = 1,
+        get  = function() return (_G.Meter_GetPaddingX and _G.Meter_GetPaddingX()) or 0 end,
+        set  = function(v) if _G.Meter_SetPaddingX then _G.Meter_SetPaddingX(tonumber(v) or 0) end end,
+        tooltip  = "Horizontal gap between Layout Control grid cells.",
+        label2 = "Y", min2 = 0, max2 = 10, step2 = 1,
+        get2 = function() return (_G.Meter_GetPaddingY and _G.Meter_GetPaddingY()) or 0 end,
+        set2 = function(v) if _G.Meter_SetPaddingY then _G.Meter_SetPaddingY(tonumber(v) or 0) end end,
+        tooltip2 = "Vertical gap between Layout Control grid cells." }
+      r[#r + 1] = { type = "trackedcooldowns", label = "Cooldowns" }  -- 1x5 spell-cooldown config grid (under Padding)
+      r[#r + 1] = { type = "check", label = "Player Tracked HUD",       -- above the Center Marker section
+        get = function() return (_G.Meters_GetPlayerTracked and _G.Meters_GetPlayerTracked()) or false end,
+        set = function(v) if _G.Meters_SetPlayerTracked then _G.Meters_SetPlayerTracked(v) end end,
+        tooltip = "Anchor the whole Meters HUD to your character (your personal nameplate) so it follows you around the screen. Turning this on enables the personal nameplate (which also shows Blizzard's PRD bar). When no nameplate is present (vehicle, cinematic, etc.) the HUD falls back to its fixed position." }
       for _, row in ipairs(CenterMarkerRows())   do r[#r + 1] = row end  -- Center Marker + Press Detection/colour
-      for _, row in ipairs(MetersReadoutRows())  do r[#r + 1] = row end  -- Layout editor + Refresh + Opacity
+      for _, row in ipairs(MetersReadoutRows())  do r[#r + 1] = row end  -- Refresh + Opacity
       for _, row in ipairs(MetersBottomRows())   do r[#r + 1] = row end  -- Font + Outline + Meters Scale
       return r
     end },

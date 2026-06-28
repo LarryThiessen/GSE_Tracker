@@ -1,7 +1,7 @@
 -- AHLight.lua (Optimized)
 
 local DEFAULT_REFRESH_RATE = 0.10
-local MIN_REFRESH_RATE     = 0.05
+local MIN_REFRESH_RATE     = 0.02
 local MAX_REFRESH_RATE     = 0.15
 local GCD_SPELL_ID         = 61304
 local PREVIEW_TEXTURE      = "Interface\\Icons\\ui_spellbook_onebutton"

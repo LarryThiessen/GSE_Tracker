@@ -656,15 +656,17 @@ AddMeterTooltip(ahLightUsageCB, "Show SBAssist %", "How often your casts match t
 -- were swapped, Details on top), so the sliders sit just below it at the left margin.
 refreshRateSlider = CreateFrame("Slider", nil, panel, "OptionsSliderTemplate")
 refreshRateSlider:SetPoint("TOPLEFT", gcdCB, "BOTTOMLEFT", 0, -28)
-refreshRateSlider:SetMinMaxValues(0.05, 0.15)
+refreshRateSlider:SetMinMaxValues(0.02, 0.15)
 refreshRateSlider:SetValueStep(0.01)
 refreshRateSlider:SetObeyStepOnDrag(true)
 refreshRateSlider:SetWidth((MAIN_SLIDER_WIDTH - 40) / 2)  -- half width: shares the row with Opacity
-refreshRateSlider.Low:SetText("0.05")
+refreshRateSlider.Low:SetText("0.02")
 refreshRateSlider.High:SetText("0.15")
-refreshRateSlider:SetScript("OnValueChanged", function(_, value)
+refreshRateSlider:SetScript("OnValueChanged", function(_, value, userInput)
     value = ClampRefreshRateValue(value)
-    MetersSavedVars.refreshRate = value
+    -- Only a real user drag writes the saved rate. A programmatic SetValue (the sync below) would otherwise
+    -- clamp to this slider's 0.05 min and clobber a value set elsewhere (the native panel slider).
+    if userInput then MetersSavedVars.refreshRate = value end
     UpdateRefreshRateText(value); ApplyRefreshRate()
 end)
 

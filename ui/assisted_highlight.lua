@@ -1853,20 +1853,23 @@ local function CreateMirrorFrame(parent, isPreview)
         return
       end
 
+      -- Cursor-follow must run EVERY frame the icon is visible -- INCLUDING while the options/Edit tab is
+      -- open -- otherwise it only catches up on the throttled refresh below and visibly stutters behind the
+      -- pointer. Kept above the editing/mirror gates for that reason.
+      local followsCursor = addon.GetAssistedHighlightAnchorTarget and addon:GetAssistedHighlightAnchorTarget() == "Mouse Cursor"
+      if followsCursor and self:IsShown() then
+        Display:ApplyPosition()
+      end
+
       local mirrorEnabled = addon.IsAssistedHighlightMirrorEnabled and addon:IsAssistedHighlightMirrorEnabled()
       if IsEditingAssistedHighlightTab() or not mirrorEnabled then
         return
       end
 
-      -- Hidden mirrors should not keep doing cursor-follow or provider work.
+      -- Hidden mirrors should not keep doing provider work.
       -- Event-driven refreshes wake the frame back up when visibility changes.
       if not self:IsShown() then
         return
-      end
-
-      local followsCursor = addon.GetAssistedHighlightAnchorTarget and addon:GetAssistedHighlightAnchorTarget() == "Mouse Cursor"
-      if followsCursor then
-        Display:ApplyPosition()
       end
 
       self._elapsed = (self._elapsed or 0) + (elapsed or 0)

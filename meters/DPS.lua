@@ -3,7 +3,7 @@
 DPSSavedVars    = DPSSavedVars    or {}
 MetersSavedVars = MetersSavedVars or {}
 
-local MIN_REFRESH_RATE     = 0.05
+local MIN_REFRESH_RATE     = 0.02
 local MAX_REFRESH_RATE     = 0.15
 local DEFAULT_REFRESH_RATE = 0.10
 local MIN_DAMAGE_METER_INTERVAL = 0.15

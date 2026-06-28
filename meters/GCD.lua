@@ -38,8 +38,8 @@ end
 local function ClampRefreshRate(value)
     value = tonumber(value) or 0.10
 
-    if value < 0.05 then
-        value = 0.05
+    if value < 0.02 then
+        value = 0.02
     elseif value > 0.15 then
         value = 0.15
     end
@@ -64,7 +64,7 @@ end
 
 local function GetGCDFontSize(size)
     size = tonumber(size) or 18
-    return math.max(size - 2, 8)
+    return math.max(size - 8, 8)   -- match the AH Match readout's HUD size (meter font - 8)
 end
 
 local function ResolveFont(fontName)

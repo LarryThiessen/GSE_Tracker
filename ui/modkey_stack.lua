@@ -644,10 +644,10 @@ function UI:UpdateAHMatchReadout()
     pct = 75
     if _G.GSETracker_CancelFade then _G.GSETracker_CancelFade(fs) end  -- examples don't fade
     fs:SetAlpha(1)
-    fs:SetText("AH Match: 75% (15/20)")
+    fs:SetText("75% (15/20)")
   else
     pct = (casts > 0) and (matches / casts * 100) or 0
-    fs:SetText(string.format("AH Match: %d%% (%d/%d)", math.floor(pct + 0.5), matches, casts))
+    fs:SetText(string.format("%d%% (%d/%d)", math.floor(pct + 0.5), matches, casts))
   end
   -- "AH Animated" toggle: colour gradient + pulse when ON; plain WHITE static text when OFF.
   local animated = (self.GetAHMatchAnimated == nil) or self:GetAHMatchAnimated()

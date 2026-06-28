@@ -58,13 +58,123 @@ local ELEMENTS = {
   -- TODO (next increment): Potion (bag-scan for a usable combat potion), Racial (UnitRace+class -> spell),
   -- Custom (user-entered spell/item ID -- needs an input field in the arranger).
 }
+-- Spells with a base cooldown of 6s+ are discovered from the spellbook (rebuilt on spell/spec changes) and
+-- offered alongside the static items. id = "Spell:<spellID>".
+local SPELL_ELEMENTS = {}
 local BY_ID = {}
-for _, e in ipairs(ELEMENTS) do BY_ID[e.id] = e end
+local function RebuildIndex()
+  wipe(BY_ID)
+  for _, e in ipairs(ELEMENTS)       do BY_ID[e.id] = e end
+  for _, e in ipairs(SPELL_ELEMENTS) do BY_ID[e.id] = e end
+end
+RebuildIndex()
+
+-- ── Spell cooldown elements (player's 6s+ base-cooldown spells) ───────────────
+local MIN_SPELL_CD = 6  -- seconds
+local function SpellTex(sid)
+  return (C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(sid))
+      or (GetSpellTexture and GetSpellTexture(sid)) or nil
+end
+local function SpellNm(sid)
+  if C_Spell and C_Spell.GetSpellName then return C_Spell.GetSpellName(sid) end
+  if GetSpellInfo then return (GetSpellInfo(sid)) end
+  return nil
+end
+local function SpellBaseCDSec(sid)
+  if not GetSpellBaseCooldown then return 0 end
+  local ms = GetSpellBaseCooldown(sid)   -- returns (cooldownMS, gcdMS) -- keep only the first
+  return (tonumber(ms) or 0) / 1000
+end
+
+-- Player cast times, recorded from UNIT_SPELLCAST_SUCCEEDED (GetTime() is non-secret). We drive the spell
+-- cooldown display from THESE + the spell's BASE cooldown, NEVER from C_Spell.GetSpellCooldown: that returns
+-- SECRET values in combat (remaining time = start+duration-now is arithmetic, which throws on a secret), and
+-- the engine refuses to animate a secret-fed cooldown on our tainted frame until combat ends. Cast-time +
+-- base-CD is all non-secret, so the engine Cooldown frame ticks through combat.
+-- ponytail: base CD ignores talent reductions / charges / resets / overrides, and a spell already on CD at
+-- login shows ready until first cast. Good enough for a simple bar; revisit if accuracy matters.
+local lastCast = {}
+local castEv = CreateFrame("Frame")
+castEv:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
+castEv:SetScript("OnEvent", function(_, _, unit, _, spellID)
+  if unit == "player" and spellID then lastCast[spellID] = GetTime() end
+end)
+
+-- start, duration for the engine Cooldown frame, from non-secret cast time + base CD.
+local function SpellCD(sid)
+  local d = SpellBaseCDSec(sid)
+  if d <= 0 then return 0, 0 end
+  return lastCast[sid] or 0, d
+end
+
+-- Spellbook subtext ("rank" line). Racials carry "Racial" here (racial defensives too); junk General-tab
+-- entries carry "Guild Perk"/"Battle Pets"/empty. ponytail: "Racial" is the enUS subtext -- a non-English
+-- client would need its localised word here; revisit if anyone runs GSE_Tracker non-enUS.
+local RACIAL_SUB = "Racial"
+local GENERAL_NAME = _G.GENERAL or "General"
+local function SpellSub(slot, bank, sid)
+  local _, sub = C_SpellBook.GetSpellBookItemName(slot, bank)
+  if (not sub or sub == "") and C_Spell and C_Spell.GetSpellSubtext then sub = C_Spell.GetSpellSubtext(sid) end
+  return sub
+end
+
+local function RebuildSpellElements()
+  wipe(SPELL_ELEMENTS)
+  -- Retail-only path (C_SpellBook); on Classic this no-ops, leaving just the static items.
+  if C_SpellBook and C_SpellBook.GetNumSpellBookSkillLines and C_SpellBook.GetSpellBookItemInfo then
+    local bank = (Enum and Enum.SpellBookSpellBank and Enum.SpellBookSpellBank.Player) or 0
+    local seen = {}
+    for line = 1, (C_SpellBook.GetNumSpellBookSkillLines() or 0) do
+      local li = C_SpellBook.GetSpellBookSkillLineInfo and C_SpellBook.GetSpellBookSkillLineInfo(line)
+      -- Skip OFF-spec lines (the inactive spec's spells, greyed in the spellbook) so we only show the current
+      -- spec's loadout. Within the active lines we keep ACTIVE spells and drop PASSIVES -- a passive aura
+      -- never needs a tracked cooldown. The "General" tab is mostly junk (Mobile Banking, Revive Battle Pets,
+      -- special items) so there we keep ONLY racials (sub == "Racial"); class/spec defensives live on their
+      -- own tabs and are kept wholesale. Rebuilt on spec change/load.
+      local offSpec = li and ((li.offSpecID and li.offSpecID ~= 0) or li.isOffSpec)
+      if li and li.numSpellBookItems and not offSpec then
+        local isGeneral = li.name and (li.name == GENERAL_NAME or li.name == "General")
+        local off = li.itemIndexOffset or 0
+        for slot = off + 1, off + li.numSpellBookItems do
+          local it = C_SpellBook.GetSpellBookItemInfo(slot, bank)
+          local sid = it and it.spellID
+          local isSpell = it and (not (Enum and Enum.SpellBookItemType) or it.itemType == Enum.SpellBookItemType.Spell)
+          local isPassive = it and (it.isPassive or (C_Spell and C_Spell.IsSpellPassive and sid and C_Spell.IsSpellPassive(sid)))
+          -- On the General tab, keep ONLY racials; everywhere else keep everything (subject to the checks below).
+          local keep = (not isGeneral) or (sid and SpellSub(slot, bank, sid) == RACIAL_SUB)
+          if sid and isSpell and not isPassive and keep and not seen[sid] and SpellBaseCDSec(sid) >= MIN_SPELL_CD then
+            local name = SpellNm(sid)
+            if name and name ~= "" then
+              seen[sid] = true
+              SPELL_ELEMENTS[#SPELL_ELEMENTS + 1] = {
+                id = "Spell:" .. sid, label = name, spellID = sid,
+                icon      = function() return SpellTex(sid) end,
+                cooldown  = function() return SpellCD(sid) end,
+                available = function() return true end,
+              }
+            end
+          end
+        end
+      end
+    end
+  end
+  table.sort(SPELL_ELEMENTS, function(a, b) return tostring(a.label):lower() < tostring(b.label):lower() end)
+  RebuildIndex()
+end
+
+local spellEv = CreateFrame("Frame")
+spellEv:RegisterEvent("PLAYER_LOGIN")
+spellEv:RegisterEvent("SPELLS_CHANGED")
+local function safeReg(e) pcall(spellEv.RegisterEvent, spellEv, e) end
+safeReg("PLAYER_SPECIALIZATION_CHANGED")
+safeReg("ACTIVE_TALENT_GROUP_CHANGED")
+spellEv:SetScript("OnEvent", function() RebuildSpellElements() end)
 
 -- ── Public registry queries (consumed by Meters.lua + the arranger) ──────────
-function GSETracker_CooldownElements_List()  -- ordered {id,label} of ALL optional elements
+function GSETracker_CooldownElements_List()  -- ordered {id,label} of ALL optional elements (items + spells)
   local out = {}
-  for _, e in ipairs(ELEMENTS) do out[#out + 1] = { id = e.id, label = e.label } end
+  for _, e in ipairs(ELEMENTS)       do out[#out + 1] = { id = e.id, label = e.label } end
+  for _, e in ipairs(SPELL_ELEMENTS) do out[#out + 1] = { id = e.id, label = e.label } end
   return out
 end
 
@@ -74,22 +184,28 @@ function GSETracker_CooldownElements_Label(id) return (BY_ID[id] and BY_ID[id].l
 -- ── Widget (one frame per element id, created on demand, cached) ──────────────
 local frames = {}
 
+-- Build a cooldown widget: icon + engine-driven swipe + engine countdown numbers. The numbers are rendered
+-- by the Cooldown frame itself (SetHideCountdownNumbers(false)). We feed it only non-secret start/duration
+-- (item cooldowns, or spell cast-time + base CD) so it animates through combat without touching secret values.
+local function BuildCDWidget(name, parent)
+  local f = CreateFrame("Frame", name, parent or UIParent)
+  f:SetSize(24, 24)
+  f.icon = f:CreateTexture(nil, "ARTWORK")
+  f.icon:SetAllPoints(f)
+  f.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)  -- trim the default icon border
+  f.cd = CreateFrame("Cooldown", nil, f, "CooldownFrameTemplate")
+  f.cd:SetAllPoints(f)
+  f.cd:SetHideCountdownNumbers(false)   -- engine renders the centred number (secret-safe)
+  f.cd:SetDrawEdge(false)
+  return f
+end
+
 function GSETracker_CooldownElements_Ensure(id, parent)
   local desc = BY_ID[id]
   if not desc then return nil end
   local f = frames[id]
   if not f then
-    f = CreateFrame("Frame", "GSETrackerCDElem_" .. id, parent or UIParent)
-    f:SetSize(24, 24)
-    f.icon = f:CreateTexture(nil, "ARTWORK")
-    f.icon:SetAllPoints(f)
-    f.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)  -- trim the default icon border
-    f.cd = CreateFrame("Cooldown", nil, f, "CooldownFrameTemplate")
-    f.cd:SetAllPoints(f)
-    f.cd:SetHideCountdownNumbers(true)
-    f.cd:SetDrawEdge(false)
-    f.time = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    f.time:SetPoint("BOTTOM", f, "BOTTOM", 0, -2)
+    f = BuildCDWidget("GSETrackerCDElem_" .. id, parent)
     f._desc = desc
     frames[id] = f
   end
@@ -102,26 +218,91 @@ function GSETracker_CooldownElements_Hide(id)
   if f then f:Hide() end
 end
 
-local function FmtTime(rem)
-  if rem >= 60 then return string.format("%dm", math.floor(rem / 60 + 0.5)) end
-  if rem >= 10 then return string.format("%d", math.floor(rem + 0.5)) end
-  return string.format("%.1f", rem)
+-- Run fn(frame) for each currently-shown cooldown item (so the Edit Mode box can measure them into its fit).
+function GSETracker_CooldownElements_ForEachShown(fn)
+  for _, f in pairs(frames) do
+    if f.IsShown and f:IsShown() then fn(f) end
+  end
+end
+
+-- Push the icon + cooldown onto a widget. s/d are non-secret (item CD, or spell cast-time + base CD); the
+-- engine-side Cooldown frame draws the swipe and (SetHideCountdownNumbers(false)) the countdown number and
+-- animates them itself, including in combat. SetCooldown(0, 0) clears when there's no cooldown. (pcall is
+-- defensive only -- there's no secret-value math here.)
+local function PaintCDWidget(f, iconTex, s, d)
+  f.icon:SetTexture(iconTex or QUESTION_MARK)
+  pcall(f.cd.SetCooldown, f.cd, s or 0, d or 0)
 end
 
 function GSETracker_CooldownElements_Update(id)
   local f = frames[id]
   if not (f and f._desc) then return end
-  local desc = f._desc
-  f.icon:SetTexture(desc.icon() or QUESTION_MARK)
-  local s, d, e = desc.cooldown()
-  if e and s > 0 and d and d > 1.5 then  -- > 1.5 so the GCD doesn't flash a swipe on every press
-    f.cd:SetCooldown(s, d)
-    local rem = (s + d) - GetTime()
-    f.time:SetText(rem > 0 and FmtTime(rem) or "")
-  else
-    if f.cd.Clear then f.cd:Clear() end
-    f.time:SetText("")
+  local s, d = f._desc.cooldown()
+  PaintCDWidget(f, f._desc.icon(), s, d)
+end
+
+-- ── Tracked Cooldowns bar ────────────────────────────────────────────────────
+-- Up to 5 chosen 30s+ spells, assigned per-slot in the "Cooldowns" config grid and rendered as a
+-- side-by-side bar wherever the "Cooldowns" element is placed on the main Layout Control grid.
+local TRACKED_SLOTS = 5
+local trackedFrames = {}
+local function TrackedStore()
+  MetersSavedVars.trackedCooldowns = MetersSavedVars.trackedCooldowns or {}
+  return MetersSavedVars.trackedCooldowns
+end
+-- The store holds generic ELEMENT IDS ("Trinket1", "Healthstone", "Spell:12345", ...) so the bar can mix
+-- items and spells. Legacy saves stored a bare spellID number -- normalise those to "Spell:<id>" on read.
+local function NormId(v)
+  if type(v) == "number" then return "Spell:" .. v end
+  return v
+end
+function GSETracker_TrackedCooldowns_Count() return TRACKED_SLOTS end
+function GSETracker_TrackedCooldowns_SpellAt(slot) return NormId(TrackedStore()[slot]) end
+function GSETracker_TrackedCooldowns_SetSpell(slot, id)
+  if not (slot and slot >= 1 and slot <= TRACKED_SLOTS) then return end
+  if id then                            -- no duplicates: ignore if this element is already in another slot
+    local store = TrackedStore()
+    for s = 1, TRACKED_SLOTS do
+      if s ~= slot and NormId(store[s]) == id then return end
+    end
   end
+  TrackedStore()[slot] = id
+end
+-- True if element `id` is assigned to any slot other than exceptSlot (used to filter the picker menu).
+function GSETracker_TrackedCooldowns_IsAssigned(id, exceptSlot)
+  local store = TrackedStore()
+  for s = 1, TRACKED_SLOTS do
+    if s ~= exceptSlot and NormId(store[s]) == id then return true end
+  end
+  return false
+end
+-- Everything offered in the per-slot picker: the static items (trinkets/healthstone) + discovered spells.
+function GSETracker_TrackedCooldowns_SpellList()
+  return GSETracker_CooldownElements_List()
+end
+function GSETracker_TrackedCooldowns_SpellTexture(id)
+  local desc = BY_ID[id]
+  return desc and desc.icon and desc.icon() or nil
+end
+function GSETracker_TrackedCooldowns_Ensure(slot, parent)
+  if not (slot and slot >= 1 and slot <= TRACKED_SLOTS) then return nil end
+  local f = trackedFrames[slot]
+  if not f then f = BuildCDWidget("GSETrackerTrackedCD" .. slot, parent); trackedFrames[slot] = f end
+  if parent then f:SetParent(parent) end
+  return f
+end
+function GSETracker_TrackedCooldowns_Update(slot)
+  local f = trackedFrames[slot]; if not f then return end
+  local desc = BY_ID[NormId(TrackedStore()[slot])]
+  if not desc then f.icon:SetTexture(nil); f:Hide(); return end
+  local s, d = desc.cooldown()
+  PaintCDWidget(f, desc.icon and desc.icon(), s, d)
+end
+function GSETracker_TrackedCooldowns_HideAll()
+  for _, f in pairs(trackedFrames) do f:Hide() end
+end
+function GSETracker_TrackedCooldowns_ForEachShown(fn)
+  for _, f in pairs(trackedFrames) do if f.IsShown and f:IsShown() then fn(f) end end
 end
 
 -- ── Ticker: refresh every shown widget ~5x/sec ───────────────────────────────
@@ -133,5 +314,8 @@ ticker:SetScript("OnUpdate", function(self, elapsed)
   self._t = 0
   for id, f in pairs(frames) do
     if f:IsShown() then GSETracker_CooldownElements_Update(id) end
+  end
+  for slot, f in pairs(trackedFrames) do
+    if f:IsShown() then GSETracker_TrackedCooldowns_Update(slot) end
   end
 end)

@@ -2999,3 +2999,141 @@ SlashCmdList.GETDEFAULT = function()
     end
     dumpRegions(bar, "  barreg")
 end
+
+-- /getprd -- dump the Personal Resource Display's real frame + Edit Mode wiring so the PRD lock
+-- (ui/personal_resource.lua) can be written against the actual protected frame, not a guess. Enable the
+-- PRD first (Interface > Names > "Personal Resource Display", or set nameplateShowSelf 1) so it exists.
+SLASH_GETPRD1 = "/getprd"
+SlashCmdList.GETPRD = function()
+    local function p(...) print("|cff66ccff[GetPRD]|r", ...) end
+    p("cvar nameplateShowSelf =", tostring(GetCVar and GetCVar("nameplateShowSelf")))
+
+    -- 1) The PRD nameplate (the player's own nameplate). Only exists while shown.
+    local np = C_NamePlate and C_NamePlate.GetNamePlateForUnit and C_NamePlate.GetNamePlateForUnit("player")
+    if not np then
+        p("no player nameplate -- enable the PRD and stand so it's visible, then rerun.")
+    else
+        p("nameplate", np:GetName() or "(anon)", string.format("%.0fx%.0f", np:GetWidth() or 0, np:GetHeight() or 0))
+        local point, rel, relPoint, x, y = np:GetPoint(1)
+        local relName = rel and (rel.GetName and rel:GetName()) or tostring(rel)
+        p("  point", tostring(point), "->", tostring(relName), tostring(relPoint), string.format("%.1f,%.1f", x or 0, y or 0))
+        p("  parent", (np:GetParent() and np:GetParent():GetName()) or "(anon)",
+            "movable=" .. tostring(np.IsMovable and np:IsMovable()),
+            "protected=" .. tostring(np.IsProtected and select(1, np:IsProtected())))
+        local uf = np.UnitFrame
+        if uf then p("  .UnitFrame", uf:GetName() or "(anon)", uf.GetObjectType and uf:GetObjectType() or "?") end
+    end
+
+    -- 1b) Anchor vs visible-bars delta: how far the PRD system frame's CENTER is from the cell anchor we
+    -- pin it to, and from the visible bars (nameplate/UnitFrame). The vertical delta is the Y offset the
+    -- lock needs so the BARS (not the frame centre) land on the grid cell.
+    local prd = _G.PersonalResourceDisplayFrame
+    if prd and prd.GetCenter then
+        local fx, fy = prd:GetCenter()
+        p(string.format("PRDFrame %.0fx%.0f centre=(%.0f,%.0f)", prd:GetWidth() or 0, prd:GetHeight() or 0, fx or 0, fy or 0))
+        local bar = np and (np.UnitFrame or np)
+        if bar and bar.GetCenter then
+            local bx, by = bar:GetCenter()
+            if fy and by then p(string.format("  bars centre=(%.0f,%.0f)  deltaY(bars-frame)=%.1f", bx or 0, by or 0, by - fy)) end
+        end
+        local cell = _G.GSETracker_PRDCell
+        if cell and cell.GetCenter then
+            local cx, cy = cell:GetCenter()
+            if fy and cy then p(string.format("  cell centre=(%.0f,%.0f)  deltaY(cell-frame)=%.1f", cx or 0, cy or 0, cy - fy)) end
+        end
+    end
+
+    -- 1c) Where is the Meters cluster the cell is supposed to hug? If the cell is far from MetersAnchor the
+    -- cell offset is wrong; if MetersAnchor itself is at top-right the cluster moved, not the cell.
+    local ma = _G.MetersAnchor
+    if ma and ma.GetCenter then
+        local mx, my = ma:GetCenter()
+        p(string.format("MetersAnchor %.0fx%.0f centre=(%.0f,%.0f) shown=%s",
+            ma:GetWidth() or 0, ma:GetHeight() or 0, mx or 0, my or 0, tostring(ma:IsShown())))
+        local cell = _G.GSETracker_PRDCell
+        if cell and cell.GetCenter then
+            local cx, cy = cell:GetCenter()
+            if mx and cx then p(string.format("  cell offset from anchor = (%.1f, %.1f)", cx - mx, cy - my)) end
+        end
+    end
+
+    -- 1d) Hunt the green name. Walk the PRD frame's whole tree for FontStrings showing the player's name,
+    -- and report each one's owner/parent + position -- that's the fontstring we'd hide to kill the double.
+    local myName = UnitName and UnitName("player")
+    local prdf = _G.PersonalResourceDisplayFrame
+    if prdf and myName then
+        local hits = 0
+        local function walk(fr, depth)
+            if not fr or depth > 6 then return end
+            if fr.GetRegions then
+                for _, r in ipairs({ fr:GetRegions() }) do
+                    if r.GetObjectType and r:GetObjectType() == "FontString" then
+                        local t = r.GetText and r:GetText()
+                        if t and tostring(t):find(myName, 1, true) then
+                            hits = hits + 1
+                            local owner = fr.GetName and fr:GetName() or "(anon)"
+                            local cx, cy = r.GetCenter and r:GetCenter()
+                            p(string.format("  NAME fontstring '%s' in %s @ (%.0f,%.0f) shown=%s", tostring(t), owner,
+                                cx or 0, cy or 0, tostring(r.IsShown and r:IsShown())))
+                        end
+                    end
+                end
+            end
+            if fr.GetChildren then for _, c in ipairs({ fr:GetChildren() }) do walk(c, depth + 1) end end
+        end
+        walk(prdf, 0)
+        if hits == 0 then p("  no name fontstring found under PersonalResourceDisplayFrame (it's elsewhere)") end
+    end
+
+    -- 2) NamePlateDriverFrame + any global frame whose name mentions the PRD.
+    local drv = _G.NamePlateDriverFrame
+    p("NamePlateDriverFrame =", drv and (drv:GetName() or "(anon)") or "nil")
+    for _, n in ipairs({ "NamePlatePlayerResourceFrame", "ClassNameplateBar", "NamePlateDriverFrame",
+        "PersonalResourceDisplayFrame", "EditModeSystemSelectionPersonalResourceDisplay" }) do
+        if _G[n] then p("  global", n, "exists", _G[n].GetObjectType and _G[n]:GetObjectType() or "?") end
+    end
+
+    -- 3) Edit Mode: is the PRD a registered system, and what enum/index is it?
+    local mgr = _G.EditModeManagerFrame
+    if not mgr or not mgr.registeredSystemFrames then
+        p("EditModeManagerFrame.registeredSystemFrames not available.")
+    else
+        for _, f in ipairs(mgr.registeredSystemFrames) do
+            local name = (f.GetName and f:GetName()) or "(anon)"
+            if name:lower():find("resource") or name:lower():find("nameplate") or name:lower():find("prd") then
+                p("  EMsystem", name, "system=" .. tostring(f.system), "index=" .. tostring(f.systemIndex))
+            end
+        end
+        p("(scanned", #mgr.registeredSystemFrames, "Edit Mode systems for resource/nameplate)")
+    end
+    if Enum and Enum.EditModeSystem then
+        for k, v in pairs(Enum.EditModeSystem) do
+            if tostring(k):lower():find("resource") or tostring(k):lower():find("nameplate") then
+                p("  Enum.EditModeSystem", k, "=", v)
+            end
+        end
+    end
+end
+
+-- /emz -- dump EVERY registered Edit Mode system's selection overlay (strata/level/size/shown) so we can
+-- see why the PRD + Encounter Bar selections don't restack with the others. Run while Edit Mode is open.
+SLASH_EMZ1 = "/emz"
+SlashCmdList.EMZ = function()
+    local function p(...) print("|cff66ccff[EMZ]|r", ...) end
+    local mgr = _G.EditModeManagerFrame
+    if not (mgr and mgr.registeredSystemFrames) then p("no registeredSystemFrames"); return end
+    for _, f in ipairs(mgr.registeredSystemFrames) do
+        local nm = (f.GetName and f:GetName()) or "(anon)"
+        local sysShown = f.IsShown and f:IsShown()
+        local sel = f.Selection
+        if sel and sel.GetFrameStrata then
+            p(string.format("%s sys=%s shown=%s | Sel strata=%s lvl=%s size=%.0fx%.0f selShown=%s top=%s",
+                nm, tostring(f.system), tostring(sysShown),
+                tostring(sel:GetFrameStrata()), tostring(sel:GetFrameLevel()),
+                sel:GetWidth() or 0, sel:GetHeight() or 0,
+                tostring(sel.IsShown and sel:IsShown()), tostring(sel.IsToplevel and sel:IsToplevel())))
+        else
+            p(string.format("%s sys=%s shown=%s | NO .Selection (sel=%s)", nm, tostring(f.system), tostring(sysShown), tostring(sel)))
+        end
+    end
+end
