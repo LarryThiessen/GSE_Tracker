@@ -1,3 +1,19 @@
+## 1.5.7
+
+### Added
+- **Cooldowns on Classic.** The Cooldowns spell list now works on MoP/Cata/TBC/Vanilla via the legacy spellbook API — your spec's 6s+ cooldown spells show up there too, not just on Retail.
+- **Edit Mode on Classic.** A fallback selection-box overlay (cyan tint, rounded corners, "Click to Edit" on hover) lets you position HUD elements on flavors that don't have Blizzard's Edit Mode.
+
+### Changed
+- **Cooldowns bar follows the HUD.** It now hides/shows with the Meters HUD's visibility setting instead of lingering on its own.
+- **Cooldowns follow upgrades.** A tracked spell that transforms mid-fight (e.g. Bestial Wrath → Wailing Arrow) now swaps its icon and keeps counting down instead of disappearing.
+- **Flavor-aware elements.** PRD and AH % (and the Assisted Highlight Edit Mode button) are hidden/greyed on the Classic flavors where those features don't exist.
+- **Panel fits the screen.** The Meters options panel scales to fit shorter resolutions (e.g. MoP) instead of running off-screen.
+
+### Fixed
+- DPS/HPS no longer show a long raw decimal for near-zero values on Classic — they round to a clean number.
+- Cooldown swipe no longer flickers.
+
 ## 1.5.6
 
 ### Added

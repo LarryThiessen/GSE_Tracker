@@ -53,6 +53,15 @@ end
 
 local function FormatMeterValue(n)
     if n == nil then return "" end
+    -- Round small values ourselves: AbbreviateNumbers returns the RAW number for sub-1 inputs (a near-zero
+    -- Classic HPS otherwise prints as "0.00031617..."). The compare is pcall-guarded -- on Retail the live
+    -- value is taint-"secret" and `<` throws, so we fall through to AbbreviateNumbers (which abbreviates the
+    -- large secret numbers fine). string.format("%.0f", ...) is permitted on secret values.
+    local okCmp, small = pcall(function() return n < 1000 end)
+    if okCmp and small then
+        local okR, s = pcall(string.format, "%.0f", n)
+        if okR then return s end
+    end
     if abbrevSettings then
         local ok, s = pcall(AbbreviateNumbers, n, abbrevSettings)
         if ok and s then return s end

@@ -214,7 +214,28 @@ local function EnsureBox(frame, label, tabIndex, saveDrag)
     if not box then
         local ok
         ok, box = pcall(CreateFrame, "Frame", nil, frame, "EditModeSystemSelectionTemplate")
-        if not (ok and box) then return nil end
+        if not (ok and box) then
+            -- Classic Era has no Edit Mode template: build a minimal fallback selection box -- a cyan border
+            -- + a "Click to Edit" mouseover label (stored as _nativeLabel so the hover + ShowBoxes logic just
+            -- works). Every shared script below runs on a plain frame, and the native-only methods
+            -- (ShowHighlighted / ShowSelected) are all call-guarded, so they simply no-op here.
+            box = CreateFrame("Frame", nil, frame, "BackdropTemplate")
+            if box.SetBackdrop then
+                box:SetBackdrop({
+                    bgFile   = "Interface\\Buttons\\WHITE8x8",            -- translucent tint fill
+                    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",  -- softly rounded corners
+                    edgeSize = 14,
+                    insets   = { left = 4, right = 4, top = 4, bottom = 4 },
+                })
+                box:SetBackdropColor(0, 1, 1, 0.30)      -- cyan overlay tint
+                box:SetBackdropBorderColor(0, 1, 1, 1)   -- cyan border (matches TintGSEBox)
+            end
+            local fs = box:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            fs:SetPoint("CENTER", box, "CENTER", 0, 0)
+            fs:SetText("Click to Edit"); fs:SetTextColor(0, 1, 1); fs:Hide()
+            box._nativeLabel = fs
+            box._gsetFallback = true
+        end
         box:SetAllPoints(frame)
         -- Strata: pin to HIGH -- the strata our HUD readouts actually draw at (Meters.lua/GCD.lua/AHLight.lua
         -- all SetFrameStrata("HIGH")). We can't just inherit the parent: MetersAnchor drops itself to LOW

@@ -2063,7 +2063,10 @@ end
 local EDITMODE_DISABLE = {
   [1] = function() return _G.MetersSavedVars and _G.MetersSavedVars.enabled == false end,
   [2] = function() return addon.IsEnabled and not addon:IsEnabled() end,
-  [3] = function() return addon.IsAssistedHighlightMirrorEnabled and not addon:IsAssistedHighlightMirrorEnabled() end,
+  [3] = function()
+    if not (ns.Caps and ns.Caps.assistedHighlight) then return true end  -- Assisted Highlight is Retail-only
+    return addon.IsAssistedHighlightMirrorEnabled and not addon:IsAssistedHighlightMirrorEnabled()
+  end,
   [4] = function()
     local cfg = addon.GetElementLayout and addon:GetElementLayout("pressedIndicator")
     return type(cfg) == "table" and cfg.enabled == false
@@ -2886,7 +2889,13 @@ local function BuildEditWindow(idx)
     -- Fit the window height to the content: title strip (~46) + content + bottom padding.
     -- (The "Revert Changes" / "Reset To Default Position" buttons were REMOVED -- they could wipe data.)
     local contentH = (pane.GetHeight and pane:GetHeight()) or 200
-    w:SetHeight(46 + contentH + 30)
+    local wantH = 46 + contentH + 30
+    -- Keep the window on-screen: a tall page (e.g. Meters on MoP / short resolutions or a large UI scale)
+    -- would otherwise run off the top and bottom (SetClampedToScreen can't shrink a frame taller than the
+    -- screen). Scale the whole window down to fit instead of overflowing.
+    local maxH = (UIParent:GetHeight() or 768) - 40
+    if wantH > maxH then w:SetScale(maxH / wantH) end
+    w:SetHeight(wantH)
   end
 
   -- Meters used to embed MetersOptionsPanel, whose OnShow drove the readout preview (12345/6789 etc.).

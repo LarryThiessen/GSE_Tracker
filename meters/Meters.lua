@@ -937,7 +937,13 @@ end
 local FIXED_SHOW_KEY = { DPS = "showDPS", HPS = "showHPS", GCD = "showGCD", AHMatch = "showAHMatch", PlayerName = "showPlayerName", PersonalResource = "showPRD", TrackedBuffs = "showTrackedBuffs" }
 local FIXED_ORDER    = { "GCD", "DPS", "HPS", "AHMatch", "PlayerName", "PersonalResource", "TrackedBuffs", "Marker" }
 
+-- Elements that need a capability the flavor may lack: AH % needs C_AssistedCombat; PRD pins only on Retail.
+-- When the cap is absent the element is never "on" (below) and never offered (Meter_GetAvailableElements).
+local FIXED_ELEMENT_CAP = { AHMatch = "assistedHighlight", PersonalResource = "prd" }
+
 local function FixedElementOn(id)
+    local reqCap = FIXED_ELEMENT_CAP[id]
+    if reqCap and not (ns.Caps and ns.Caps[reqCap]) then return false end
     if id == "Marker" then return not MetersSavedVars.markerHidden end
     -- These fixed elements DEFAULT OFF (off the grid until the user adds them).
     if id == "AHMatch" then return MetersSavedVars.showAHMatch == true end
@@ -1038,7 +1044,14 @@ end
 function Meter_GetAvailableElements()
     local out, s = {}, MeterSlots()
     for _, id in ipairs(FIXED_ORDER) do
-        if not FixedElementOn(id) then out[#out + 1] = { id = id, label = Meter_ElementLabel(id) } end
+        -- Don't offer an element whose capability the flavor lacks (AH % needs C_AssistedCombat; PRD pins
+        -- only on Retail).
+        local reqCap = FIXED_ELEMENT_CAP[id]
+        if reqCap and not (ns.Caps and ns.Caps[reqCap]) then
+            -- skip
+        elseif not FixedElementOn(id) then
+            out[#out + 1] = { id = id, label = Meter_ElementLabel(id) }
+        end
     end
     if _G.GSETracker_CooldownElements_List then
         for _, e in ipairs(_G.GSETracker_CooldownElements_List()) do
@@ -1405,6 +1418,11 @@ function Meter_UpdateVisibility()
     end
     UpdateCenterGCDSwipe()
     UpdateAnchorInteractivity()
+    -- Cooldowns bar follows the HUD's visibility (showWhen): shown only when the anchor is shown AND the
+    -- element is on the grid; hidden otherwise (matches the readouts instead of lingering on its own).
+    if _G.GSETracker_TrackedCooldowns_SetShown then
+        _G.GSETracker_TrackedCooldowns_SetShown(anchor:IsShown() and FixedElementOn("TrackedBuffs"))
+    end
     -- If the PRD is slotted in the Meters HUD, mirror the HUD's visibility onto it (alpha lever -- works in
     -- combat too, unlike Hide on a protected nameplate frame).
     if _G.GSETracker_SyncPRDVisibility then _G.GSETracker_SyncPRDVisibility() end

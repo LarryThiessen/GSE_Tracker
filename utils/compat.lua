@@ -94,6 +94,11 @@ function Compat:CheckRuntime()
   -- The meters cluster always has at least the GCD readout (works on every flavor), so the
   -- shared Meters font/style controls are available everywhere.
   ns.Caps.meters = true
+  -- Personal Resource Display can be PINNED to a grid cell only on Retail. On Classic there's no
+  -- PersonalResourceDisplayFrame and the player nameplate doesn't resolve or hold a fixed position
+  -- (verified on MoP via /getprd -- the native PRD doesn't even render there), so the "PRD" element is
+  -- hidden on the Classic flavors.
+  ns.Caps.prd = info.features.isMainline
   ns.Caps.settingsPanel = info.features.hasSettingsCanvas
   -- GCD is a Blizzard cooldown read (works on EVERY flavor). DPS/HPS can come from the retail
   -- C_DamageMeter OR the Details! addon (Classic) -- both checked LIVE via the globals below,

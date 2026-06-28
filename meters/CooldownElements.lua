@@ -107,6 +107,16 @@ local function SpellCD(sid)
   return lastCast[sid] or 0, d
 end
 
+-- Follow an active override/upgrade (a proc or talent that swaps the button to another spell -- e.g. a
+-- tracked ability that flips to an upgraded version mid-fight) so we show the spell you'd actually cast,
+-- icon AND cooldown, instead of a stale base or a blank once the base leaves the spellbook. Returns sid
+-- unchanged when there's no override (or no API on this flavor).
+local function ResolveSpell(sid)
+  local o = (C_Spell and C_Spell.GetOverrideSpell and C_Spell.GetOverrideSpell(sid))
+         or (FindSpellOverrideByID and FindSpellOverrideByID(sid))
+  return o or sid
+end
+
 -- Spellbook subtext ("rank" line). Racials carry "Racial" here (racial defensives too); junk General-tab
 -- entries carry "Guild Perk"/"Battle Pets"/empty. ponytail: "Racial" is the enUS subtext -- a non-English
 -- client would need its localised word here; revisit if anyone runs GSE_Tracker non-enUS.
@@ -118,19 +128,33 @@ local function SpellSub(slot, bank, sid)
   return sub
 end
 
+-- Shared "consider this spell for the picker" gate, used by BOTH the retail (C_SpellBook) and the legacy
+-- Classic (GetSpellTabInfo) scans: drop passives, drop General-tab non-racials (Mobile Banking / Battle Pets
+-- / special items -- racials and class/spec defensives are kept), require a 6s+ base cooldown, de-dupe.
+-- `sub` is the spellbook rank/subtext, only needed for the General-tab racial test.
+local function AddSpellElement(seen, sid, name, isPassive, isGeneral, sub)
+  if not sid or isPassive or seen[sid] then return end
+  if isGeneral and sub ~= RACIAL_SUB then return end
+  if SpellBaseCDSec(sid) < MIN_SPELL_CD then return end
+  name = name or SpellNm(sid)
+  if not name or name == "" then return end
+  seen[sid] = true
+  SPELL_ELEMENTS[#SPELL_ELEMENTS + 1] = {
+    id = "Spell:" .. sid, label = name, spellID = sid,
+    icon      = function() return SpellTex(sid) end,
+    cooldown  = function() return SpellCD(sid) end,
+    available = function() return true end,
+  }
+end
+
 local function RebuildSpellElements()
   wipe(SPELL_ELEMENTS)
-  -- Retail-only path (C_SpellBook); on Classic this no-ops, leaving just the static items.
+  local seen = {}
   if C_SpellBook and C_SpellBook.GetNumSpellBookSkillLines and C_SpellBook.GetSpellBookItemInfo then
+    -- Retail (Dragonflight+): C_SpellBook skill lines. Skip OFF-spec lines so we only see the current spec.
     local bank = (Enum and Enum.SpellBookSpellBank and Enum.SpellBookSpellBank.Player) or 0
-    local seen = {}
     for line = 1, (C_SpellBook.GetNumSpellBookSkillLines() or 0) do
       local li = C_SpellBook.GetSpellBookSkillLineInfo and C_SpellBook.GetSpellBookSkillLineInfo(line)
-      -- Skip OFF-spec lines (the inactive spec's spells, greyed in the spellbook) so we only show the current
-      -- spec's loadout. Within the active lines we keep ACTIVE spells and drop PASSIVES -- a passive aura
-      -- never needs a tracked cooldown. The "General" tab is mostly junk (Mobile Banking, Revive Battle Pets,
-      -- special items) so there we keep ONLY racials (sub == "Racial"); class/spec defensives live on their
-      -- own tabs and are kept wholesale. Rebuilt on spec change/load.
       local offSpec = li and ((li.offSpecID and li.offSpecID ~= 0) or li.isOffSpec)
       if li and li.numSpellBookItems and not offSpec then
         local isGeneral = li.name and (li.name == GENERAL_NAME or li.name == "General")
@@ -139,20 +163,29 @@ local function RebuildSpellElements()
           local it = C_SpellBook.GetSpellBookItemInfo(slot, bank)
           local sid = it and it.spellID
           local isSpell = it and (not (Enum and Enum.SpellBookItemType) or it.itemType == Enum.SpellBookItemType.Spell)
-          local isPassive = it and (it.isPassive or (C_Spell and C_Spell.IsSpellPassive and sid and C_Spell.IsSpellPassive(sid)))
-          -- On the General tab, keep ONLY racials; everywhere else keep everything (subject to the checks below).
-          local keep = (not isGeneral) or (sid and SpellSub(slot, bank, sid) == RACIAL_SUB)
-          if sid and isSpell and not isPassive and keep and not seen[sid] and SpellBaseCDSec(sid) >= MIN_SPELL_CD then
-            local name = SpellNm(sid)
-            if name and name ~= "" then
-              seen[sid] = true
-              SPELL_ELEMENTS[#SPELL_ELEMENTS + 1] = {
-                id = "Spell:" .. sid, label = name, spellID = sid,
-                icon      = function() return SpellTex(sid) end,
-                cooldown  = function() return SpellCD(sid) end,
-                available = function() return true end,
-              }
-            end
+          if sid and isSpell then
+            local isPassive = it.isPassive or (C_Spell and C_Spell.IsSpellPassive and C_Spell.IsSpellPassive(sid))
+            local sub = isGeneral and SpellSub(slot, bank, sid) or nil
+            AddSpellElement(seen, sid, nil, isPassive, isGeneral, sub)
+          end
+        end
+      end
+    end
+  elseif GetNumSpellTabs and GetSpellBookItemInfo and GetSpellTabInfo then
+    -- Classic / MoP / Cata / TBC / Vanilla: the legacy spellbook tab API (no C_SpellBook there). Same gate;
+    -- skip the inactive spec's tab (offSpecID ~= 0). GetSpellBookItemInfo returns (itemType, spellID).
+    local BOOK = BOOKTYPE_SPELL or "spell"
+    for tab = 1, (GetNumSpellTabs() or 0) do
+      local tabName, _, offset, numSpells, _, tabOffSpec = GetSpellTabInfo(tab)
+      if not (tabOffSpec and tabOffSpec ~= 0) then
+        local isGeneral = tabName and (tabName == GENERAL_NAME or tabName == "General")
+        offset = offset or 0
+        for i = offset + 1, offset + (numSpells or 0) do
+          local stype, sid = GetSpellBookItemInfo(i, BOOK)
+          if sid and stype == "SPELL" then
+            local isPassive = IsPassiveSpell and IsPassiveSpell(i, BOOK)
+            local name, sub = GetSpellBookItemName(i, BOOK)
+            AddSpellElement(seen, sid, name, isPassive, isGeneral, sub)
           end
         end
       end
@@ -231,7 +264,13 @@ end
 -- defensive only -- there's no secret-value math here.)
 local function PaintCDWidget(f, iconTex, s, d)
   f.icon:SetTexture(iconTex or QUESTION_MARK)
-  pcall(f.cd.SetCooldown, f.cd, s or 0, d or 0)
+  s = s or 0; d = d or 0
+  -- Only (re)apply when the cooldown actually changed. Re-issuing SetCooldown every tick with identical
+  -- values restarts the swipe and shows as a flicker. (Values are non-secret here, so comparing is safe.)
+  if f._cdStart ~= s or f._cdDur ~= d then
+    f._cdStart, f._cdDur = s, d
+    pcall(f.cd.SetCooldown, f.cd, s, d)
+  end
 end
 
 function GSETracker_CooldownElements_Update(id)
@@ -293,13 +332,31 @@ function GSETracker_TrackedCooldowns_Ensure(slot, parent)
 end
 function GSETracker_TrackedCooldowns_Update(slot)
   local f = trackedFrames[slot]; if not f then return end
-  local desc = BY_ID[NormId(TrackedStore()[slot])]
+  local id = NormId(TrackedStore()[slot])
+  if not id then f.icon:SetTexture(nil); f:Hide(); return end
+  -- Spell slots render straight from the stored id (override-resolved), NOT via BY_ID: BY_ID is rebuilt
+  -- from the spellbook scan and drops a spell the instant it's overridden/upgraded, which made the icon
+  -- vanish (and flicker as the entry toggled). Items (no override) still use the descriptor.
+  local sidStr = id:match("^Spell:(%d+)")
+  if sidStr then
+    local sid = ResolveSpell(tonumber(sidStr))
+    f:Show()
+    PaintCDWidget(f, SpellTex(sid), SpellCD(sid))
+    return
+  end
+  local desc = BY_ID[id]
   if not desc then f.icon:SetTexture(nil); f:Hide(); return end
-  local s, d = desc.cooldown()
-  PaintCDWidget(f, desc.icon and desc.icon(), s, d)
+  PaintCDWidget(f, desc.icon and desc.icon(), desc.cooldown())
 end
 function GSETracker_TrackedCooldowns_HideAll()
   for _, f in pairs(trackedFrames) do f:Hide() end
+end
+-- Show occupied slots / hide everything, so the bar follows the Meters HUD visibility (showWhen). Empty
+-- slots stay hidden either way; this only governs the slots that actually hold a spell/trinket.
+function GSETracker_TrackedCooldowns_SetShown(shown)
+  for slot, f in pairs(trackedFrames) do
+    f:SetShown(shown and NormId(TrackedStore()[slot]) ~= nil)
+  end
 end
 function GSETracker_TrackedCooldowns_ForEachShown(fn)
   for _, f in pairs(trackedFrames) do if f.IsShown and f:IsShown() then fn(f) end end
