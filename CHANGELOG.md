@@ -6,6 +6,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.5.8] - 2026-06-28
+
+### Fixed
+- Breakdown window no longer throws a Lua error when focused on another combatant (it was comparing taint-protected "secret" C_DamageMeter GUIDs directly).
+
+### Changed
+- Cooldowns bar lays out **vertically** when placed on the centre row (the DPS/Marker/HPS line) so it doesn't spill across the readouts; other rows stay horizontal.
+- The Meters Edit Mode selection box now re-fits the readout cluster continuously while shown (and self-corrects), instead of measuring once.
+
+### Internal
+- Removed a large amount of dead code (the old custom-widget options UI, dead debug globals, the unused Action Tracker move-marker, and the retired SBA% machinery) and de-duplicated the shared cursor-position helper. No user-facing behaviour change.
+- Dev-only diagnostic slash commands are no longer shipped in the packaged build.
+
 ## [1.5.7] - 2026-06-28
 
 ### Added

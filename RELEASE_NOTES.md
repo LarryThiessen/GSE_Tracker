@@ -1,3 +1,15 @@
+## 1.5.8
+
+### Fixed
+- **Breakdown crash.** The breakdown window no longer errors out when it's focused on another combatant (it was comparing taint-protected "secret" damage-meter GUIDs directly).
+
+### Changed
+- **Vertical Cooldowns on the centre row.** Place the Cooldowns bar on the centre row (the DPS/Marker/HPS line) and it now stacks vertically so it doesn't overlap the readouts. Other rows stay horizontal.
+- **Snugger Edit Mode box.** The Meters selection box now re-fits the readout cluster live while it's shown instead of measuring just once.
+
+### Internal
+- Removed a big chunk of dead code and de-duplicated a shared helper (no behaviour change); dev-only diagnostic slash commands are no longer included in the released build.
+
 ## 1.5.7
 
 ### Added

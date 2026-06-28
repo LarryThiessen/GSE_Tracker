@@ -3,7 +3,7 @@
 ## Notes: Standalone Action Tracker
 ## Author: ScaryLarryGames
 ## IconTexture: Interface\AddOns\GSE_Tracker\media\GSE_Tracker.png
-## Version: 1.5.7
+## Version: 1.5.8
 ## SavedVariables: GSETrackerDB
 ## SavedVariablesPerCharacter: GSETrackerCharDB
 ## OptionalDeps: LibSharedMedia-3.0
