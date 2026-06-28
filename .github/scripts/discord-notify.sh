@@ -32,11 +32,11 @@ CF_FILE_ID=$(echo "$CF_API_RESPONSE" | jq -r --arg ver "$VERSION" '
         (.fileName    // "" | contains($ver)) or
         (.displayName // "" | contains($ver))
       )
-  ] | first | .id // ""')
+  ] | first | .id // ""' 2>/dev/null || echo "")
 
-# If version search found nothing, fall back to the newest file
+# If version search found nothing (or the CF API hiccupped), fall back to the newest file.
 if [ -z "$CF_FILE_ID" ] || [ "$CF_FILE_ID" = "null" ]; then
-    CF_FILE_ID=$(echo "$CF_API_RESPONSE" | jq -r '.data[0].id // ""')
+    CF_FILE_ID=$(echo "$CF_API_RESPONSE" | jq -r '.data[0].id // ""' 2>/dev/null || echo "")
 fi
 
 # Build URLs — fall back to the addon page if file ID still unresolvable
@@ -50,13 +50,20 @@ GH_URL="https://github.com/${GITHUB_REPOSITORY:-LarryThiessen/GSE_Tracker}/relea
 # Format notes: pull ONLY the current version's section (between "## $VERSION"
 # and the next "## " heading), then its bullets — auto-bold key terms.
 NOTES=$(awk -v ver="## $VERSION" '$0==ver{f=1;next} /^## /{f=0} f' "$NOTES_FILE" \
-  | grep "^- " \
+  | { grep "^- " || true; } \
   | sed \
       -e 's/^- /* /' \
       -e 's/GSE/**GSE**/g' \
       -e 's/GS:E/**GS:E**/g' \
       -e 's/GSE Tracker/**GSE Tracker**/g' \
       -e 's/Blizzard/**Blizzard**/g')
+
+# Never let a missing/empty version section abort the announcement. (The grep above
+# used to exit 1 under `set -o pipefail` when RELEASE_NOTES.md had no "## $VERSION"
+# section, killing the whole step before it posted.) Fall back to a generic line.
+if [ -z "$NOTES" ]; then
+    NOTES="* See the [release notes]($GH_URL) for what's new in v$VERSION."
+fi
 
 # Closing signature block, appended to the bottom of the embed description.
 # NOTE: standard emoji must be real unicode (webhooks don't expand :shortcodes:).
