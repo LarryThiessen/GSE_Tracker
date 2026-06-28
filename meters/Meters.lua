@@ -1155,11 +1155,16 @@ local function ComputeMeterGrid(slots, iconSize, fontSize, gap)
         if ph <= 1 then ph = iconSize end
         note(slots.PersonalResource, iconSize * 2, ph)
     end
-    -- TrackedBuffs (the Cooldowns bar) contributes only ROW HEIGHT, not column width: the bar spans the row
-    -- centred on its cell and should NOT widen the column (it overflows the cell horizontally by design).
-    -- Width 0 = no column impact.
+    -- TrackedBuffs (the Cooldowns bar). HORIZONTAL (off the centre row): contributes only ROW HEIGHT -- the
+    -- bar spans the row centred on its cell and overflows horizontally by design (width 0 = no column impact).
+    -- VERTICAL (centre row -- the DPS/Marker/HPS line): the bar stacks instead so it doesn't spill across the
+    -- readouts, reserving COLUMN WIDTH and overflowing vertically (height 0) -- mirrors the horizontal case.
     if FixedElementOn("TrackedBuffs") then
-        note(slots.TrackedBuffs, 0, iconSize)
+        if SLOT_ROW[slots.TrackedBuffs] == "M" then
+            note(slots.TrackedBuffs, iconSize, 0)
+        else
+            note(slots.TrackedBuffs, 0, iconSize)
+        end
     end
     note(slots.Marker, iconSize, iconSize)               -- centre icon always occupies its cell
     for _, id in ipairs(PlacedOptionalIds()) do note(slots[id], iconSize, iconSize) end
@@ -1307,19 +1312,26 @@ function SetupFrames()
         end
     end
 
-    -- Cooldowns bar (TrackedBuffs): render up to N chosen 30s+ spells side by side, NO horizontal padding,
-    -- centred at the cell. The cooldown swipe + countdown number are engine-drawn (secret-value safe).
-    -- Hidden (and its widgets parked) when not slotted.
+    -- Cooldowns bar (TrackedBuffs): render up to N chosen 30s+ spells, NO padding, centred at the cell.
+    -- HORIZONTAL (off the centre row) = icons left->right; VERTICAL (centre row -- the DPS/Marker/HPS line)
+    -- = icons top->bottom, so a wide bar doesn't spill across the readouts. The swipe + number are
+    -- engine-drawn. Hidden (widgets parked) when not slotted.
     if _G.GSETracker_TrackedCooldowns_Ensure and FixedElementOn("TrackedBuffs") then
         local n  = (_G.GSETracker_TrackedCooldowns_Count and _G.GSETracker_TrackedCooldowns_Count()) or 5
         local bx, by = CellXY(colX, rowY, slots.TrackedBuffs)
-        local startX = bx - (n * isize) / 2 + isize / 2     -- centre of the first icon
+        local vertical = (SLOT_ROW[slots.TrackedBuffs] == "M")
+        local startX = bx - (n * isize) / 2 + isize / 2     -- centre of the FIRST icon (left, horizontal)
+        local startY = by + (n * isize) / 2 - isize / 2     -- centre of the FIRST icon (top,  vertical)
         for i = 1, n do
             local f = _G.GSETracker_TrackedCooldowns_Ensure(i, anchor)
             if f then
                 f:SetParent(anchor); f:SetFrameLevel(12); f:SetSize(isize, isize)
                 f:ClearAllPoints()
-                f:SetPoint("CENTER", iconCenter, "CENTER", startX + (i - 1) * isize, by)   -- side by side, no gap
+                if vertical then
+                    f:SetPoint("CENTER", iconCenter, "CENTER", bx, startY - (i - 1) * isize)  -- stacked, no gap
+                else
+                    f:SetPoint("CENTER", iconCenter, "CENTER", startX + (i - 1) * isize, by)  -- side by side, no gap
+                end
                 if _G.GSETracker_SkinAdoptedIcon then _G.GSETracker_SkinAdoptedIcon(f) end
                 f:Show()
                 _G.GSETracker_TrackedCooldowns_Update(i)
