@@ -434,7 +434,10 @@ end
 -- resolve a class (e.g. focus is a pet/NPC or info not cached yet).
 local function GetFocusClassColor()
     local focusGUID = activeInst and activeInst.focusGUID
-    if not focusGUID or focusGUID == UnitGUID("player") then
+    -- No GUID compare: focusGUID can be a SECRET C_DamageMeter value (== throws while tainted). When nothing
+    -- is focused, use the player's colour; otherwise resolve via GetPlayerInfoByGUID below -- which returns
+    -- the player's own class (hence colour) when the focus happens to be the player, so self still works.
+    if not focusGUID then
         return GetPlayerClassColor()
     end
     local classColors = CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS
@@ -912,10 +915,16 @@ end
 local function SourceMatchesPlayer(source, playerGUID)
     if type(source) ~= "table" then return false end
     if source.isLocalPlayer then return true end
-    return source.sourceGUID == playerGUID
-        or source.guid == playerGUID
-        or source.unitGUID == playerGUID
-        or source.actorGUID == playerGUID
+    -- C_DamageMeter source GUIDs can be SECRET (taint) -- a direct `==` throws while tainted. pcall the
+    -- compare so a secret GUID just fails to match here (the engine-side lookups in ResolveSourceForGUID
+    -- resolve the match secret-safely) instead of erroring out the whole breakdown render.
+    local ok, match = pcall(function()
+        return source.sourceGUID == playerGUID
+            or source.guid == playerGUID
+            or source.unitGUID == playerGUID
+            or source.actorGUID == playerGUID
+    end)
+    return (ok and match) or false
 end
 
 local function GetPlayerSourceFromAvailableSessions(meterType, playerGUID)
@@ -1006,8 +1015,12 @@ end
 local function GetPlayerSource(meterType)
     if not C_DamageMeter then return nil, "C_DamageMeter is not available." end
     local playerGUID = UnitGUID("player"); if not playerGUID then return nil, "Player GUID is not ready." end
-    local targetGUID = (activeInst and activeInst.focusGUID) or playerGUID
-    local isSelf = (targetGUID == playerGUID)
+    -- focusGUID is a C_DamageMeter combatant GUID (from clicking a row) and can be a SECRET value -- comparing
+    -- it (== playerGUID) throws while tainted. "Self" = nothing focused (we only set focusGUID on a row
+    -- click); the engine-side source lookups below take the GUID itself and handle secret values.
+    local focus = activeInst and activeInst.focusGUID
+    local targetGUID = focus or playerGUID
+    local isSelf = not focus
     local src = ResolveSourceForGUID(meterType, targetGUID, isSelf)
     if not src and not isSelf then
         if activeInst then activeInst.focusGUID = nil end  -- focused combatant absent here -> back to self
@@ -2920,6 +2933,11 @@ SlashCmdList.GSETRACKERDETAILS = function()
     GSETrackerDetails_Show(DEFAULT_VIEW)
 end
 
+--@do-not-package@
+-- ── Dev-only diagnostics (NOT shipped) ───────────────────────────────────────
+-- /getdefault, /getprd, /emz are maintainer debugging dumpers. The BigWigs packager strips everything
+-- between @do-not-package@ / @end-do-not-package@ from the CurseForge build, so end users never get these
+-- in their slash namespace -- but they stay in the repo and load/run in the dev client (run from source).
 -- /getdefault -- dump the native Blizzard DamageMeter's real geometry (Edit Mode size settings + one
 -- bar entry's height, icon/bar sizes and font sizes) so the breakdown rows can copy the exact default
 -- sizes/shapes. Retail-only (needs C_DamageMeter's DamageMeter frame, meter must be enabled).
@@ -3137,3 +3155,4 @@ SlashCmdList.EMZ = function()
         end
     end
 end
+--@end-do-not-package@
