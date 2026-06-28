@@ -1,3 +1,18 @@
+## 1.5.6
+
+### Added
+- **Cooldowns bar (Meters HUD).** Place a side-by-side row of tracked cooldowns. Each slot is picked from a menu of your spells and trinkets, and the same cooldown can't be added twice (across the bar and the standalone grid elements).
+- **Trinkets** (Trinket 1 / Trinket 2 / Healthstone) can be added to the Cooldowns bar alongside spells.
+- **Smarter spell discovery.** The picker lists your current spec's spells with a 6s+ cooldown, rebuilt automatically on login, spec change, talent swap, and any spellbook change.
+
+### Changed
+- **Cleaner cooldown list.** General-tab junk (Mobile Banking, Revive Battle Pets, profession/utility items) is filtered out; racials and class/spec defensives are kept; passives are always excluded.
+- **Live in combat.** Cooldowns now count down in real time during combat (swipe + number), driven by your cast time and the spell's base cooldown — no more waiting for combat to end.
+- **Layout padding defaults to 0.** The X / Y grid padding starts at 0; raise it in the Meters panel if you want spacing and your value is saved.
+
+### Fixed
+- **Mouse Cursor highlight smoothness.** The Assisted Highlight stuttered while the options panel was open; it now follows the cursor every frame whenever it's visible.
+
 ## 1.5.5
 
 ### Fixed
