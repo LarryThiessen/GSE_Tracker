@@ -63,8 +63,6 @@ ui\personal_resource.lua
 ui\minimap.lua
 
 # Options: configuration only
-options\skins.lua
-options\helpers.lua
 options\settings_panel.lua
 options\elements.xml
 
