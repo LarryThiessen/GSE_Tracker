@@ -3155,4 +3155,202 @@ SlashCmdList.EMZ = function()
         end
     end
 end
+
+-- /gsetcdmgr -- TEMP: dump Blizzard's Cooldown Manager (C_CooldownViewer) categories + their spells, so we
+-- can build the Retail cooldown picker straight from Blizzard's curated per-spec lists (Essential/Utility).
+SLASH_GSETCDMGR1 = "/gsetcdmgr"
+SlashCmdList.GSETCDMGR = function()
+    local function p(...) print("|cff66ccff[CDMgr]|r", ...) end
+    if not (C_CooldownViewer and Enum and Enum.CooldownViewerCategory) then
+        p("C_CooldownViewer / Enum.CooldownViewerCategory not available (Retail only)"); return
+    end
+    local fns = {}
+    for k in pairs(C_CooldownViewer) do fns[#fns + 1] = k end
+    table.sort(fns)
+    p("C_CooldownViewer fns: " .. table.concat(fns, ", "))
+    for catName, catVal in pairs(Enum.CooldownViewerCategory) do
+        local ok, ids = pcall(C_CooldownViewer.GetCooldownViewerCategorySet, catVal)
+        if ok and type(ids) == "table" then
+            p(string.format("== %s (=%s): %d ==", tostring(catName), tostring(catVal), #ids))
+            for _, cid in ipairs(ids) do
+                local oki, info = pcall(C_CooldownViewer.GetCooldownViewerCooldownInfo, cid)
+                if oki and type(info) == "table" then
+                    local sid = info.spellID or info.overrideSpellID
+                    local nm = sid and C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(sid)
+                    p(string.format("  cid=%s spellID=%s %s", tostring(cid), tostring(sid), tostring(nm or "?")))
+                else
+                    p(string.format("  cid=%s (no info)", tostring(cid)))
+                end
+            end
+        else
+            p(string.format("== %s (=%s): getter failed/empty ==", tostring(catName), tostring(catVal)))
+        end
+    end
+end
+
+-- /gsetcdlayout -- TEMP: dump the Cooldown viewer's Edit Mode LAYOUT settings (orientation / icon limit /
+-- direction) + current values + which write methods the frame exposes, so we can drive wrap-at-7 and the
+-- grow-from-edge behaviour taint-free.
+SLASH_GSETCDLAYOUT1 = "/gsetcdlayout"
+SlashCmdList.GSETCDLAYOUT = function(msg)
+    msg = (msg or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    local function p(...) print("|cff66ccff[CDLayout]|r", ...) end
+    local f = _G.EssentialCooldownViewer
+    if not f then p("EssentialCooldownViewer missing (Retail only)"); return end
+
+    -- Dump the Orientation / IconDirection value enums so we can map L/R/U/D onto setting values.
+    if Enum then
+        for ename, etab in pairs(Enum) do
+            if type(etab) == "table" and (ename:find("Orientation") or ename:find("IconDirection")
+               or ename:find("CooldownViewer")) and not ename:find("EditMode") then
+                local parts = {}
+                for k, v in pairs(etab) do parts[#parts + 1] = k .. "=" .. tostring(v) end
+                table.sort(parts)
+                p(ename .. ": " .. table.concat(parts, ", "))
+            end
+        end
+    end
+
+    -- Edit Mode setting enum for cooldown viewers.
+    local E = Enum and Enum.EditModeCooldownViewerSetting
+    if E then
+        local keys = {}
+        for k in pairs(E) do keys[#keys + 1] = k end
+        table.sort(keys)
+        p("EditModeCooldownViewerSetting: " .. table.concat(keys, ", "))
+        if f.GetSettingValue then
+            for _, k in ipairs(keys) do
+                local ok, v = pcall(f.GetSettingValue, f, E[k])
+                p(string.format("  %s (=%s) = %s", k, tostring(E[k]), ok and tostring(v) or "?"))
+            end
+        else
+            p("frame has NO GetSettingValue")
+        end
+    else
+        p("Enum.EditModeCooldownViewerSetting NOT present")
+    end
+
+    -- Which methods can we use to change layout? Probe for the likely ones.
+    local meths = { "SetSettingValue", "UpdateSystemSetting", "RefreshLayout", "Layout", "MarkDirty",
+                    "GetOrientation", "SetOrientation", "GetNumItemsThatFit", "ApplySystemAnchor",
+                    "UpdateSystemSettingOrientation", "UpdateSystemSettingIconLimit",
+                    "UpdateSystemSettingIconDirection", "GetItemFrames", "GetItems" }
+    local have = {}
+    for _, m in ipairs(meths) do if type(f[m]) == "function" then have[#have + 1] = m end end
+    p("frame methods present: " .. (#have > 0 and table.concat(have, ", ") or "(none of the probed set)"))
+
+    -- Geometry + item count so we know what one icon costs and how many are live.
+    p(string.format("viewer size = %.0f x %.0f  point=%s",
+        f:GetWidth() or 0, f:GetHeight() or 0, tostring(select(1, f:GetPoint()))))
+    if f.GetNumItems then local ok, n = pcall(f.GetNumItems, f); p("GetNumItems = " .. (ok and tostring(n) or "?")) end
+    if f.GetItemFrames then local ok, t = pcall(f.GetItemFrames, f); p("GetItemFrames count = " .. (ok and type(t)=="table" and tostring(#t) or "?")) end
+
+    -- Where does GetSettingValue read from? Dump the likely backing store.
+    p("settingMap type = " .. type(f.settingMap))
+    if E and type(f.settingMap) == "table" then
+        local il = f.settingMap[E.IconLimit]
+        p("settingMap[IconLimit] = " .. type(il) .. "  .value=" .. (type(il)=="table" and tostring(il.value) or "?"))
+    end
+
+    -- Edit Mode ANCHOR (the green emblem + "forced placement"). systemInfo.anchorInfo drives ApplySystemAnchor.
+    p("--- anchor ---")
+    p("systemInfo type = " .. type(f.systemInfo))
+    local ai = type(f.systemInfo) == "table" and f.systemInfo.anchorInfo
+    if type(ai) == "table" then
+        p(string.format("anchorInfo: point=%s relTo=%s relPoint=%s x=%s y=%s",
+            tostring(ai.point), tostring(ai.relativeTo), tostring(ai.relativePoint),
+            tostring(ai.offsetX), tostring(ai.offsetY)))
+    else
+        p("anchorInfo = " .. tostring(ai))
+    end
+    -- Probe anchor-related methods + the selection/emblem object.
+    local am = { "ApplySystemAnchor", "GetSettingsAnchorPoint", "SetupSettingsDialogAnchor", "BreakFromAnchoring",
+                 "AnchorSelectionToParent", "ClearFrameSnap", "OnDragStart", "OnDragStop", "UpdateMagnetismRegistration" }
+    local ah = {}
+    for _, m in ipairs(am) do if type(f[m]) == "function" then ah[#ah + 1] = m end end
+    p("anchor methods: " .. (#ah > 0 and table.concat(ah, ", ") or "(none probed)"))
+
+    -- The green ⊕ nub is Blizzard's Edit Mode Selection. Dump it so we can find what positions the nub.
+    p("--- selection (run in Edit Mode) ---")
+    local sel = f.Selection
+    p("Selection type = " .. type(sel))
+    if type(sel) == "table" then
+        if sel.GetNumPoints then
+            for i = 1, (sel:GetNumPoints() or 0) do
+                local pt, rel, relP, x, y = sel:GetPoint(i)
+                p(string.format("  point %d: %s -> %s %s (%s, %s)", i, tostring(pt),
+                    tostring(rel and rel.GetName and rel:GetName() or rel), tostring(relP), tostring(x), tostring(y)))
+            end
+        end
+        -- named sub-objects (the nub/anchor texture/button live here)
+        for k, v in pairs(sel) do
+            if type(v) == "table" and v.GetObjectType then
+                local oqk = pcall(function() return v:GetObjectType() end)
+                local pt = v.GetPoint and select(1, v:GetPoint())
+                p(string.format("  .%s = %s  point=%s shown=%s", tostring(k),
+                    (oqk and v:GetObjectType()) or "?", tostring(pt), tostring(v.IsShown and v:IsShown())))
+            end
+        end
+        -- CHILD FRAMES (the nub may be an unnamed child of the Selection)
+        local function dumpKids(obj, tag)
+            if not (obj and obj.GetChildren) then return end
+            for _, c in ipairs({ obj:GetChildren() }) do
+                local nm = c.GetName and c:GetName()
+                local pt = c.GetPoint and select(1, c:GetPoint())
+                p(string.format("  %s-child: %s type=%s point=%s w=%.0f shown=%s", tag, tostring(nm or "(anon)"),
+                    c.GetObjectType and c:GetObjectType() or "?", tostring(pt),
+                    (c.GetWidth and c:GetWidth()) or 0, tostring(c.IsShown and c:IsShown())))
+            end
+        end
+        dumpKids(sel, "Sel")
+    end
+    -- Look for a TAINT-SAFE way to open the cooldown settings (NOT SelectSystem, which taints Edit Mode).
+    p("--- settings openers ---")
+    p("CooldownViewerSettings = " .. type(_G.CooldownViewerSettings))
+    if type(_G.CooldownViewerSettings) == "table" then
+        for _, m in ipairs({ "Show", "Open", "SetShown", "Toggle", "OpenSettings" }) do
+            p("  CVS:" .. m .. " = " .. type(_G.CooldownViewerSettings[m]))
+        end
+    end
+    p("Settings.OpenToCategory = " .. type(Settings and Settings.OpenToCategory))
+    p("CooldownManagerSettings = " .. type(_G.CooldownManagerSettings))
+    -- registered Settings categories whose name mentions cooldown
+    if Settings and Settings.GetCategoryList then
+        local ok, cats = pcall(Settings.GetCategoryList)
+        if ok and type(cats) == "table" then
+            for _, c in ipairs(cats) do
+                local nm = c.GetName and c:GetName()
+                if nm and nm:lower():find("cooldown") then
+                    p(string.format("  Settings category: '%s' id=%s", nm, tostring(c.GetID and c:GetID())))
+                end
+            end
+        end
+    end
+
+    -- The nub might be a child of the VIEWER, or Blizzard's shared magnetism indicator.
+    p("EditModeMagnetismManager = " .. type(_G.EditModeMagnetismManager))
+    if f.GetChildren then
+        for _, c in ipairs({ f:GetChildren() }) do
+            local nm = c.GetName and c:GetName()
+            if not (nm and (nm:find("CooldownID") or nm:find("Item"))) then
+                p(string.format("  Viewer-child: %s type=%s point=%s shown=%s", tostring(nm or "(anon)"),
+                    c.GetObjectType and c:GetObjectType() or "?", tostring(c.GetPoint and select(1, c:GetPoint())),
+                    tostring(c.IsShown and c:IsShown())))
+            end
+        end
+    end
+
+    -- "/gsetcdlayout set" -> LIVE write-test: force IconLimit to 5 via settingMap + the Update method, then
+    -- report whether GetSettingValue + the rendered width actually changed. Dev-only; out of combat only.
+    if msg == "set" and E and not InCombatLockdown() then
+        local before = f:GetWidth()
+        if type(f.settingMap) == "table" and f.settingMap[E.IconLimit] then
+            f.settingMap[E.IconLimit].value = 5
+        end
+        if f.UpdateSystemSettingIconLimit then pcall(f.UpdateSystemSettingIconLimit, f) end
+        if f.Layout then pcall(f.Layout, f) end
+        local ok, after = pcall(f.GetSettingValue, f, E.IconLimit)
+        p(string.format("WRITE TEST: IconLimit now=%s  width %.0f -> %.0f", ok and tostring(after) or "?", before, f:GetWidth()))
+    end
+end
 --@end-do-not-package@

@@ -365,9 +365,10 @@ local function FitMetersBox(box, anchor)
         -- so no content (numbers L/R, GCD above, icon below) is clipped.
         local centreX, centreY = (aL + aR) / 2, (aT + aB) / 2
         local halfW = math.max((maxR + pad) - centreX, centreX - (minL - pad))
-        -- +20 to the half-height -> the box grows 20px UP and 20px DOWN (40 taller overall), for headroom
-        -- around the top/bottom readouts now that elements can sit in the corner cells.
-        local halfH = math.max((maxT + pad) - centreY, centreY - (minB - pad)) + 20
+        -- Hug the readout cluster: no extra head-room. (The cooldown viewers now anchor OUTSIDE this box -- to
+        -- the cluster edge -- so the box no longer needs to reserve space for corner-cell elements. Keeping the
+        -- box at the true cluster edge also lines up with where those cooldown blocks butt against it.)
+        local halfH = math.max((maxT + pad) - centreY, centreY - (minB - pad))
         box:ClearAllPoints()   -- only now (all measurements succeeded) do we re-anchor
         box:SetPoint("TOPLEFT",     anchor, "TOPLEFT",     (centreX - halfW) - aL, (centreY + halfH) - aT)
         box:SetPoint("BOTTOMRIGHT", anchor, "BOTTOMRIGHT", (centreX + halfW) - aR, (centreY - halfH) - aB)

@@ -1,3 +1,17 @@
+## 1.5.9
+
+### Added
+- **Retail now uses Blizzard's Cooldown Manager instead of the custom Cooldowns bar.** Add the new **Essential Cooldowns** and **Utility Cooldowns** elements to the Layout Control grid — they pin Blizzard's own cooldown viewers to your HUD, so you finally get real **charges, stacks and live cooldown timers** that the custom bar couldn't show. Configure *which* spells appear in Blizzard's Cooldown Manager as usual. *(The custom Cooldowns bar + spell picker stay on Classic, which has no Cooldown Manager.)*
+- **Cooldown icons match your UI skin.** The native cooldown icons pick up your action-bar skinner (Masque / ElvUI / ActionBars Enhanced) — border + icon shape — just like the rest of the HUD, or stay Blizzard-default with **Force Blizzard Native Skin**.
+
+### Changed
+- **Cooldown layout.** Essential/Utility blocks centre on their cell, wrap at the Icon Limit you set in the Cooldown Manager, rotate so they read naturally based on which side they're placed, and sit flush against the Meters cluster edge.
+- **Center Marker press detection.** With Press Detection on, the marker now stays visible per your Meters HUD visibility and simply **blinks brighter** on each press, instead of disappearing between presses.
+- **AH % match flash.** The AH % readout now flashes for ~2 seconds when you land a match, instead of pulsing constantly.
+
+### Fixed
+- **Classic.** Some Classic clients ship empty stubs of Blizzard's Cooldown Manager / spellbook APIs; those no longer hide the custom Cooldowns bar or leave its spell list empty, and Edit Mode no longer throws an "unknown event" error on login.
+
 ## 1.5.8
 
 ### Fixed

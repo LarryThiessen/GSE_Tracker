@@ -12,6 +12,11 @@
 
 local ADDON_NAME = ...
 
+-- True only on Retail. Some Classic clients expose STUBS of C_CooldownViewer / C_SpellBook (no real data),
+-- which wrongly stole the spell scan from the legacy GetSpellTabInfo path -> empty Cooldowns picker on Classic.
+-- Gate the two retail spell-scan branches on this so Classic/MoP/Vanilla always use the legacy scan.
+local IS_MAINLINE = (WOW_PROJECT_ID and WOW_PROJECT_MAINLINE and WOW_PROJECT_ID == WOW_PROJECT_MAINLINE) or false
+
 -- ── Cross-version cooldown / icon readers ────────────────────────────────────
 local function EquipSlotCD(slot)
   local s, d, e = GetInventoryItemCooldown("player", slot)
@@ -91,20 +96,73 @@ end
 -- SECRET values in combat (remaining time = start+duration-now is arithmetic, which throws on a secret), and
 -- the engine refuses to animate a secret-fed cooldown on our tainted frame until combat ends. Cast-time +
 -- base-CD is all non-secret, so the engine Cooldown frame ticks through combat.
--- ponytail: base CD ignores talent reductions / charges / resets / overrides, and a spell already on CD at
--- login shows ready until first cast. Good enough for a simple bar; revisit if accuracy matters.
+-- ponytail: base CD ignores talent reductions / resets / overrides, and a spell already on CD at login shows
+-- ready until first cast. Good enough for a simple bar; revisit if accuracy matters.
 local lastCast = {}
+
+-- Charge / stacked spells (Barbed Shot, Survival of the Fittest): base cooldown reads 0 (the recharge runs
+-- per-charge) and in combat the live charge values are taint-secret. So cache the recharge duration + max
+-- charges OUT OF COMBAT (non-secret there), simulate the stack count from casts, and show the recharge only
+-- once all stacks are spent. The sim resyncs to the real charge state each time you leave combat.
+-- ponytail: proc refunds / charge resets aren't modelled mid-combat (resynced on combat end); the cached
+-- recharge uses out-of-combat haste, so in combat it can read a touch long.
+local chargeMax, chargeDur, chargeCur, chargeStart = {}, {}, {}, {}
+
+local function CacheChargeInfo(sid)
+  if InCombatLockdown() then return end                 -- in combat the charge values are taint-secret
+  if not (C_Spell and C_Spell.GetSpellCharges) then return end
+  local info = C_Spell.GetSpellCharges(sid)
+  if type(info) ~= "table" then return end
+  local mx, dur, cur = tonumber(info.maxCharges), tonumber(info.cooldownDuration), tonumber(info.currentCharges)
+  if mx and mx > 1 and dur and dur > 0 then
+    chargeMax[sid], chargeDur[sid], chargeCur[sid] = mx, dur, cur or mx
+    chargeStart[sid] = (cur and cur < mx) and GetTime() or nil
+  end
+end
+
+-- Advance the simulated stack count to now (regenerate any charges whose recharge has elapsed).
+local function RegenCharges(sid)
+  local mx, dur, start = chargeMax[sid], chargeDur[sid], chargeStart[sid]
+  if not (mx and dur and start) then return end
+  local cur = chargeCur[sid] or mx
+  while cur < mx and (GetTime() - start) >= dur do cur = cur + 1; start = start + dur end
+  if cur >= mx then start = nil end
+  chargeCur[sid], chargeStart[sid] = cur, start
+end
+
 local castEv = CreateFrame("Frame")
 castEv:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
-castEv:SetScript("OnEvent", function(_, _, unit, _, spellID)
-  if unit == "player" and spellID then lastCast[spellID] = GetTime() end
+castEv:RegisterEvent("PLAYER_REGEN_ENABLED")            -- resync the stack sim to reality after combat
+castEv:RegisterEvent("PLAYER_ENTERING_WORLD")
+castEv:SetScript("OnEvent", function(_, e, unit, _, spellID)
+  if e == "UNIT_SPELLCAST_SUCCEEDED" then
+    if unit ~= "player" or not spellID then return end
+    lastCast[spellID] = GetTime()
+    if chargeMax[spellID] then                          -- tracked charge spell -> spend a stack
+      RegenCharges(spellID)
+      local cur = chargeCur[spellID] or chargeMax[spellID]
+      if cur >= chargeMax[spellID] then chargeStart[spellID] = GetTime() end  -- first stack spent: recharge starts
+      chargeCur[spellID] = math.max(0, cur - 1)
+    end
+  else
+    for sid in pairs(chargeMax) do CacheChargeInfo(sid) end   -- out of combat: re-read real charge state
+  end
 end)
 
--- start, duration for the engine Cooldown frame, from non-secret cast time + base CD.
+-- start, duration for the engine Cooldown frame. Normal spells: cast time + base CD. Charge/stacked spells:
+-- show the recharge only once all stacks are spent (stack count simulated from casts, cached recharge dur).
 local function SpellCD(sid)
   local d = SpellBaseCDSec(sid)
-  if d <= 0 then return 0, 0 end
-  return lastCast[sid] or 0, d
+  if d > 0 then return lastCast[sid] or 0, d end
+  if not chargeMax[sid] then CacheChargeInfo(sid) end   -- lazily learn it's a charge spell (out of combat)
+  if chargeMax[sid] then
+    RegenCharges(sid)
+    if (chargeCur[sid] or chargeMax[sid]) <= 0 and chargeStart[sid] then
+      return chargeStart[sid], chargeDur[sid]           -- all stacks spent -> show the next-charge recharge
+    end
+    return 0, 0                                          -- stacks still available -> no CD
+  end
+  return 0, 0
 end
 
 -- Follow an active override/upgrade (a proc or talent that swaps the button to another spell -- e.g. a
@@ -132,10 +190,10 @@ end
 -- Classic (GetSpellTabInfo) scans: drop passives, drop General-tab non-racials (Mobile Banking / Battle Pets
 -- / special items -- racials and class/spec defensives are kept), require a 6s+ base cooldown, de-dupe.
 -- `sub` is the spellbook rank/subtext, only needed for the General-tab racial test.
-local function AddSpellElement(seen, sid, name, isPassive, isGeneral, sub)
-  if not sid or isPassive or seen[sid] then return end
-  if isGeneral and sub ~= RACIAL_SUB then return end
-  if SpellBaseCDSec(sid) < MIN_SPELL_CD then return end
+-- Build + register a spell element, NO filtering. Used directly for Blizzard's curated Cooldown Manager
+-- list (Retail), and via AddSpellElement (which adds the filters) for the Classic spellbook scan.
+local function AddSpellRaw(seen, sid, name)
+  if not sid or seen[sid] then return end
   name = name or SpellNm(sid)
   if not name or name == "" then return end
   seen[sid] = true
@@ -147,11 +205,34 @@ local function AddSpellElement(seen, sid, name, isPassive, isGeneral, sub)
   }
 end
 
+local function AddSpellElement(seen, sid, name, isPassive, isGeneral, sub)
+  if not sid or isPassive or seen[sid] then return end
+  if isGeneral and sub ~= RACIAL_SUB then return end
+  if SpellBaseCDSec(sid) < MIN_SPELL_CD then return end
+  AddSpellRaw(seen, sid, name)
+end
+
 local function RebuildSpellElements()
   wipe(SPELL_ELEMENTS)
   local seen = {}
-  if C_SpellBook and C_SpellBook.GetNumSpellBookSkillLines and C_SpellBook.GetSpellBookItemInfo then
-    -- Retail (Dragonflight+): C_SpellBook skill lines. Skip OFF-spec lines so we only see the current spec.
+  if IS_MAINLINE and C_CooldownViewer and Enum and Enum.CooldownViewerCategory and C_CooldownViewer.GetCooldownViewerCategorySet
+     and C_CooldownViewer.GetCooldownViewerCooldownInfo then
+    -- Retail Cooldown Manager: Blizzard's curated, per-spec cooldown lists. Essential = major (offensive)
+    -- cooldowns, Utility = defensives + utility. Already curated + categorised (and it includes the
+    -- charge/talent CDs that read a 0 base cooldown), so take them as-is -- no passive/racial/threshold
+    -- filtering. (TrackedBuff/TrackedBar are buff/resource trackers, not cooldowns -- skipped.)
+    for _, cat in ipairs({ Enum.CooldownViewerCategory.Essential, Enum.CooldownViewerCategory.Utility }) do
+      local ok, ids = pcall(C_CooldownViewer.GetCooldownViewerCategorySet, cat)
+      if ok and type(ids) == "table" then
+        for _, cid in ipairs(ids) do
+          local oki, info = pcall(C_CooldownViewer.GetCooldownViewerCooldownInfo, cid)
+          local sid = oki and type(info) == "table" and info.spellID
+          if sid then AddSpellRaw(seen, sid) end
+        end
+      end
+    end
+  elseif IS_MAINLINE and C_SpellBook and C_SpellBook.GetNumSpellBookSkillLines and C_SpellBook.GetSpellBookItemInfo then
+    -- Retail without the Cooldown Manager (fallback): C_SpellBook skill lines. Skip OFF-spec lines.
     local bank = (Enum and Enum.SpellBookSpellBank and Enum.SpellBookSpellBank.Player) or 0
     for line = 1, (C_SpellBook.GetNumSpellBookSkillLines() or 0) do
       local li = C_SpellBook.GetSpellBookSkillLineInfo and C_SpellBook.GetSpellBookSkillLineInfo(line)
@@ -265,8 +346,8 @@ end
 local function PaintCDWidget(f, iconTex, s, d)
   f.icon:SetTexture(iconTex or QUESTION_MARK)
   s = s or 0; d = d or 0
-  -- Only (re)apply when the cooldown actually changed. Re-issuing SetCooldown every tick with identical
-  -- values restarts the swipe and shows as a flicker. (Values are non-secret here, so comparing is safe.)
+  -- Only (re)apply when the cooldown actually changed -- re-issuing SetCooldown every tick restarts the swipe
+  -- and flickers. All values here are non-secret (cast time + base/cached-charge duration), so comparing is safe.
   if f._cdStart ~= s or f._cdDur ~= d then
     f._cdStart, f._cdDur = s, d
     pcall(f.cd.SetCooldown, f.cd, s, d)

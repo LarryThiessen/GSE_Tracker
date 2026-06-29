@@ -2535,7 +2535,11 @@ local EDITMODE_TABS = {
         get2 = function() return (_G.Meter_GetPaddingY and _G.Meter_GetPaddingY()) or 0 end,
         set2 = function(v) if _G.Meter_SetPaddingY then _G.Meter_SetPaddingY(tonumber(v) or 0) end end,
         tooltip2 = "Vertical gap between Layout Control grid cells." }
-      r[#r + 1] = { type = "trackedcooldowns", label = "Cooldowns" }  -- 1x5 spell-cooldown config grid (under Padding)
+      -- Custom Cooldowns bar config is the Classic-only fallback; on Retail the native Cooldown Manager
+      -- viewers (Essential/Utility elements) replace it, so the 1x5 spell picker is hidden there.
+      if not (ns.Caps and ns.Caps.cooldownManager) then
+        r[#r + 1] = { type = "trackedcooldowns", label = "Cooldowns" }  -- 1x5 spell-cooldown config grid (under Padding)
+      end
       r[#r + 1] = { type = "check", label = "Player Tracked HUD",       -- above the Center Marker section
         get = function() return (_G.Meters_GetPlayerTracked and _G.Meters_GetPlayerTracked()) or false end,
         set = function(v) if _G.Meters_SetPlayerTracked then _G.Meters_SetPlayerTracked(v) end end,

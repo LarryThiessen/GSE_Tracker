@@ -254,6 +254,14 @@ markerCell:SetSize(1, 1)
 local prdCell = CreateFrame("Frame", "GSETracker_PRDCell", anchor)
 prdCell:SetPoint("CENTER", iconCenter, "CENTER", 0, 0)
 prdCell:SetSize(1, 1)
+-- 1x1 anchors the native Cooldown Manager viewers (Essential/Utility) are pinned to (ui/cooldown_viewer.lua
+-- reads these); SetupFrames re-parks them on every layout.
+local essentialCDCell = CreateFrame("Frame", "GSETracker_EssentialCDCell", anchor)
+essentialCDCell:SetPoint("CENTER", iconCenter, "CENTER", 0, 0)
+essentialCDCell:SetSize(1, 1)
+local utilityCDCell = CreateFrame("Frame", "GSETracker_UtilityCDCell", anchor)
+utilityCDCell:SetPoint("CENTER", iconCenter, "CENTER", 0, 0)
+utilityCDCell:SetSize(1, 1)
 
 local CENTER_GCD_SPELL_ID   = 61304
 local BULLSEYE_SWIPE_TEXTURE = "Interface\\AddOns\\GSE_Tracker\\media\\marker-images\\Crosshairs001.png"
@@ -752,7 +760,7 @@ local LEGACY_SLOT_MAP = { TOP = "T", BOTTOM = "B", LEFT = "L", RIGHT = "R" }
 -- PersonalResource is positional like Marker (no text frame): it locks Blizzard's protected PRD nameplate
 -- to its cell at safe moments (see ui/personal_resource.lua). Default cell XBC (bottom row, centre).
 -- TrackedBuffs is the "Cooldowns" bar (up to 5 chosen 30s+ spells, side by side); positional, no text frame.
-local METER_SLOT_DEFAULTS = { DPS = "L", HPS = "R", GCD = "T", Marker = "C", AHMatch = "B", PlayerName = "TTC", PersonalResource = "XBC", TrackedBuffs = "XXBC" }
+local METER_SLOT_DEFAULTS = { DPS = "L", HPS = "R", GCD = "T", Marker = "C", AHMatch = "B", PlayerName = "TTC", PersonalResource = "XBC", TrackedBuffs = "XXBC", EssentialCDs = "XBC", UtilityCDs = "XXBC" }
 
 -- id -> (global frame name created by its module, text fontstring field on that frame). The Marker is NOT
 -- here -- it isn't a text readout placed by PlaceMeterElement; it has its own markerCell positioning.
@@ -934,12 +942,12 @@ end
 -- their show flag (so the Readouts dropdown stays in sync), the Marker follows markerHidden (gated in
 -- ui/player_tracker.lua ShouldShowCombatMarker). They keep their saved cell while hidden, so re-adding
 -- restores the spot.
-local FIXED_SHOW_KEY = { DPS = "showDPS", HPS = "showHPS", GCD = "showGCD", AHMatch = "showAHMatch", PlayerName = "showPlayerName", PersonalResource = "showPRD", TrackedBuffs = "showTrackedBuffs" }
-local FIXED_ORDER    = { "GCD", "DPS", "HPS", "AHMatch", "PlayerName", "PersonalResource", "TrackedBuffs", "Marker" }
+local FIXED_SHOW_KEY = { DPS = "showDPS", HPS = "showHPS", GCD = "showGCD", AHMatch = "showAHMatch", PlayerName = "showPlayerName", PersonalResource = "showPRD", TrackedBuffs = "showTrackedBuffs", EssentialCDs = "showEssentialCDs", UtilityCDs = "showUtilityCDs" }
+local FIXED_ORDER    = { "GCD", "DPS", "HPS", "AHMatch", "PlayerName", "PersonalResource", "EssentialCDs", "UtilityCDs", "TrackedBuffs", "Marker" }
 
 -- Elements that need a capability the flavor may lack: AH % needs C_AssistedCombat; PRD pins only on Retail.
 -- When the cap is absent the element is never "on" (below) and never offered (Meter_GetAvailableElements).
-local FIXED_ELEMENT_CAP = { AHMatch = "assistedHighlight", PersonalResource = "prd" }
+local FIXED_ELEMENT_CAP = { AHMatch = "assistedHighlight", PersonalResource = "prd", EssentialCDs = "cooldownManager", UtilityCDs = "cooldownManager" }
 
 local function FixedElementOn(id)
     local reqCap = FIXED_ELEMENT_CAP[id]
@@ -949,7 +957,14 @@ local function FixedElementOn(id)
     if id == "AHMatch" then return MetersSavedVars.showAHMatch == true end
     if id == "PlayerName" then return MetersSavedVars.showPlayerName == true end
     if id == "PersonalResource" then return MetersSavedVars.showPRD == true end
-    if id == "TrackedBuffs" then return MetersSavedVars.showTrackedBuffs == true end
+    if id == "EssentialCDs" then return MetersSavedVars.showEssentialCDs == true end
+    if id == "UtilityCDs" then return MetersSavedVars.showUtilityCDs == true end
+    -- The custom Cooldowns bar is the Classic-only fallback; on Retail the native Cooldown Manager
+    -- viewers (Essential/Utility) replace it, so it never renders there.
+    if id == "TrackedBuffs" then
+        if ns.Caps and ns.Caps.cooldownManager then return false end
+        return MetersSavedVars.showTrackedBuffs == true
+    end
     local k = FIXED_SHOW_KEY[id]
     if k then return MetersSavedVars[k] ~= false end
     return true
@@ -1006,6 +1021,61 @@ function _G.GSETracker_IsPRDSlotted()
     return MetersSavedVars.showPRD == true
 end
 
+-- True when the native Cooldown Manager viewers are slotted (the cooldown_viewer lock module gates on these).
+function _G.GSETracker_IsEssentialCDsSlotted() return MetersSavedVars.showEssentialCDs == true end
+function _G.GSETracker_IsUtilityCDsSlotted()   return MetersSavedVars.showUtilityCDs == true end
+
+-- Which screen SIDE a native Cooldown viewer sits on, from its grid cell. The lock module centres the block on
+-- the cell and rotates its icon fill/stack direction by side so the whole element turns like a clock as it
+-- moves around the grid (never a 180 flip): left/right columns -> vertical, top/bottom -> horizontal.
+-- Returns "LEFT" / "RIGHT" / "TOP" / "BOTTOM".
+function _G.GSETracker_CDViewerGrowth(slotKey)
+    local slot = MeterSlots()[slotKey]
+    local col  = COL_MULT[SLOT_COL[slot or ""] or "C"] or 0
+    local row  = ROW_MULT[SLOT_ROW[slot or ""] or "M"] or 0
+    if col < 0 then return "LEFT"  end
+    if col > 0 then return "RIGHT" end
+    if row > 0 then return "TOP"   end
+    return "BOTTOM"
+end
+
+-- Half-extents (halfW, halfH) of the VISIBLE readout cluster, centred on MetersAnchor -- so the cooldown lock
+-- module can butt the native viewers against the cluster edge (anchorCentre +/- half). Mirrors the measurement
+-- the Edit Mode box uses (union of the placed readout frames; DPS/HPS geometry is "secret" so each read is
+-- pcall-guarded). Measured OUT OF COMBAT only and cached, so a secret/partial in-combat read can't jitter it.
+local clusterHW, clusterHH = 90, 35   -- fallback (~180x70 cluster)
+function _G.GSETracker_MetersClusterHalfExtents()
+    local a = _G.MetersAnchor
+    if a and a.GetLeft and not InCombatLockdown() then
+        pcall(function()
+            local aL, aR, aT, aB = a:GetLeft(), a:GetRight(), a:GetTop(), a:GetBottom()
+            if not (aL and aR and aT and aB) then error("noanchor") end
+            local minL, maxR, maxT, minB
+            local function add(c)
+                if not (c and c.IsShown and c:IsShown() and c.GetLeft) then return end
+                pcall(function()
+                    local w = c:GetWidth(); if not w or w <= 1 then return end
+                    local l, r, t, b = c:GetLeft(), c:GetRight(), c:GetTop(), c:GetBottom()
+                    if not (l and r and t and b) then return end
+                    minL = minL and math.min(minL, l) or l; maxR = maxR and math.max(maxR, r) or r
+                    maxT = maxT and math.max(maxT, t) or t; minB = minB and math.min(minB, b) or b
+                end)
+            end
+            add(_G.GCDFrame and _G.GCDFrame.gcdText);   add(_G.DPSFrame and _G.DPSFrame.dpsText)
+            add(_G.HPSFrame and _G.HPSFrame.hpsText);   add(_G.AHMatchFrame and _G.AHMatchFrame.matchText)
+            add(_G.PlayerNameFrame and _G.PlayerNameFrame.nameText)
+            add(_G.AHLightFrame); add(_G.MarkerFrame)
+            if _G.GSETracker_CooldownElements_ForEachShown then _G.GSETracker_CooldownElements_ForEachShown(add) end
+            if not minL then error("nokids") end
+            local pad = 8
+            local cx, cy = (aL + aR) / 2, (aT + aB) / 2
+            clusterHW = math.max((maxR + pad) - cx, cx - (minL - pad))
+            clusterHH = math.max((maxT + pad) - cy, cy - (minB - pad))
+        end)
+    end
+    return clusterHW, clusterHH
+end
+
 -- Assign `id` to a 3x3 grid `slot` (TL/T/TR/L/C/R/BL/B/BR), swapping any occupant. Placing a fixed element
 -- also turns it back ON. Works for fixed AND optional ids. Returns the slot map.
 function Meter_SetElementSlot(id, slot)
@@ -1048,7 +1118,9 @@ function Meter_GetAvailableElements()
         -- only on Retail).
         local reqCap = FIXED_ELEMENT_CAP[id]
         if reqCap and not (ns.Caps and ns.Caps[reqCap]) then
-            -- skip
+            -- skip: flavor lacks the capability
+        elseif id == "TrackedBuffs" and ns.Caps and ns.Caps.cooldownManager then
+            -- skip: native Cooldown Manager replaces the custom Cooldowns bar on Retail
         elseif not FixedElementOn(id) then
             out[#out + 1] = { id = id, label = Meter_ElementLabel(id) }
         end
@@ -1076,6 +1148,8 @@ function Meter_ElementLabel(id)
     if id == "AHMatch" then return "AH %" end
     if id == "PlayerName" then return "Player Name" end
     if id == "PersonalResource" then return "PRD" end
+    if id == "EssentialCDs" then return "Essential" end
+    if id == "UtilityCDs" then return "Utility" end
     if id == "TrackedBuffs" then return "Cooldowns" end
     if METER_SLOT_DEFAULTS[id] then return id end
     return (_G.GSETracker_CooldownElements_Label and _G.GSETracker_CooldownElements_Label(id)) or id
@@ -1155,6 +1229,8 @@ local function ComputeMeterGrid(slots, iconSize, fontSize, gap)
         if ph <= 1 then ph = iconSize end
         note(slots.PersonalResource, iconSize * 2, ph)
     end
+    -- Essential/Utility CD viewers contribute NO footprint: they pin to their cell centre and overflow the
+    -- grid freely in every direction, so placing one never resizes the surrounding rows/columns.
     -- TrackedBuffs (the Cooldowns bar). HORIZONTAL (off the centre row): contributes only ROW HEIGHT -- the
     -- bar spans the row centred on its cell and overflows horizontally by design (width 0 = no column impact).
     -- VERTICAL (centre row -- the DPS/Marker/HPS line): the bar stacks instead so it doesn't spill across the
@@ -1259,10 +1335,17 @@ function SetupFrames()
     markerCell:ClearAllPoints()
     markerCell:SetPoint("CENTER", iconCenter, "CENTER", mcx, mcy)
 
-    -- Park the PRD lock anchor at its cell so the lock module can read the cell's screen position.
+    -- Park the PRD + Cooldown Manager lock anchors at their cells so the lock modules can read the screen pos.
     local pcx, pcy = CellXY(colX, rowY, slots.PersonalResource)
     prdCell:ClearAllPoints()
     prdCell:SetPoint("CENTER", iconCenter, "CENTER", pcx, pcy)
+    local ecx, ecy = CellXY(colX, rowY, slots.EssentialCDs)
+    essentialCDCell:ClearAllPoints()
+    essentialCDCell:SetPoint("CENTER", iconCenter, "CENTER", ecx, ecy)
+    local ucx, ucy = CellXY(colX, rowY, slots.UtilityCDs)
+    utilityCDCell:ClearAllPoints()
+    utilityCDCell:SetPoint("CENTER", iconCenter, "CENTER", ucx, ucy)
+    if _G.GSETracker_LockCooldownViewers then _G.GSETracker_LockCooldownViewers() end
 
     if AHLightFrame then
         AHLightFrame:SetParent(anchor)

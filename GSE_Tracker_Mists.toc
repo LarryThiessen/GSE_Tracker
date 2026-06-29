@@ -3,7 +3,7 @@
 ## Notes: Standalone Action Tracker
 ## Author: ScaryLarryGames
 ## IconTexture: Interface\AddOns\GSE_Tracker\media\GSE_Tracker.png
-## Version: 1.5.8
+## Version: 1.5.9
 ## SavedVariables: GSETrackerDB
 ## SavedVariablesPerCharacter: GSETrackerCharDB
 ## OptionalDeps: LibSharedMedia-3.0
@@ -60,6 +60,7 @@ ui\assisted_highlight.lua
 ui\player_tracker.lua
 ui\editmode.lua
 ui\personal_resource.lua
+ui\cooldown_viewer.lua
 ui\minimap.lua
 
 # Options: configuration only

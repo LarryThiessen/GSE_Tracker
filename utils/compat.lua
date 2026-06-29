@@ -91,6 +91,12 @@ function Compat:CheckRuntime()
   -- (true on Retail; false on Classic where the C_* API is absent).
   ns.Caps = ns.Caps or {}
   ns.Caps.assistedHighlight = info.features.hasAssistedCombat
+  -- Blizzard Cooldown Manager (C_CooldownViewer) -- Retail only. Gates the Essential/Utility CD elements
+  -- (their native viewers are pinned to a grid cell, like the PRD). Require Mainline too: some Classic clients
+  -- expose a C_CooldownViewer STUB without the actual Edit Mode viewers -- gating on it alone wrongly flipped
+  -- this true on Classic and hid the custom Cooldowns bar.
+  ns.Caps.cooldownManager = info.features.isMainline
+    and (_G.C_CooldownViewer and _G.C_CooldownViewer.GetCooldownViewerCategorySet) and true or false
   -- The meters cluster always has at least the GCD readout (works on every flavor), so the
   -- shared Meters font/style controls are available everywhere.
   ns.Caps.meters = true

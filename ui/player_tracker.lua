@@ -662,14 +662,10 @@ function UI:ShouldShowCombatMarker(forceOverride)
   if forceOverride == true or IsEditingCenterMarkerTab() then
     return true
   end
-  -- Press Detection: behave exactly like the standalone Pressed Indicator -- ALWAYS AVAILABLE
-  -- (independent of combat / the Meters readout), shown and pulsing while there's recent input,
-  -- and faded ALL THE WAY out (hidden) when no input is detected. The blink/colour is handled in
-  -- ApplyMarkerStyleToFrame.
-  if IsPressDetectionOn() then
-    local _, recentlyUsed = GetMarkerPressedState()
-    return recentlyUsed and true or false
-  end
+  -- Press Detection does NOT change visibility -- the marker still follows the normal Meters HUD rules below
+  -- (shown whenever the readout/marker would be), it does NOT hide between presses. Press Detection only adds
+  -- the BRIGHTER-ON-PRESS blink: the alpha eases 1.0 (just pressed) -> minAlpha (~0.40 baseline) in
+  -- ApplyMarkerStyleToFrame, so the marker stays visibly on but flashes brighter on each press.
   -- A CHOSEN Center Marker symbol stays on screen regardless of the Meters readout's combat visibility --
   -- it does NOT fade out of combat (it's a persistent centre reticle). "None"/"AHLight" aren't standalone
   -- symbols, so they fall through to the Meters-follow behaviour below.

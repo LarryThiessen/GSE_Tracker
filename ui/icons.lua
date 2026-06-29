@@ -260,6 +260,8 @@ local function GetActiveActionIconMask()
   end
   return nil, nil, 1
 end
+-- Exposed so the native Cooldown Manager icons can adopt the same mask (ui/cooldown_viewer.lua).
+uiShared.GetActiveActionIconMask = GetActiveActionIconMask
 
 -- Size a tracker icon's mask the way the action buttons do: centred on the icon
 -- texture, scaled by the mask:icon ratio (NOT SetAllPoints) so the mask's opaque

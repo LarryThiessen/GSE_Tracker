@@ -566,36 +566,35 @@ local function MatchColor(pct)
   return 1 - 0.8 * k, 1, 0.2
 end
 
--- Pulse the readout at 50%+ (sine alpha), FASTER as the %% climbs: ~1 pulse/sec at 50% up to ~4/sec at
--- 100%. A tiny OnUpdate frame breathes the alpha; below 50% (or during the post-combat fade) it holds
--- steady. The match %% is addon-computed (not "secret"), so the numeric math here is safe.
+-- Flash the readout for AH_FLASH_DURATION seconds on each NEW AH match (a quick sine blink), then hold steady.
+-- In Edit Mode preview it flashes continuously so the style is visible. A tiny OnUpdate frame drives the alpha
+-- and self-stops once the flash window passes. The match count is addon-computed (not "secret"), so this is safe.
 local PULSE_MIN_ALPHA = 0.35
-local function MatchPulseFreq(pct)
-  pct = tonumber(pct) or 0
-  if pct < 50 then return 0 end
-  return 1 + ((pct - 50) / 50) * 3   -- 50% -> 1 Hz, 100% -> 4 Hz
-end
+local AH_FLASH_DURATION = 2      -- seconds to flash after each match
+local AH_FLASH_FREQ = 3          -- blinks per second during the flash
 local function EnsureMatchPulseDriver(ui)
   if ui._ahMatchPulseDriver then return ui._ahMatchPulseDriver end
   local d = _G.CreateFrame("Frame")
   d:Hide()
   d:SetScript("OnUpdate", function(self, elapsed)
     local fs = ui._ahMatchActiveFS   -- the currently-shown readout (under-AT OR grid), set in UpdateAHMatchReadout
-    if not (fs and fs:IsShown() and self._freq and self._freq > 0) then
+    local now = (API.GetTime and API.GetTime()) or (GetTime and GetTime()) or 0
+    local flashing = ui._ahPreviewFlash or (ui._ahFlashUntil and now < ui._ahFlashUntil)
+    if not (fs and fs:IsShown()) or not flashing then
+      if fs then fs:SetAlpha(1) end   -- flash over -> steady full alpha
       self:Hide()
       return
     end
     self._t = (self._t or 0) + (elapsed or 0)
-    local a = PULSE_MIN_ALPHA + (1 - PULSE_MIN_ALPHA) * (0.5 + 0.5 * math.sin(self._t * self._freq * 2 * math.pi))
+    local a = PULSE_MIN_ALPHA + (1 - PULSE_MIN_ALPHA) * (0.5 + 0.5 * math.sin(self._t * AH_FLASH_FREQ * 2 * math.pi))
     fs:SetAlpha(a)
   end)
   ui._ahMatchPulseDriver = d
   return d
 end
-local function StartMatchPulse(ui, pct)
+local function StartMatchPulse(ui)
   local d = EnsureMatchPulseDriver(ui)
-  d._freq = MatchPulseFreq(pct)
-  if not d:IsShown() then d._t = 0; d:Show() end   -- keep phase continuous across %% updates
+  if not d:IsShown() then d._t = 0; d:Show() end
 end
 local function StopMatchPulse(ui, resetAlpha)
   local d = ui and ui._ahMatchPulseDriver
@@ -658,12 +657,24 @@ function UI:UpdateAHMatchReadout()
     AnchorMatchReadoutBelowModkeys(ui, fs)  -- under-AT: pin at the modkeys baseline
   end
   fs:Show()
-  -- Pulse at 50%+ while actively shown (in combat or Edit Mode preview) AND animation is on. During the
-  -- post-combat fade (holdActive, not in combat) leave the alpha to the fade -- don't pulse or reset it.
+  -- Flash for 2s on each NEW match (not a continuous 50%+ pulse). Detect the match count incrementing; the
+  -- driver self-stops after the window. Edit Mode preview flashes continuously so the effect is visible.
+  -- During the post-combat fade (holdActive, not in combat) leave the alpha to the fade.
   local activeShow = inCombat or previewing
-  if animated and pct >= 50 and activeShow then
-    StartMatchPulse(ui, pct)
+  ui._ahPreviewFlash = (animated and previewing) or nil
+  local prevMatches = ui._ahLastMatchCount
+  ui._ahLastMatchCount = matches
+  if animated and activeShow then
+    if previewing then
+      StartMatchPulse(ui)
+    elseif prevMatches and matches > prevMatches then
+      ui._ahFlashUntil = now + AH_FLASH_DURATION
+      StartMatchPulse(ui)
+    elseif not (ui._ahFlashUntil and now < ui._ahFlashUntil) then
+      StopMatchPulse(ui, true)   -- not flashing -> steady full alpha
+    end
   else
+    ui._ahFlashUntil, ui._ahPreviewFlash = nil, nil
     StopMatchPulse(ui, activeShow)
   end
 

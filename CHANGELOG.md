@@ -6,6 +6,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.5.9] - 2026-06-28
+
+### Added
+- Retail: the Cooldowns feature now rides Blizzard's native **Cooldown Manager**. New **Essential Cooldowns** / **Utility Cooldowns** Layout Control elements pin `EssentialCooldownViewer` / `UtilityCooldownViewer` to a grid cell, so charges, stacks and the (secret) cooldown timers render Blizzard's own way — replacing the custom Cooldowns bar on Retail. The custom bar + spell picker remain on Classic (no Cooldown Manager there).
+- Native cooldown icons adopt the active action-bar skin (border + icon mask) via the same `uiShared` rules as the rest of the UI; left native under Force Blizzard Native Skin / no skinner.
+
+### Changed
+- Cooldown viewer layout: centred on the cell, wrapped at the player's Icon Limit, icon order rotates 90° per side (never a 180° flip), and the block butts the Meters cluster edge.
+- Center Marker Press Detection now follows the Meters HUD visibility instead of hiding between presses; it blinks brighter (alpha eases 1.0 → ~0.40) on each press.
+- AH % readout flashes for ~2s on each new match instead of a continuous 50%+ pulse.
+
+### Fixed
+- Classic: `ns.Caps.cooldownManager` and the spell-discovery scan (`CooldownElements.lua`) now require Mainline, not just API presence — Classic clients exposing empty `C_CooldownViewer` / `C_SpellBook` stubs no longer hide the custom Cooldowns bar or empty its spell list.
+- `EDIT_MODE_LAYOUTS_UPDATED` is now registered via `pcall`, so Classic no longer errors on the unknown event.
+
 ## [1.5.8] - 2026-06-28
 
 ### Fixed
