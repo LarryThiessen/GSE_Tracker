@@ -1224,9 +1224,21 @@ local function ComputeMeterGrid(slots, iconSize, fontSize, gap)
     if FixedElementOn("PlayerName")       then note(slots.PlayerName, fontSize * 4, th) end
     if FixedElementOn("PersonalResource") then
         -- Use the PRD bar's REAL height (it's a thin bar, not a full icon) so its row isn't over-tall.
+        -- The PRD is a PROTECTED nameplate frame: in combat its GetHeight() can return a "secret"
+        -- (taint-protected) value, and comparing it (ph <= 1) then THROWS -- which aborted the whole
+        -- SetupFrames layout mid-way, leaving Player Name (and everything placed after this) unplaced,
+        -- and poisoning the layout cache so it never recovered. pcall the read+compare; fall back to the
+        -- icon size when the height is unreadable.
+        local ph = iconSize
         local prd = _G.PersonalResourceDisplayFrame
-        local ph = (prd and prd.GetHeight and prd:GetHeight()) or 0
-        if ph <= 1 then ph = iconSize end
+        if prd and prd.GetHeight then
+            local ok, h = pcall(function()
+                local v = prd:GetHeight()
+                if type(v) == "number" and v > 1 then return v end
+                return nil
+            end)
+            if ok and h then ph = h end
+        end
         note(slots.PersonalResource, iconSize * 2, ph)
     end
     -- Essential/Utility CD viewers contribute NO footprint: they pin to their cell centre and overflow the
@@ -1320,7 +1332,9 @@ function SetupFrames()
         UpdateCenterGCDSwipe()
         return
     end
-    lastLayoutKey = layoutKey
+    -- NOTE: lastLayoutKey is set at the END of this function, not here -- so if any read below throws
+    -- (e.g. a "secret" protected-frame geometry value in combat), the cache is NOT marked done and the
+    -- next call re-runs the full layout instead of skipping it forever ("poisoned" cache).
 
     local slots = MeterSlots()
 
@@ -1443,6 +1457,7 @@ function SetupFrames()
     end
 
     UpdateCenterGCDSwipe()
+    lastLayoutKey = layoutKey   -- mark the cache done only AFTER a full, successful layout (see note above)
 end
 
 -- ─── Visibility ───────────────────────────────────────────────────────────────
